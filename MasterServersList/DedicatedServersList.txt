@@ -15,9 +15,8 @@
 203.10.96.54:2101
 #Scott Manley community server
 135.23.120.245:8800
-#ABrit's Server
+#Cygnus Servers
 abritin.space:8800
-abritin.space:8900
 abritin.space:9100
 #Tserver
 ksp.trickys.gg:8800

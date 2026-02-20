@@ -6,6 +6,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Threading.Tasks;
 
 namespace LmpMasterServer.Dedicated
@@ -18,6 +19,11 @@ namespace LmpMasterServer.Dedicated
     {
         private static readonly ConcurrentHashSet<IPEndPoint> DedicatedServers = new ConcurrentHashSet<IPEndPoint>();
         private static readonly TimeSpan RequestInterval = TimeSpan.FromMinutes(5);
+
+        private static readonly HttpClient Client = new HttpClient(new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = GithubCertification.MyRemoteCertificateValidationCallback
+        });
 
         public static bool IsDedicatedServer(IPEndPoint endpoint)
         {
@@ -33,32 +39,24 @@ namespace LmpMasterServer.Dedicated
             {
                 try
                 {
-                    ServicePointManager.ServerCertificateValidationCallback = GithubCertification.MyRemoteCertificateValidationCallback;
-                    using (var client = new WebClient())
-                    using (var stream = client.OpenRead(RepoConstants.DedicatedServersListUrl))
+                    var content = await Client.GetStringAsync(RepoConstants.DedicatedServersListUrl).ConfigureAwait(false);
+                    var servers = content
+                        .Trim()
+                        .Split('\n')
+                        .Where(s => !s.StartsWith("#") && s.Contains(":") && !string.IsNullOrEmpty(s))
+                        .ToArray();
+
+                    DedicatedServers.Clear();
+
+                    foreach (var server in servers)
                     {
-                        using (var reader = new StreamReader(stream))
+                        try
                         {
-                            var content = await reader.ReadToEndAsync().ConfigureAwait(false);
-                            var servers = content
-                                .Trim()
-                                .Split('\n')
-                                .Where(s => !s.StartsWith("#") && s.Contains(":") && !string.IsNullOrEmpty(s))
-                                .ToArray();
-
-                            DedicatedServers.Clear();
-
-                            foreach (var server in servers)
-                            {
-                                try
-                                {
-                                    DedicatedServers.Add(LunaNetUtils.CreateEndpointFromString(server));
-                                }
-                                catch (Exception)
-                                {
-                                    //Ignore the bad server
-                                }
-                            }
+                            DedicatedServers.Add(LunaNetUtils.CreateEndpointFromString(server));
+                        }
+                        catch (Exception)
+                        {
+                            //Ignore the bad server
                         }
                     }
                 }

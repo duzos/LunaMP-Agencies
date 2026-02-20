@@ -20,9 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Lidgren.Net\Lidgren.Net.csproj" />
+    <ProjectReference Include="..\LmpGlobal\LmpGlobal.csproj" />
+    <ProjectReference Include="..\LmpCommon\LmpCommon.csproj" />
   </ItemGroup>
-
-  <Import Project="..\LmpCommon\LmpCommon.projitems" Label="Shared" />
-  <Import Project="..\LmpGlobal\LmpGlobal.projitems" Label="Shared" />
 
 </Project>

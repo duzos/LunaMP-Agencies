@@ -7,6 +7,8 @@ using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 
+#pragma warning disable SYSLIB0014
+
 namespace LmpCommon.RepoRetrievers
 {
     /// <summary>

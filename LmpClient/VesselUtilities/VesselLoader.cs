@@ -15,7 +15,7 @@ namespace LmpClient.VesselUtilities
         {
             try
             {
-                return vesselProto.Validate() && LoadVesselIntoGame(vesselProto, forceReload);
+                return vesselProto.Validate(true) && LoadVesselIntoGame(vesselProto, forceReload);
             }
             catch (Exception e)
             {

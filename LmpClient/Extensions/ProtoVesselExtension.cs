@@ -118,32 +118,30 @@ namespace LmpClient.Extensions
         /// <summary>
         /// Checks the protovessel for errors
         /// </summary>
-        public static bool Validate(this ProtoVessel protoVessel)
+        public static bool Validate(this ProtoVessel protoVessel, bool verboseErrors)
         {
             if (protoVessel == null)
             {
-                LunaLog.LogError("[LMP]: protoVessel is null!");
+                if (verboseErrors) LunaLog.LogError("[LMP]: protoVessel is null!");
                 return false;
             }
 
             if (protoVessel.vesselID == Guid.Empty)
             {
-                LunaLog.LogError("[LMP]: protoVessel id is null!");
+                if (verboseErrors) LunaLog.LogError("[LMP]: protoVessel id is null!");
                 return false;
             }
 
-            if (protoVessel.situation == Vessel.Situations.FLYING)
+            if (protoVessel.orbitSnapShot == null)
             {
-                if (protoVessel.orbitSnapShot == null)
-                {
-                    LunaLog.LogWarning("[LMP]: Skipping flying vessel load - Protovessel does not have an orbit snapshot");
-                    return false;
-                }
-                if (FlightGlobals.Bodies == null || FlightGlobals.Bodies.Count < protoVessel.orbitSnapShot.ReferenceBodyIndex)
-                {
-                    LunaLog.LogWarning($"[LMP]: Skipping flying vessel load - Could not find celestial body index {protoVessel.orbitSnapShot.ReferenceBodyIndex}");
-                    return false;
-                }
+                if (verboseErrors) LunaLog.LogWarning($"[LMP]: Skipping vessel {protoVessel.vesselID} load - Protovessel does not have an orbit snapshot");
+                return false;
+            }
+
+            if (FlightGlobals.Bodies == null || protoVessel.orbitSnapShot.ReferenceBodyIndex < 0 || protoVessel.orbitSnapShot.ReferenceBodyIndex >= FlightGlobals.Bodies.Count)
+            {
+                if (verboseErrors) LunaLog.LogWarning($"[LMP]: Skipping vessel {protoVessel.vesselID} load - Could not find celestial body index {protoVessel.orbitSnapShot.ReferenceBodyIndex}");
+                return false;
             }
 
             //Fix the flags urls in the vessel. The flag have the value as: "Squad/Flags/default"
@@ -151,7 +149,7 @@ namespace LmpClient.Extensions
             {
                 if (!FlagSystem.Singleton.FlagExists(part.flagURL))
                 {
-                    LunaLog.Log($"[LMP]: Flag '{part.flagURL}' doesn't exist, setting to default!");
+                    if (verboseErrors) LunaLog.Log($"[LMP]: Flag '{part.flagURL}' doesn't exist, setting to default!");
                     part.flagURL = "Squad/Flags/default";
                 }
             }

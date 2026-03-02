@@ -135,7 +135,8 @@ namespace LmpClient.Systems.VesselProtoSys
                         var protoVessel = vesselProto.CreateProtoVessel();
                         keyVal.Value.Recycle(vesselProto);
 
-                        if (protoVessel == null || protoVessel.HasInvalidParts(!VesselsUnableToLoad.Contains(vesselProto.VesselId)))
+                        var verboseErrors = !VesselsUnableToLoad.Contains(vesselProto.VesselId);
+                        if (protoVessel == null || !protoVessel.Validate(verboseErrors) || protoVessel.HasInvalidParts(verboseErrors))
                         {
                             VesselsUnableToLoad.Add(vesselProto.VesselId);
                             continue;

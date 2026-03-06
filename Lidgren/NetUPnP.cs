@@ -3,6 +3,7 @@ using System.IO;
 using System.Xml;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.Http;
 using System.Threading;
 
 #if !__NOIPENDPOINT__
@@ -37,6 +38,7 @@ namespace Lidgren.Network
 	/// </summary>
 	public class NetUPnP
 	{
+		private static readonly HttpClient s_httpClient = new HttpClient();
 		private const int c_discoveryTimeOutMillis = 1000;
 
 		private string m_serviceUrl;
@@ -97,8 +99,8 @@ namespace Lidgren.Network
 			{
 #endif
 			XmlDocument desc = new XmlDocument();
-			using (var response = WebRequest.Create(resp).GetResponse())
-				desc.Load(response.GetResponseStream());
+            using (var responseStream = s_httpClient.GetStreamAsync(resp).GetAwaiter().GetResult())
+                desc.Load(responseStream);
 
 			XmlNamespaceManager nsMgr = new XmlNamespaceManager(desc.NameTable);
 			nsMgr.AddNamespace("tns", "urn:schemas-upnp-org:device-1-0");
@@ -265,18 +267,21 @@ namespace Lidgren.Network
 			soap +
 			"</s:Body>" +
 			"</s:Envelope>";
-			WebRequest r = HttpWebRequest.Create(url);
-			r.Method = "POST";
-			byte[] b = System.Text.Encoding.UTF8.GetBytes(req);
-			r.Headers.Add("SOAPACTION", "\"urn:schemas-upnp-org:service:" + m_serviceName + ":1#" + function + "\""); 
-			r.ContentType = "text/xml; charset=\"utf-8\"";
-			r.ContentLength = b.Length;
-			r.GetRequestStream().Write(b, 0, b.Length);
-			using (WebResponse wres = r.GetResponse()) {
-				XmlDocument resp = new XmlDocument();
-				Stream ress = wres.GetResponseStream();
-				resp.Load(ress);
-				return resp;
+
+			using (var request = new HttpRequestMessage(HttpMethod.Post, url))
+			{
+				request.Headers.Add("SOAPACTION", "\"urn:schemas-upnp-org:service:" + m_serviceName + ":1#" + function + "\"");
+				request.Content = new StringContent(req, System.Text.Encoding.UTF8, "text/xml");
+				request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/xml");
+				request.Content.Headers.ContentType.CharSet = "utf-8";
+
+				using (var response = s_httpClient.SendAsync(request).GetAwaiter().GetResult())
+				using (var stream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
+				{
+					XmlDocument respObj = new XmlDocument();
+					respObj.Load(stream);
+					return respObj;
+				}
 			}
 		}
 	}

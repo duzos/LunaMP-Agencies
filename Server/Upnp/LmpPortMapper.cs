@@ -1,5 +1,5 @@
 ﻿using Microsoft.VisualStudio.Threading;
-using Open.Nat;
+using Mono.Nat;
 using Server.Context;
 using Server.Events;
 using Server.Log;
@@ -15,7 +15,7 @@ namespace Server.Upnp
     public static class LmpPortMapper
     {
         private static readonly int LifetimeInSeconds = (int)TimeSpan.FromMinutes(5).TotalSeconds;
-        private static readonly AsyncLazy<NatDevice> Device = new AsyncLazy<NatDevice>(DiscoverDeviceAsync, new JoinableTaskContext().Factory);
+        private static readonly AsyncLazy<INatDevice> Device = new AsyncLazy<INatDevice>(DiscoverDeviceAsync, new JoinableTaskContext().Factory);
 
         private static Mapping LmpPortMapping => new Mapping(Protocol.Udp, ConnectionSettings.SettingsStore.Port, ConnectionSettings.SettingsStore.Port,
             LifetimeInSeconds, $"LMPServer {ConnectionSettings.SettingsStore.Port}");
@@ -23,10 +23,29 @@ namespace Server.Upnp
         private static Mapping LmpWebPortMapping => new Mapping(Protocol.Tcp, WebsiteSettings.SettingsStore.Port, WebsiteSettings.SettingsStore.Port,
             LifetimeInSeconds, $"LMPServerWeb {WebsiteSettings.SettingsStore.Port}");
 
-        private static async Task<NatDevice> DiscoverDeviceAsync()
+        private static async Task<INatDevice> DiscoverDeviceAsync()
         {
-            var nat = new NatDiscoverer();
-            return await nat.DiscoverDeviceAsync(PortMapper.Upnp, new CancellationTokenSource(ConnectionSettings.SettingsStore.UpnpMsTimeout));
+            var tcs = new TaskCompletionSource<INatDevice>();
+            var cts = new CancellationTokenSource(ConnectionSettings.SettingsStore.UpnpMsTimeout);
+            cts.Token.Register(() => tcs.TrySetCanceled());
+
+            void OnDeviceFound(object sender, DeviceEventArgs args)
+            {
+                tcs.TrySetResult(args.Device);
+            }
+
+            NatUtility.DeviceFound += OnDeviceFound;
+            NatUtility.StartDiscovery();
+
+            try
+            {
+                return await tcs.Task;
+            }
+            finally
+            {
+                NatUtility.StopDiscovery();
+                NatUtility.DeviceFound -= OnDeviceFound;
+            }
         }
 
         static LmpPortMapper() => ExitEvent.ServerClosing += () =>

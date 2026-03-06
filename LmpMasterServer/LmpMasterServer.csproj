@@ -29,13 +29,13 @@
     <PackageReference Include="Microsoft.VisualStudio.Validation" Version="17.8.8" />
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="Open.NAT" Version="2.1.0.0" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.8.14">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Mono.Nat" Version="3.0.4" />
     <ProjectReference Include="..\LmpCommon\LmpCommon.csproj" />
     <ProjectReference Include="..\LmpGlobal\LmpGlobal.csproj" />
   </ItemGroup>

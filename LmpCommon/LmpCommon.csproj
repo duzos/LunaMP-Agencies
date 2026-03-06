@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net9.0</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;net9.0;net472</TargetFrameworks>
     <RootNamespace>LmpCommon</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
@@ -13,7 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Lidgren.Core\Lidgren.Core.csproj" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <ProjectReference Include="..\Lidgren.Net\Lidgren.Net.csproj" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+    <ProjectReference Include="..\Lidgren.Net\Lidgren.Net.csproj" Condition="'$(TargetFramework)' == 'netstandard2.0' Or '$(TargetFramework)' == 'net472'" />
     <ProjectReference Include="..\LmpGlobal\LmpGlobal.csproj" />
   </ItemGroup>
 

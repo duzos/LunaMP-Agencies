@@ -1,6 +1,6 @@
 ﻿using LmpMasterServer.Http;
 using Microsoft.VisualStudio.Threading;
-using Open.Nat;
+using Mono.Nat;
 using System;
 using System.Diagnostics;
 using System.Threading;
@@ -13,15 +13,34 @@ namespace LmpMasterServer.Upnp
         public static bool UseUpnp { get; set; } = true;
 
         private static readonly int LifetimeInSeconds = (int)TimeSpan.FromMinutes(1).TotalSeconds;
-        private static readonly AsyncLazy<NatDevice> Device = new AsyncLazy<NatDevice>(DiscoverDeviceAsync, new JoinableTaskContext().Factory);
+        private static readonly AsyncLazy<INatDevice> Device = new AsyncLazy<INatDevice>(DiscoverDeviceAsync, new JoinableTaskContext().Factory);
 
         private static Mapping MasterServerPortMapping => new Mapping(Protocol.Udp, Lidgren.MasterServer.Port, Lidgren.MasterServer.Port, LifetimeInSeconds, $"LMPMasterSrv {Lidgren.MasterServer.Port}");
         private static Mapping MasterServerWebPortMapping => new Mapping(Protocol.Tcp, LunaHttpServer.Port, LunaHttpServer.Port, LifetimeInSeconds, $"LMPMasterSrvWeb {LunaHttpServer.Port}");
 
-        private static async Task<NatDevice> DiscoverDeviceAsync()
+        private static async Task<INatDevice> DiscoverDeviceAsync()
         {
-            var nat = new NatDiscoverer();
-            return await nat.DiscoverDeviceAsync(PortMapper.Upnp, new CancellationTokenSource(5000));
+            var tcs = new TaskCompletionSource<INatDevice>();
+            var cts = new CancellationTokenSource(5000);
+            cts.Token.Register(() => tcs.TrySetCanceled());
+
+            void OnDeviceFound(object sender, DeviceEventArgs args)
+            {
+                tcs.TrySetResult(args.Device);
+            }
+
+            NatUtility.DeviceFound += OnDeviceFound;
+            NatUtility.StartDiscovery();
+
+            try
+            {
+                return await tcs.Task;
+            }
+            finally
+            {
+                NatUtility.StopDiscovery();
+                NatUtility.DeviceFound -= OnDeviceFound;
+            }
         }
 
         [DebuggerHidden]

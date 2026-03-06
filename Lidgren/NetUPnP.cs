@@ -3,7 +3,9 @@ using System.IO;
 using System.Xml;
 using System.Net;
 using System.Net.Sockets;
+#if !NET472
 using System.Net.Http;
+#endif
 using System.Threading;
 
 #if !__NOIPENDPOINT__
@@ -38,7 +40,9 @@ namespace Lidgren.Network
 	/// </summary>
 	public class NetUPnP
 	{
+#if !NET472
 		private static readonly HttpClient s_httpClient = new HttpClient();
+#endif
 		private const int c_discoveryTimeOutMillis = 1000;
 
 		private string m_serviceUrl;
@@ -99,8 +103,16 @@ namespace Lidgren.Network
 			{
 #endif
 			XmlDocument desc = new XmlDocument();
+#if !NET472
             using (var responseStream = s_httpClient.GetStreamAsync(resp).GetAwaiter().GetResult())
                 desc.Load(responseStream);
+#else
+			var request = WebRequest.Create(resp);
+			request.Method = "GET";
+			using (var response = request.GetResponse())
+			using (var responseStream = response.GetResponseStream())
+				desc.Load(responseStream);
+#endif
 
 			XmlNamespaceManager nsMgr = new XmlNamespaceManager(desc.NameTable);
 			nsMgr.AddNamespace("tns", "urn:schemas-upnp-org:device-1-0");
@@ -268,6 +280,7 @@ namespace Lidgren.Network
 			"</s:Body>" +
 			"</s:Envelope>";
 
+#if !NET472
 			using (var request = new HttpRequestMessage(HttpMethod.Post, url))
 			{
 				request.Headers.Add("SOAPACTION", "\"urn:schemas-upnp-org:service:" + m_serviceName + ":1#" + function + "\"");
@@ -283,6 +296,25 @@ namespace Lidgren.Network
 					return respObj;
 				}
 			}
+#else
+			var request = WebRequest.Create(url);
+			request.Method = "POST";
+			byte[] body = System.Text.Encoding.UTF8.GetBytes(req);
+			request.Headers.Add("SOAPACTION", "\"urn:schemas-upnp-org:service:" + m_serviceName + ":1#" + function + "\"");
+			request.ContentType = "text/xml; charset=\"utf-8\"";
+			request.ContentLength = body.Length;
+
+			using (var requestStream = request.GetRequestStream())
+				requestStream.Write(body, 0, body.Length);
+
+			using (var response = request.GetResponse())
+			using (var responseStream = response.GetResponseStream())
+			{
+				XmlDocument respObj = new XmlDocument();
+				respObj.Load(responseStream);
+				return respObj;
+			}
+#endif
 		}
 	}
 }

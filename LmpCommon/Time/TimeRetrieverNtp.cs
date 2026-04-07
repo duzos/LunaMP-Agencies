@@ -26,6 +26,7 @@ namespace LmpCommon.Time
             using (var socket = new UdpClient(_serverAddress.AddressFamily))
             {
                 socket.Connect(_serverAddress);
+                socket.Client.ReceiveTimeout = 5000;
                 socket.Send(_ntpData, _ntpData.Length);
 
                 pingDuration = Stopwatch.GetTimestamp(); // after Send-Method to reduce WinSocket API-Call time

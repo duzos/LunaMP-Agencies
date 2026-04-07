@@ -1,6 +1,8 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
+[assembly: DoNotParallelize]
 [assembly: AssemblyTitle("LmpCommonTest")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]

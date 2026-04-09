@@ -59,6 +59,21 @@ namespace LmpClient.Systems.Scenario
             else
             {
                 LunaLog.LogError($"[LMP]: Scenario data has been lost for {scenarioModule}");
+                byte[] rawCopy = null;
+                if (scenarioData != null && numBytes > 0)
+                {
+                    var len = global::System.Math.Min(numBytes, scenarioData.Length);
+                    rawCopy = new byte[len];
+                    global::System.Buffer.BlockCopy(scenarioData, 0, rawCopy, 0, len);
+                }
+
+                System.ScenarioQueue.Enqueue(new ScenarioEntry
+                {
+                    ScenarioModule = scenarioModule,
+                    ScenarioNode = null,
+                    RawScenarioBytes = rawCopy,
+                    RawNumBytes = numBytes
+                });
             }
         }
     }

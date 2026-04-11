@@ -12,22 +12,20 @@ namespace Server.System
 {
     public partial class HandshakeSystem
     {
-        private string Reason { get; set; }
-
         public void HandleHandshakeRequest(ClientStructure client, HandshakeRequestMsgData data)
         {
-            var valid = CheckServerFull(client);
-            valid &= valid && CheckUsernameLength(client, data.PlayerName);
-            valid &= valid && CheckUsernameCharacters(client, data.PlayerName);
-            valid &= valid && CheckPlayerIsAlreadyConnected(client, data.PlayerName);
-            valid &= valid && CheckUsernameIsReserved(client, data.PlayerName);
-            valid &= valid && CheckPlayerIsBanned(client, data.UniqueIdentifier);
+            var valid = CheckServerFull(client, out var reason);
+            valid &= valid && CheckUsernameLength(client, data.PlayerName, out reason);
+            valid &= valid && CheckUsernameCharacters(client, data.PlayerName, out reason);
+            valid &= valid && CheckPlayerIsAlreadyConnected(client, data.PlayerName, out reason);
+            valid &= valid && CheckUsernameIsReserved(client, data.PlayerName, out reason);
+            valid &= valid && CheckPlayerIsBanned(client, data.UniqueIdentifier, out reason);
 
             if (!valid)
             {
-                LunaLog.Normal($"Client {data.PlayerName} ({data.UniqueIdentifier}) failed to handshake: {Reason}. Disconnecting");
+                LunaLog.Normal($"Client {data.PlayerName} ({data.UniqueIdentifier}) failed to handshake: {reason}. Disconnecting");
                 client.DisconnectClient = true;
-                ClientConnectionHandler.DisconnectClient(client, Reason);
+                ClientConnectionHandler.DisconnectClient(client, reason);
             }
             else
             {

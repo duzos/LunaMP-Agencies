@@ -61,7 +61,7 @@ RUN case "${TARGETARCH}" in \
     arm) DOTNET_RID=linux-musl-arm ;; \
     *) echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
   esac && \
-  dotnet publish -c Release -r ${DOTNET_RID} -o Publish
+  dotnet publish -c Release -r ${DOTNET_RID} --self-contained true -o Publish
 
 FROM ${OS_BASE}:${OS_VERSION}
 RUN apk add icu-libs libstdc++ libgcc

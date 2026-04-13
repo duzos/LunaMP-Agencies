@@ -37,6 +37,9 @@ namespace LmpClient.Systems.ShareContracts
         public void LevelLoaded(GameScenes data)
         {
             System.TryGetContractLock();
+            // StopIgnoringEvents is deferred to ContractsLoaded() so the guard covers the full
+            // ContractSystem.OnLoad() window. onContractsLoaded fires after OnLoad completes,
+            // while onLevelWasLoadedGUIReady can fire up to ~100ms before contracts finish loading.
         }
 
         #region EventHandlers
@@ -73,6 +76,11 @@ namespace LmpClient.Systems.ShareContracts
         public void ContractsLoaded()
         {
             LunaLog.Log("Contracts loaded.");
+            // Safe point to stop ignoring events: ContractSystem.OnLoad() has fully completed.
+            // ContractOffered from new contract generation cannot fire until LockAcquire sets
+            // generateContractIterations back to the default, which always happens after
+            // LevelLoaded/TryGetContractLock. So there is no race between this and LockAcquire.
+            System.StopIgnoringEvents();
         }
 
         public void ContractDeclined(Contract contract)
@@ -101,10 +109,16 @@ namespace LmpClient.Systems.ShareContracts
 
         public void ContractOffered(Contract contract)
         {
+            // Allow contracts being loaded from server data to pass through untouched.
+            // IgnoreEvents is set both during ContractUpdate (ShareProgress path) and during
+            // ContractSystem.OnLoad() (scenario restore path) via ContractSystem_OnLoad patch.
+            if (System.IgnoreEvents) return;
+
             if (!LockSystem.LockQuery.ContractLockBelongsToPlayer(SettingsSystem.CurrentSettings.PlayerName))
             {
-                //We don't have the contract lock so remove the contract that we spawned.
-                //The idea is that ONLY THE PLAYER with the contract lock spawn contracts to the other players
+                //We don't have the contract lock, so discard any contract KSP generated locally.
+                //New generation is already suppressed via generateContractIterations = 0; this
+                //is a safety net for any edge case where KSP still fires the event.
                 contract.Withdraw();
                 contract.Kill();
                 return;

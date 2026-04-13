@@ -182,6 +182,19 @@ namespace LmpClient.Systems.Scenario
                     continue;
                 }
 
+                if (scenarioEntry.ScenarioModule == "ContractSystem")
+                {
+                    try
+                    {
+                        StripContractsWithMissingParts(scenarioEntry.ScenarioNode);
+                    }
+                    catch (Exception e)
+                    {
+                        LunaLog.LogError($"[ShareContracts]: Error while pre-filtering ContractSystem scenario data: {e.Message}. The scenario will be loaded as-is.");
+                    }
+                }
+
+
                 ProtoScenarioModule psm;
                 try
                 {
@@ -204,6 +217,58 @@ namespace LmpClient.Systems.Scenario
                     LunaLog.Log($"[LMP]: Skipping {psm.moduleName} scenario data in {SettingsSystem.ServerSettings.GameMode} mode");
                 }
             }
+        }
+
+        /// <summary>
+        /// Removes CONTRACT nodes from the ContractSystem scenario that reference part names not present
+        /// in this client's install. Such contracts would throw an exception during ContractSystem.OnLoad()
+        /// and display an error popup. They are silently dropped here instead, with a log warning.
+        /// </summary>
+        private static void StripContractsWithMissingParts(ConfigNode scenarioNode)
+        {
+            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS");
+            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS_FINISHED");
+        }
+
+        private static void StripContractSectionWithMissingParts(ConfigNode scenarioNode, string sectionName)
+        {
+            var sectionNode = scenarioNode.GetNode(sectionName);
+            if (sectionNode == null) return;
+
+            var contractNodes = sectionNode.GetNodes("CONTRACT");
+            sectionNode.ClearNodes();
+            foreach (var contractNode in contractNodes)
+            {
+                var missingPart = FindMissingPartName(contractNode);
+                if (missingPart == null)
+                {
+                    sectionNode.AddNode(contractNode);
+                }
+                else
+                {
+                    LunaLog.LogWarning($"[ShareContracts]: Dropping contract {contractNode.GetValue("guid")} ({contractNode.GetValue("type")}) from {sectionName} — references part '{missingPart}' which is not installed on this client.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Recursively searches a contract ConfigNode for any "part = X" value where X is not a
+        /// recognised part in PartLoader. Returns the first missing part name found, or null if all
+        /// referenced parts are present.
+        /// </summary>
+        private static string FindMissingPartName(ConfigNode node)
+        {
+            foreach (ConfigNode.Value v in node.values)
+            {
+                if (v.name == "part" && PartLoader.getPartInfoByName(v.value) == null)
+                    return v.value;
+            }
+            foreach (ConfigNode childNode in node.nodes)
+            {
+                var missing = FindMissingPartName(childNode);
+                if (missing != null) return missing;
+            }
+            return null;
         }
 
         #endregion

@@ -12,6 +12,7 @@ using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
 using System;
 using System.Collections.Concurrent;
+using UnityEngine;
 
 namespace LmpClient.Systems.ShareContracts
 {
@@ -49,6 +50,8 @@ namespace LmpClient.Systems.ShareContracts
 
         private static void ContractUpdate(ContractInfo[] contractInfos)
         {
+            LunaLog.Log($"[ShareContracts]: Syncing {contractInfos.Length} contract(s).");
+
             //Don't listen to these events for the time this message is processing.
             System.StartIgnoringEvents();
             ShareFundsSystem.Singleton.StartIgnoringEvents();
@@ -56,10 +59,17 @@ namespace LmpClient.Systems.ShareContracts
             ShareReputationSystem.Singleton.StartIgnoringEvents();
             ShareExperimentalPartsSystem.Singleton.StartIgnoringEvents();
 
+            var failedCount = 0;
             foreach (var cInfo in contractInfos)
             {
                 var incomingContract = ConvertByteArrayToContract(cInfo.Data, cInfo.NumBytes);
-                if (incomingContract == null) continue;
+                if (incomingContract == null)
+                {
+                    failedCount++;
+                    continue;
+                }
+
+                LunaLog.Log($"[ShareContracts]: Contract - GUID: {incomingContract.ContractGuid} | Title: {incomingContract.Title} | Type: {incomingContract.GetType().Name} | State: {incomingContract.ContractState}");
 
                 var contractIndex = ContractSystem.Instance.Contracts.FindIndex(c => c.ContractGuid == cInfo.ContractGuid);
 
@@ -81,6 +91,16 @@ namespace LmpClient.Systems.ShareContracts
             ShareScienceSystem.Singleton.StopIgnoringEvents(true);
             ShareReputationSystem.Singleton.StopIgnoringEvents(true);
             ShareExperimentalPartsSystem.Singleton.StopIgnoringEvents();
+
+            if (failedCount > 0)
+            {
+                LunaScreenMsg.PostScreenMessage(
+                    $"[LMP] {failedCount} contract(s) could not be loaded — missing parts or mods. Check KSP.log for details.",
+                    20f,
+                    ScreenMessageStyle.UPPER_LEFT,
+                    Color.yellow);
+            }
+
             GameEvents.Contract.onContractsListChanged.Fire();
             System.StopIgnoringEvents();
         }
@@ -108,17 +128,29 @@ namespace LmpClient.Systems.ShareContracts
                 return null;
             }
 
+            // Extract identifying fields before modifying the node or attempting a load,
+            // so failure messages always include as much context as possible.
+            var contractTypeName = node.GetValue("type") ?? "Unknown";
+            var contractGuid = node.GetValue("guid") ?? "Unknown";
+            var partName = node.GetValue("part"); // Only present on PartTest contracts
+
             Contract contract;
             try
             {
-                var value = node.GetValue("type");
                 node.RemoveValues("type");
-                var contractType = ContractSystem.GetContractType(value);
+                var contractType = ContractSystem.GetContractType(contractTypeName);
+                if (contractType == null)
+                {
+                    LunaLog.LogError($"[LMP]: Cannot load contract (GUID: {contractGuid}) — unknown type '{contractTypeName}'. Is a required contract mod missing?");
+                    return null;
+                }
+
                 contract = Contract.Load((Contract)Activator.CreateInstance(contractType), node);
             }
             catch (Exception e)
             {
-                LunaLog.LogError($"[LMP]: Error while deserializing contract: {e}");
+                var partDetail = partName != null ? $", requires part: '{partName}'" : "";
+                LunaLog.LogError($"[LMP]: Cannot load {contractTypeName} contract (GUID: {contractGuid}{partDetail}): {e.Message}");
                 return null;
             }
 

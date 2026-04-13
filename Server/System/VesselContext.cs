@@ -1,10 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 
 namespace Server.System
 {
     public static class VesselContext
     {
-        public static List<Guid> RemovedVessels { get; } = new List<Guid>();
+        public static ConcurrentDictionary<Guid, byte> RemovedVessels { get; } = new ConcurrentDictionary<Guid, byte>();
     }
 }

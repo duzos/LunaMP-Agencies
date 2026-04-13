@@ -20,7 +20,7 @@ namespace Server.System.Vessel
         public static void WritePartSyncUiFieldDataToFile(VesselBaseMsgData message)
         {
             if (!(message is VesselPartSyncUiFieldMsgData msgData)) return;
-            if (VesselContext.RemovedVessels.Contains(msgData.VesselId)) return;
+            if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             //Sync part changes ALWAYS and ignore the rate they arrive
             _ = Task.Run(() =>

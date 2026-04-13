@@ -99,5 +99,18 @@ namespace Server.System
                 }
             }
         }
+
+        /// <summary>
+        /// Writes one vessel to disk so live patches (orbit, IDENT, position fields) are reflected in the Vessels folder without waiting for <see cref="BackupVessels"/>.
+        /// </summary>
+        public static void PersistVesselToFile(Guid vesselId)
+        {
+            if (!CurrentVessels.TryGetValue(vesselId, out var vessel)) return;
+
+            lock (BackupLock)
+            {
+                FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vesselId}{VesselFileFormat}"), vessel.ToString());
+            }
+        }
     }
 }

@@ -27,6 +27,14 @@ namespace LmpClient.Systems.ShareContracts
 
             ContractSystem.generateContractIterations = 0;
 
+            // Protect the startup window: any ContractOffered events that fire between
+            // system enable and the scene being GUI-ready (when TryGetContractLock runs)
+            // must not kill server contracts. This matters on servers with no active lock
+            // holder, where contracts can only arrive via ContractSystem.OnLoad() and any
+            // post-load re-offer events (e.g. from ContractPreLoader or mod initialisation).
+            // Cleared in LevelLoaded() after lock status is determined.
+            IgnoreEvents = true;
+
             LockEvent.onLockAcquire.Add(ShareContractsEvents.LockAcquire);
             LockEvent.onLockRelease.Add(ShareContractsEvents.LockReleased);
             GameEvents.onLevelWasLoadedGUIReady.Add(ShareContractsEvents.LevelLoaded);

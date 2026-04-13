@@ -51,6 +51,10 @@ namespace LmpClient.VesselUtilities
                     existingVessel.RemoveAllCrew();
 
                 FlightGlobals.RemoveVessel(existingVessel);
+                // Disable immediately so Unity stops calling FixedUpdate on this vessel before
+                // Object.Destroy is processed — same deferred-destroy race that causes
+                // Vessel.UpdateCaches() NullReferenceExceptions (see VesselRemoveSystem.KillVessel).
+                existingVessel.gameObject.SetActive(false);
                 foreach (var part in existingVessel.parts)
                 {
                     Object.Destroy(part.gameObject);
@@ -62,10 +66,50 @@ namespace LmpClient.VesselUtilities
                 LunaLog.Log($"[LMP]: Loading vessel {vesselProto.vesselID}");
             }
 
-            vesselProto.Load(HighLogic.CurrentGame.flightState);
+            try
+            {
+                vesselProto.Load(HighLogic.CurrentGame.flightState);
+            }
+            catch (Exception loadEx)
+            {
+                // KSP may have created the Vessel GameObject before the exception (e.g. OrbitSnapshot.Load
+                // throws when the vessel's referenceBody index is out of range because the server has extra
+                // celestial bodies from a mod the client doesn't have).  Without cleanup the zombie vessel
+                // stays in FlightGlobals and causes NullReferenceExceptions in Vessel.UpdateCaches() on
+                // every physics tick.
+                LunaLog.LogError($"[LMP]: Vessel {vesselProto.vesselID} threw during ProtoVessel.Load — removing to prevent zombie vessel. Error: {loadEx.Message}");
+                if (vesselProto.vesselRef != null)
+                {
+                    FlightGlobals.RemoveVessel(vesselProto.vesselRef);
+                    foreach (var part in vesselProto.vesselRef.parts)
+                        Object.Destroy(part.gameObject);
+                    Object.Destroy(vesselProto.vesselRef.gameObject);
+                }
+                HighLogic.CurrentGame.flightState.protoVessels.Remove(vesselProto);
+                return false;
+            }
+
             if (vesselProto.vesselRef == null)
             {
                 LunaLog.Log($"[LMP]: Protovessel {vesselProto.vesselID} failed to create a vessel!");
+                return false;
+            }
+
+            // Safety-net: verify the ProtoVessel can be saved before keeping it in the flight state.
+            // If ProtoVessel.Save() throws (e.g. from a null resource definition left by a server mod),
+            // GamePersistence.SaveGame() would also throw, causing the UI to freeze on any menu close.
+            try
+            {
+                vesselProto.Save(new ConfigNode());
+            }
+            catch (Exception saveEx)
+            {
+                LunaLog.LogError($"[LMP]: Vessel {vesselProto.vesselID} ({vesselProto.vesselName}) cannot be saved — removing to prevent UI freezes. Error: {saveEx.Message}");
+                FlightGlobals.RemoveVessel(vesselProto.vesselRef);
+                foreach (var part in vesselProto.vesselRef.parts)
+                    Object.Destroy(part.gameObject);
+                Object.Destroy(vesselProto.vesselRef.gameObject);
+                HighLogic.CurrentGame.flightState.protoVessels.Remove(vesselProto);
                 return false;
             }
 

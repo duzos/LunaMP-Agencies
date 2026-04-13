@@ -30,7 +30,7 @@ namespace Server.System.Vessel
         public static void WriteUpdateDataToFile(VesselBaseMsgData message)
         {
             if (!(message is VesselUpdateMsgData msgData)) return;
-            if (VesselContext.RemovedVessels.Contains(msgData.VesselId)) return;
+            if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             if (!LastUpdateDictionary.TryGetValue(msgData.VesselId, out var lastUpdated) || (DateTime.Now - lastUpdated).TotalMilliseconds > FileUpdateIntervalMs)
             {
@@ -59,6 +59,10 @@ namespace Server.System.Vessel
                         vessel.Fields.Update("clnRsn", msgData.AutoCleanReason);
                         vessel.Fields.Update("ctrl", msgData.WasControllable.ToString(CultureInfo.InvariantCulture));
                         vessel.Fields.Update("stg", msgData.Stage.ToString(CultureInfo.InvariantCulture));
+
+                        ApplyOrbitIdent(vessel, msgData.BodyName);
+
+                        VesselStoreSystem.PersistVesselToFile(msgData.VesselId);
 
                         //NEVER! patch the CoM in the protovessel as then it will be drawn with incorrect CommNet lines!
                         //vessel.Fields.Update("CoM", $"{msgData.Com[0].ToString(CultureInfo.InvariantCulture)}," +

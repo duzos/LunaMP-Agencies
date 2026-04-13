@@ -49,6 +49,21 @@ namespace LmpClient.Systems.Scenario
             var scenarioNode = scenarioData.DeserializeToConfigNode(numBytes);
             if (scenarioNode != null)
             {
+                if (scenarioModule == "ContractSystem")
+                {
+                    var contracts = scenarioNode.GetNode("CONTRACTS")?.GetNodes("CONTRACT") ?? new ConfigNode[0];
+                    var finishedContracts = scenarioNode.GetNode("CONTRACTS_FINISHED")?.GetNodes("CONTRACT") ?? new ConfigNode[0];
+                    LunaLog.Log($"[ShareContracts]: Received ContractSystem from server — {contracts.Length} in CONTRACTS, {finishedContracts.Length} in CONTRACTS_FINISHED.");
+                    foreach (var contract in contracts)
+                    {
+                        LunaLog.Log($"[ShareContracts]: Contract - GUID: {contract.GetValue("guid")} | Type: {contract.GetValue("type")} | State: {contract.GetValue("state")}");
+                    }
+                    foreach (var contract in finishedContracts)
+                    {
+                        LunaLog.Log($"[ShareContracts]: Finished Contract - GUID: {contract.GetValue("guid")} | Type: {contract.GetValue("type")} | State: {contract.GetValue("state")}");
+                    }
+                }
+
                 var entry = new ScenarioEntry
                 {
                     ScenarioModule = scenarioModule,
@@ -59,6 +74,21 @@ namespace LmpClient.Systems.Scenario
             else
             {
                 LunaLog.LogError($"[LMP]: Scenario data has been lost for {scenarioModule}");
+                byte[] rawCopy = null;
+                if (scenarioData != null && numBytes > 0)
+                {
+                    var len = global::System.Math.Min(numBytes, scenarioData.Length);
+                    rawCopy = new byte[len];
+                    global::System.Buffer.BlockCopy(scenarioData, 0, rawCopy, 0, len);
+                }
+
+                System.ScenarioQueue.Enqueue(new ScenarioEntry
+                {
+                    ScenarioModule = scenarioModule,
+                    ScenarioNode = null,
+                    RawScenarioBytes = rawCopy,
+                    RawNumBytes = numBytes
+                });
             }
         }
     }

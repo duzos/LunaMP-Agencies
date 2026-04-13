@@ -18,7 +18,7 @@ namespace Server.System.Vessel
         public static void WriteActionGroupDataToFile(VesselBaseMsgData message)
         {
             if (!(message is VesselActionGroupMsgData msgData)) return;
-            if (VesselContext.RemovedVessels.Contains(msgData.VesselId)) return;
+            if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             //Sync part changes ALWAYS and ignore the rate they arrive
             _ = Task.Run(() =>

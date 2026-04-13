@@ -877,6 +877,6 @@
     <PostBuildEvent Condition="'$(OS)' != 'Unix'">if /I "$(ConfigurationName)" == "Debug" call  "$(ProjectDir)..\Scripts\CopyToKSPDirectory.bat" $(ConfigurationName)</PostBuildEvent>
   </PropertyGroup>
   <PropertyGroup>
-    <PreBuildEvent Condition="'$(OS)' != 'Unix'">xcopy /Y "$(ProjectDir)..\External\Dependencies\*.dll" "$(TargetDir)"</PreBuildEvent>
+    <PreBuildEvent Condition="'$(OS)' != 'Unix'">xcopy /Y /S "$(ProjectDir)..\External\Dependencies\*.dll" "$(TargetDir)"</PreBuildEvent>
   </PropertyGroup>
 </Project>

@@ -6,6 +6,8 @@ using LmpCommon;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using Expansions;
 using UniLinq;
 
@@ -165,7 +167,46 @@ namespace LmpClient.Systems.Scenario
         {
             while (ScenarioQueue.TryDequeue(out var scenarioEntry))
             {
-                var psm = new ProtoScenarioModule(scenarioEntry.ScenarioNode);
+                if (scenarioEntry == null)
+                {
+                    LunaLog.LogError("[LMP]: Skipping null scenario queue entry.");
+                    WriteNullScenarioDebugLog(null);
+                    continue;
+                }
+
+                if (scenarioEntry.ScenarioNode == null)
+                {
+                    LunaLog.LogError(
+                        $"[LMP]: Skipping scenario '{scenarioEntry.ScenarioModule}' with null ConfigNode. See NullScenario.log in your KSP install folder.");
+                    WriteNullScenarioDebugLog(scenarioEntry);
+                    continue;
+                }
+
+                if (scenarioEntry.ScenarioModule == "ContractSystem")
+                {
+                    try
+                    {
+                        StripContractsWithMissingParts(scenarioEntry.ScenarioNode);
+                    }
+                    catch (Exception e)
+                    {
+                        LunaLog.LogError($"[ShareContracts]: Error while pre-filtering ContractSystem scenario data: {e.Message}. The scenario will be loaded as-is.");
+                    }
+                }
+
+
+                ProtoScenarioModule psm;
+                try
+                {
+                    psm = new ProtoScenarioModule(scenarioEntry.ScenarioNode);
+                }
+                catch (Exception e)
+                {
+                    LunaLog.LogError(
+                        $"[LMP]: Failed to apply scenario '{scenarioEntry.ScenarioModule}' (ConfigNode could not be copied into ProtoScenarioModule). {e}");
+                    continue;
+                }
+
                 if (IsScenarioModuleAllowed(psm.moduleName) && !IgnoredScenarios.IgnoreReceive.Contains(psm.moduleName))
                 {
                     LunaLog.Log($"[LMP]: Loading {psm.moduleName} scenario data");
@@ -178,9 +219,104 @@ namespace LmpClient.Systems.Scenario
             }
         }
 
+        /// <summary>
+        /// Removes CONTRACT nodes from the ContractSystem scenario that reference part names not present
+        /// in this client's install. Such contracts would throw an exception during ContractSystem.OnLoad()
+        /// and display an error popup. They are silently dropped here instead, with a log warning.
+        /// </summary>
+        private static void StripContractsWithMissingParts(ConfigNode scenarioNode)
+        {
+            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS");
+            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS_FINISHED");
+        }
+
+        private static void StripContractSectionWithMissingParts(ConfigNode scenarioNode, string sectionName)
+        {
+            var sectionNode = scenarioNode.GetNode(sectionName);
+            if (sectionNode == null) return;
+
+            var contractNodes = sectionNode.GetNodes("CONTRACT");
+            sectionNode.ClearNodes();
+            foreach (var contractNode in contractNodes)
+            {
+                var missingPart = FindMissingPartName(contractNode);
+                if (missingPart == null)
+                {
+                    sectionNode.AddNode(contractNode);
+                }
+                else
+                {
+                    LunaLog.LogWarning($"[ShareContracts]: Dropping contract {contractNode.GetValue("guid")} ({contractNode.GetValue("type")}) from {sectionName} — references part '{missingPart}' which is not installed on this client.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Recursively searches a contract ConfigNode for any "part = X" value where X is not a
+        /// recognised part in PartLoader. Returns the first missing part name found, or null if all
+        /// referenced parts are present.
+        /// </summary>
+        private static string FindMissingPartName(ConfigNode node)
+        {
+            foreach (ConfigNode.Value v in node.values)
+            {
+                if (v.name == "part" && PartLoader.getPartInfoByName(v.value) == null)
+                    return v.value;
+            }
+            foreach (ConfigNode childNode in node.nodes)
+            {
+                var missing = FindMissingPartName(childNode);
+                if (missing != null) return missing;
+            }
+            return null;
+        }
+
         #endregion
 
         #region Private methods
+
+        private static void WriteNullScenarioDebugLog(ScenarioEntry entry)
+        {
+            try
+            {
+                var path = Path.Combine(MainSystem.KspPath, "NullScenario.log");
+                var sb = new StringBuilder();
+                sb.AppendLine("================================================================================");
+                sb.AppendLine($"UTC: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z");
+                if (entry == null)
+                {
+                    sb.AppendLine("ScenarioEntry: null");
+                    sb.AppendLine();
+                    File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
+                    return;
+                }
+
+                sb.AppendLine($"ScenarioModule: {entry.ScenarioModule ?? "(null)"}");
+                sb.AppendLine($"ScenarioNode: {(entry.ScenarioNode == null ? "null" : "non-null (unexpected in this log)")}");
+                sb.AppendLine($"RawNumBytes (from network): {entry.RawNumBytes}");
+                if (entry.RawScenarioBytes != null && entry.RawScenarioBytes.Length > 0)
+                {
+                    sb.AppendLine($"RawScenarioBytes.Length: {entry.RawScenarioBytes.Length}");
+                    sb.AppendLine();
+                    sb.AppendLine("--- Payload as UTF-8 text (wire bytes before ConfigNode parse) ---");
+                    sb.AppendLine(Encoding.UTF8.GetString(entry.RawScenarioBytes, 0, entry.RawScenarioBytes.Length));
+                    sb.AppendLine();
+                    sb.AppendLine("--- Payload as Base64 ---");
+                    sb.AppendLine(Convert.ToBase64String(entry.RawScenarioBytes, 0, entry.RawScenarioBytes.Length));
+                }
+                else
+                {
+                    sb.AppendLine("RawScenarioBytes: (none — not captured or empty)");
+                }
+
+                sb.AppendLine();
+                File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
+            }
+            catch (Exception e)
+            {
+                LunaLog.LogError($"[LMP]: Failed to write NullScenario.log: {e.Message}");
+            }
+        }
 
         private static bool LoadModuleByGameMode(KSPScenarioType validScenario)
         {

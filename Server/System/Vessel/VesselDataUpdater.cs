@@ -1,4 +1,5 @@
-﻿using Server.Log;
+﻿using LunaConfigNode.CfgNode;
+using Server.Log;
 using Server.Settings.Structures;
 using System;
 using System.Collections.Concurrent;
@@ -22,6 +23,19 @@ namespace Server.System.Vessel
         private static readonly ConcurrentDictionary<Guid, object> Semaphore = new ConcurrentDictionary<Guid, object>();
 
         #endregion
+
+        /// <summary>
+        /// Sets ORBIT IDENT from the reference body name when provided (e.g. from position or update messages).
+        /// </summary>
+        internal static void ApplyOrbitIdent(Classes.Vessel vessel, string bodyName)
+        {
+            if (string.IsNullOrEmpty(bodyName)) return;
+
+            if (vessel.Orbit.Exists("IDENT"))
+                vessel.Orbit.Update("IDENT", bodyName);
+            else
+                vessel.Orbit.Add(new CfgNodeValue<string, string>("IDENT", bodyName));
+        }
 
         /// <summary>
         /// Raw updates a vessel in the dictionary and takes care of the locking in case we received another vessel message type

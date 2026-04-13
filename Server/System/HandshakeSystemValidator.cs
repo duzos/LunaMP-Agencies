@@ -34,14 +34,15 @@ namespace Server.System
             return true;
         }
 
-        private bool CheckUsernameLength(ClientStructure client, string username)
+        private bool CheckUsernameLength(ClientStructure client, string username, out string reason)
         {
-            if (!PlayerNameIsValid(username, out var reason))
+            reason = string.Empty;
+            if (!PlayerNameIsValid(username, out var validationReason))
             {
-                if (reason.Contains("long") || reason.Contains("short"))
+                if (validationReason.Contains("long") || validationReason.Contains("short"))
                 {
-                    Reason = reason;
-                    HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, Reason);
+                    reason = validationReason;
+                    HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, reason);
                     return false;
                 }
             }
@@ -49,59 +50,64 @@ namespace Server.System
             return true;
         }
 
-        private bool CheckServerFull(ClientStructure client)
+        private bool CheckServerFull(ClientStructure client, out string reason)
         {
+            reason = string.Empty;
             if (ClientRetriever.GetActiveClientCount() >= GeneralSettings.SettingsStore.MaxPlayers)
             {
-                Reason = "Server full";
-                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.ServerFull, Reason);
+                reason = "Server full";
+                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.ServerFull, reason);
                 return false;
             }
             return true;
         }
 
-        private bool CheckPlayerIsBanned(ClientStructure client, string uniqueId)
+        private bool CheckPlayerIsBanned(ClientStructure client, string uniqueId, out string reason)
         {
+            reason = string.Empty;
             if (BanPlayerCommand.GetBannedPlayers().Contains(uniqueId))
             {
-                Reason = "Banned";
-                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.PlayerBanned, Reason);
+                reason = "Banned";
+                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.PlayerBanned, reason);
                 return false;
             }
             return true;
         }
 
-        private bool CheckUsernameIsReserved(ClientStructure client, string playerName)
+        private bool CheckUsernameIsReserved(ClientStructure client, string playerName, out string reason)
         {
+            reason = string.Empty;
             if (playerName == "Initial" || playerName == GeneralSettings.SettingsStore.ConsoleIdentifier)
             {
-                Reason = "Using reserved name";
-                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, Reason);
+                reason = "Using reserved name";
+                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, reason);
                 return false;
             }
             return true;
         }
 
-        private bool CheckPlayerIsAlreadyConnected(ClientStructure client, string playerName)
+        private bool CheckPlayerIsAlreadyConnected(ClientStructure client, string playerName, out string reason)
         {
+            reason = string.Empty;
             var existingClient = ClientRetriever.GetClientByName(playerName);
             if (existingClient != null)
             {
-                Reason = "Username already taken";
-                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, Reason);
+                reason = "Username already taken";
+                HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, reason);
                 return false;
             }
             return true;
         }
 
-        private bool CheckUsernameCharacters(ClientStructure client, string playerName)
+        private bool CheckUsernameCharacters(ClientStructure client, string playerName, out string reason)
         {
-            if (!PlayerNameIsValid(playerName, out var reason))
+            reason = string.Empty;
+            if (!PlayerNameIsValid(playerName, out var validationReason))
             {
-                if (reason.Contains("characters"))
+                if (validationReason.Contains("characters"))
                 {
-                    Reason = reason;
-                    HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, Reason);
+                    reason = validationReason;
+                    HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.InvalidPlayername, reason);
                     return false;
                 }
             }

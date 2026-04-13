@@ -169,6 +169,7 @@
     <Compile Include="Harmony\EVAConstructionModeEditor_DropAttachablePart.cs" />
     <Compile Include="Harmony\ModuleDockingNode_DockToVessel.cs" />
     <Compile Include="Harmony\ContractSystem_OnAwake.cs" />
+    <Compile Include="Harmony\ContractSystem_OnLoad.cs" />
     <Compile Include="Harmony\FlightDriver_SetStartupNewVessel.cs" />
     <Compile Include="Harmony\FlightDriver_Start.cs" />
     <Compile Include="Harmony\FlightResultsDialog_SetupGUI.cs" />

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: LMP Discord
+    url: https://discord.gg/wKVMhWQ
+    about: A place for discussing LMP in general - you can also report issues here.
+  - name: LMP Website
+    url: https://lunamultiplayer.com/
+    about: The official Luna Multiplayer website.

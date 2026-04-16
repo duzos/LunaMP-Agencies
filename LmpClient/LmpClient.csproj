@@ -239,6 +239,8 @@
     <Compile Include="Harmony\Vessel_Load.cs" />
     <Compile Include="Harmony\Vessel_Unload.cs" />
     <Compile Include="Harmony\Vessel_CheckKill.cs" />
+    <Compile Include="Harmony\Vessel_UpdateCaches.cs" />
+    <Compile Include="Harmony\VesselModule_Start.cs" />
     <Compile Include="Localization\Structures\AdminWindowText.cs" />
     <Compile Include="Localization\Structures\BannedPartsResourcesWindowText.cs" />
     <Compile Include="Localization\Structures\ButtonTooltips.cs" />

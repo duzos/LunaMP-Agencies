@@ -2,6 +2,7 @@
 using LmpClient.Systems.Flag;
 using LmpClient.Systems.Mod;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace LmpClient.Extensions
@@ -145,13 +146,21 @@ namespace LmpClient.Extensions
             }
 
             //Fix the flags urls in the vessel. The flag have the value as: "Squad/Flags/default"
+            var missingFlagCounts = new Dictionary<string, int>();
             foreach (var part in protoVessel.protoPartSnapshots.Where(p => !string.IsNullOrEmpty(p.flagURL)))
             {
                 if (!FlagSystem.Singleton.FlagExists(part.flagURL))
                 {
-                    if (verboseErrors) LunaLog.Log($"[LMP]: Flag '{part.flagURL}' doesn't exist, setting to default!");
+                    if (!missingFlagCounts.ContainsKey(part.flagURL))
+                        missingFlagCounts[part.flagURL] = 0;
+                    missingFlagCounts[part.flagURL]++;
                     part.flagURL = "Squad/Flags/default";
                 }
+            }
+            if (verboseErrors)
+            {
+                foreach (var kvp in missingFlagCounts)
+                    LunaLog.Log($"[LMP]: Flag '{kvp.Key}' doesn't exist - replaced on {kvp.Value} part(s) with default.");
             }
             return true;
         }

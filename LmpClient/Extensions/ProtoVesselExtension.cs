@@ -42,17 +42,16 @@ namespace LmpClient.Extensions
                     return true;
                 }
 
-                var invalidResources = pps.resources.Select(r => r.resourceName).Except(ModSystem.Singleton.AllowedResources).ToArray();
-                if (ModSystem.Singleton.ModControl && invalidResources.Any())
+                var nonWhitelistedResources = pps.resources.Select(r => r.resourceName)
+                    .Except(ModSystem.Singleton.AllowedResources)
+                    .Where(r => PartResourceLibrary.Instance.resourceDefinitions.Contains(r))
+                    .Distinct()
+                    .ToArray();
+                if (ModSystem.Singleton.ModControl && nonWhitelistedResources.Any() && verboseErrors)
                 {
-                    if (verboseErrors)
-                    {
-                        var msg = $"Protovessel {pv.vesselID} ({pv.vesselName}) contains the BANNED RESOURCE/S '{string.Join(", ", invalidResources)}' ON PART '{pps.partName}'. Skipping load.";
-                        LunaLog.LogWarning(msg);
-                        ChatSystem.Singleton.PmMessageServer(msg);
-                    }
-
-                    return true;
+                    var msg = $"Protovessel {pv.vesselID} ({pv.vesselName}) contains RESOURCE/S '{string.Join(", ", nonWhitelistedResources)}' not present in the server allowlist on part '{pps.partName}'. Allowing load because the resources exist locally.";
+                    LunaLog.LogWarning(msg);
+                    ChatSystem.Singleton.PmMessageServer(msg);
                 }
 
                 if (pps.partInfo == null)

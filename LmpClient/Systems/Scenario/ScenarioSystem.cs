@@ -344,6 +344,27 @@ namespace LmpClient.Systems.Scenario
                 if (string.IsNullOrEmpty(guid) || existingGuids.Contains(guid))
                     continue;
 
+                // KSPCF's ContractPreLoader.OnLoad calls Contract.Load(node) on each child
+                // outside the ContractSystem.LoadContract path that LMP's Harmony finalizer
+                // guards, so exceptions there are never suppressed.  Apply the same body-index
+                // validation here so contracts that would cause CC's ParseCelestialBodyValue
+                // to throw ArgumentException never reach that code path.
+                var typeName = contractNode.GetValue("type") ?? string.Empty;
+                var isCC = string.Equals(typeName, "ConfiguredContract", StringComparison.OrdinalIgnoreCase);
+                var invalidBody = FindInvalidBodyIndex(contractNode, isCC);
+                if (invalidBody != null)
+                {
+                    LunaLog.LogWarning($"[ContractPreLoader]: Skipping injection of contract {guid} ({typeName}) — {invalidBody}.");
+                    continue;
+                }
+
+                var missingBody = FindMissingBodyReference(contractNode, isCC);
+                if (missingBody != null)
+                {
+                    LunaLog.LogWarning($"[ContractPreLoader]: Skipping injection of contract {guid} ({typeName}) — {missingBody}.");
+                    continue;
+                }
+
                 // Add the full CONTRACT node (same name KSP uses in ContractSystem.OnSave).
                 // KSPCF's ContractPreLoader.OnLoad calls Contract.Load(node) on each child,
                 // which requires type, guid, state, and all parameters to succeed.
@@ -461,6 +482,7 @@ namespace LmpClient.Systems.Scenario
             {
                 var guid = contractNode.GetValue("guid");
                 var typeName = contractNode.GetValue("type") ?? "Unknown";
+                var isConfiguredContract = string.Equals(typeName, "ConfiguredContract", StringComparison.OrdinalIgnoreCase);
 
                 var missingPart = FindMissingPartName(contractNode);
                 if (missingPart != null)
@@ -471,12 +493,21 @@ namespace LmpClient.Systems.Scenario
                     continue;
                 }
 
-                var invalidBody = FindInvalidBodyIndex(contractNode);
+                var invalidBody = FindInvalidBodyIndex(contractNode, isConfiguredContract);
                 if (invalidBody != null)
                 {
-                    LunaLog.LogWarning($"[ShareContracts]: Dropping contract {guid} ({typeName}) from {sectionName} — references {invalidBody} which is out of range on this client. The server likely has a planet pack installed that this client does not.");
+                    LunaLog.LogWarning($"[ShareContracts]: Dropping contract {guid} ({typeName}) from {sectionName} — {invalidBody}.");
                     if (guid != null)
                         strippedOut[guid] = (typeName, invalidBody);
+                    continue;
+                }
+
+                var missingBody = FindMissingBodyReference(contractNode, isConfiguredContract);
+                if (missingBody != null)
+                {
+                    LunaLog.LogWarning($"[ShareContracts]: Dropping contract {guid} ({typeName}) from {sectionName} — {missingBody}.");
+                    if (guid != null)
+                        strippedOut[guid] = (typeName, missingBody);
                     continue;
                 }
 
@@ -524,15 +555,50 @@ namespace LmpClient.Systems.Scenario
             };
 
         /// <summary>
-        /// Recursively searches a contract ConfigNode for any value whose key is a recognised
-        /// celestial-body index field and whose integer value falls outside the range of
-        /// <see cref="FlightGlobals.Bodies"/> on this client.
+        /// ConfigNode value keys found exclusively (or almost exclusively) in CC contract
+        /// parameters that also require a body-target key (<see cref="BodyIndexKeys"/>).
+        /// If a CC PARAM node contains any of these keys but none of the body-target keys,
+        /// the node is missing a required field that CC's <c>ConfigNodeUtil.ParseValue</c>
+        /// would throw <see cref="System.ArgumentException"/> for when loading.
         ///
-        /// Returns a human-readable description such as "body index #6 (key 'destination')" on
-        /// mismatch, or null if all body references are valid.  String-format body names (e.g.
-        /// "Duna") are not checked because they are resolved by name and do not cause index errors.
+        /// Examples: <c>SCANsatCoverage</c> requires both <c>coverage</c>/<c>scanType</c>
+        /// AND <c>targetBody</c>; if <c>targetBody</c> was never saved (malformed server data),
+        /// CC shows an in-game popup and the contract cannot be displayed.
         /// </summary>
-        private static string FindInvalidBodyIndex(ConfigNode node)
+        private static readonly System.Collections.Generic.HashSet<string> BodyContextKeys =
+            new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                // SCANsat integration parameters
+                "coverage", "scanType", "scanMode",
+                // CC science / biome / situation parameters
+                "experiment", "biome", "situation",
+                // CC orbital / altitude parameters
+                "orbitType", "minOrbit", "maxOrbit",
+                "minAltitude", "maxAltitude",
+                "minPeriapsis", "maxPeriapsis",
+                "minApoapsis", "maxApoapsis",
+                "minEccentricity", "maxEccentricity",
+                "minInclination", "maxInclination",
+            };
+
+        /// <summary>
+        /// Recursively searches a contract ConfigNode for any value whose key is a recognised
+        /// celestial-body index field and whose integer value is invalid for this client.
+        ///
+        /// For ordinary (non-CC) contracts, only out-of-range indices are flagged because KSP
+        /// resolves body references by integer index.
+        ///
+        /// For ContractConfigurator contracts (<paramref name="isConfiguredContract"/> = true),
+        /// <em>any</em> integer value is invalid: CC's <c>ParseCelestialBodyValue</c> resolves
+        /// bodies by name and throws <see cref="System.ArgumentException"/> when given a numeric
+        /// string such as <c>"5"</c>, even if that index is in range for
+        /// <see cref="FlightGlobals.Bodies"/>.  Such values can appear when a contract was
+        /// serialised by an older CC build or by KSPCF's ContractPreLoader using the raw body
+        /// index rather than the body name.
+        ///
+        /// Returns a human-readable description on mismatch, or null if all body references are valid.
+        /// </summary>
+        private static string FindInvalidBodyIndex(ConfigNode node, bool isConfiguredContract = false)
         {
             // Guard: if Bodies hasn't been populated yet (shouldn't happen at load time, but be safe).
             if (FlightGlobals.Bodies == null || FlightGlobals.Bodies.Count == 0)
@@ -546,7 +612,11 @@ namespace LmpClient.Systems.Scenario
                 if (int.TryParse(v.value, out idx))
                 {
                     if (idx < 0 || idx >= FlightGlobals.Bodies.Count)
-                        return $"body index #{idx} (key '{v.name}')";
+                        return $"body index #{idx} (key '{v.name}') out of range";
+                    // CC contracts always store body names; any in-range integer is also invalid
+                    // because ParseCelestialBodyValue only accepts names, not numeric strings.
+                    if (isConfiguredContract)
+                        return $"body index #{idx} (key '{v.name}') — CC contract expects a body name, not an integer";
                 }
                 else if (double.TryParse(v.value,
                              System.Globalization.NumberStyles.Float,
@@ -558,14 +628,62 @@ namespace LmpClient.Systems.Scenario
                     // KSP occasionally serialises body indices as floats (e.g. "17" → "17.0").
                     idx = (int)dbl;
                     if (idx >= FlightGlobals.Bodies.Count)
-                        return $"body index #{idx} (key '{v.name}', stored as float)";
+                        return $"body index #{idx} (key '{v.name}', stored as float) out of range";
+                    if (isConfiguredContract)
+                        return $"body index #{idx} (key '{v.name}', stored as float) — CC contract expects a body name, not an integer";
                 }
             }
             foreach (ConfigNode childNode in node.nodes)
             {
-                var invalid = FindInvalidBodyIndex(childNode);
+                var invalid = FindInvalidBodyIndex(childNode, isConfiguredContract);
                 if (invalid != null) return invalid;
             }
+            return null;
+        }
+
+        /// <summary>
+        /// Searches the direct PARAM child nodes of a <strong>CC ConfiguredContract</strong>
+        /// node for parameters that declare body-context fields (e.g. <c>coverage</c>,
+        /// <c>scanType</c>, <c>situation</c>) without any corresponding body-target field
+        /// (e.g. <c>targetBody</c>).  Such nodes are malformed — CC's
+        /// <c>ConfigNodeUtil.ParseValue&lt;CelestialBody&gt;</c> will throw
+        /// <see cref="System.ArgumentException"/> and display an in-game popup when it
+        /// tries to load a required body field that is absent.
+        ///
+        /// Only meaningful for CC contracts; always returns <c>null</c> for non-CC contracts.
+        /// </summary>
+        /// <returns>
+        /// A human-readable description of the problem (e.g.
+        /// <c>"PARAM 'SCANsatCoverage' has body-context field but no body target"</c>),
+        /// or <c>null</c> if no issue is found.
+        /// </returns>
+        private static string FindMissingBodyReference(ConfigNode contractNode, bool isConfiguredContract)
+        {
+            if (!isConfiguredContract) return null;
+
+            foreach (ConfigNode child in contractNode.nodes)
+            {
+                if (!string.Equals(child.name, "PARAM", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var hasBodyContextKey = false;
+                var hasBodyKey = false;
+                foreach (ConfigNode.Value v in child.values)
+                {
+                    if (BodyContextKeys.Contains(v.name)) hasBodyContextKey = true;
+                    if (BodyIndexKeys.Contains(v.name)) hasBodyKey = true;
+                }
+
+                if (hasBodyContextKey && !hasBodyKey)
+                {
+                    var paramName = child.GetValue("name") ?? "unknown";
+                    return $"CC PARAM '{paramName}' has body-context field but is missing a required body target (targetBody/body)";
+                }
+
+                // Recurse into nested PARAM nodes.
+                var nested = FindMissingBodyReference(child, isConfiguredContract: true);
+                if (nested != null) return nested;
+            }
+
             return null;
         }
 

@@ -95,6 +95,13 @@ namespace LmpClient.Systems.ShareContracts
             // Tell the Harmony postfix that onContractsLoaded fired normally so it does not
             // fire it a second time.
             System.ContractsLoadedEventFired = true;
+
+            // Snapshot the server-offered Contract objects NOW, before StopIgnoringEvents() and
+            // before any other onContractsLoaded listener (e.g. ContractConfigurator) runs and
+            // potentially removes them.  The snapshot is passed to PostLoadContractCheck so it can
+            // detect and restore missing contracts in the first frame after load.
+            var serverOfferedSnapshot = SnapshotServerOfferedContracts();
+
             // Safe point to stop ignoring events: ContractSystem.OnLoad() has fully completed.
             // ContractOffered from new contract generation cannot fire until LockAcquire sets
             // generateContractIterations back to the default, which always happens after
@@ -105,15 +112,46 @@ namespace LmpClient.Systems.ShareContracts
             CreateUnavailableContractStubs();
             LogContractPreLoaderState();
             LogMissionControlTally();
-            HighLogic.fetch.StartCoroutine(PostLoadContractCheck());
+            HighLogic.fetch.StartCoroutine(PostLoadContractCheck(serverOfferedSnapshot));
+        }
+
+        /// <summary>
+        /// Takes a snapshot of every Contract object whose GUID is in the server's Offered set,
+        /// capturing them while they are definitely present (before any post-load listener can
+        /// remove them).  The snapshot is used by <see cref="PostLoadContractCheck"/> to detect
+        /// and restore contracts silently removed between <c>onContractsLoaded</c> and the first
+        /// Unity Update frame.
+        /// </summary>
+        private List<Contract> SnapshotServerOfferedContracts()
+        {
+            var cs = ContractSystem.Instance;
+            if (cs == null) return new List<Contract>();
+
+            var serverGuids = System.ServerOfferedContractGuids;
+            if (serverGuids == null || serverGuids.Count == 0) return new List<Contract>();
+
+            var snapshot = new List<Contract>();
+            foreach (var c in cs.Contracts)
+            {
+                if (c != null && serverGuids.Contains(c.ContractGuid.ToString()))
+                    snapshot.Add(c);
+            }
+
+            LunaLog.Log($"[ShareContracts]: Snapshotted {snapshot.Count} server-offered contract object(s) for post-load restoration guard.");
+            return snapshot;
         }
 
         /// <summary>
         /// Logs the Offered contract count once per frame for 5 frames after ContractsLoaded(),
         /// then at 1 s and 3 s, to pinpoint exactly when (and therefore which system) removes
         /// contracts that are present at the end of our onContractsLoaded handler.
+        ///
+        /// At frame +1 it also runs a restoration pass: any contract from
+        /// <paramref name="serverOfferedSnapshot"/> that is no longer present in
+        /// <c>ContractSystem.Instance.Contracts</c> is re-added with <c>IgnoreEvents</c>
+        /// temporarily enabled so the <c>ContractOffered</c> lock-guard cannot withdraw it again.
         /// </summary>
-        private static System.Collections.IEnumerator PostLoadContractCheck()
+        private System.Collections.IEnumerator PostLoadContractCheck(List<Contract> serverOfferedSnapshot)
         {
             var cs = ContractSystem.Instance;
             if (cs == null) yield break;
@@ -123,6 +161,15 @@ namespace LmpClient.Systems.ShareContracts
                 yield return null;
                 var offered = cs.Contracts.Count(c => c.ContractState == Contract.State.Offered);
                 LunaLog.Log($"[ShareContracts]: Post-load check frame +{i} — {offered} Offered contracts.");
+
+                if (i == 1 && serverOfferedSnapshot != null && serverOfferedSnapshot.Count > 0)
+                {
+                    RestoreMissingServerOfferedContracts(cs, serverOfferedSnapshot);
+                    // Re-count after restoration so subsequent frames reflect the corrected state.
+                    offered = cs.Contracts.Count(c => c.ContractState == Contract.State.Offered);
+                    LunaLog.Log($"[ShareContracts]: Post-load check frame +{i} after restoration — {offered} Offered contracts.");
+                }
+
                 if (offered == 0) yield break;
             }
 
@@ -136,6 +183,80 @@ namespace LmpClient.Systems.ShareContracts
             {
                 var offered = cs.Contracts.Count(c => c.ContractState == Contract.State.Offered);
                 LunaLog.Log($"[ShareContracts]: Post-load check +3 s — {offered} Offered contracts.");
+            }
+        }
+
+        /// <summary>
+        /// Restores server-offered contracts that were silently removed from
+        /// <c>ContractSystem.Instance.Contracts</c> between <c>onContractsLoaded</c> and the
+        /// first Unity Update frame.
+        ///
+        /// For each snapshotted contract that is no longer in <c>Contracts</c>:
+        /// <list type="bullet">
+        ///   <item>Searches <c>ContractsFinished</c> first — if found there the contract was
+        ///         legitimately completed/failed and no restoration is needed.</item>
+        ///   <item>Otherwise re-adds the original Contract object to <c>Contracts</c> with
+        ///         <c>IgnoreEvents = true</c> so the <c>ContractOffered</c> lock-guard cannot
+        ///         withdraw it immediately.</item>
+        /// </list>
+        /// </summary>
+        private void RestoreMissingServerOfferedContracts(ContractSystem cs, List<Contract> serverOfferedSnapshot)
+        {
+            // Build a set of GUIDs currently in Contracts (any state) for fast lookup.
+            var presentInContracts = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in cs.Contracts)
+            {
+                if (c != null) presentInContracts.Add(c.ContractGuid.ToString());
+            }
+
+            var restored = 0;
+            foreach (var contract in serverOfferedSnapshot)
+            {
+                var guid = contract.ContractGuid.ToString();
+
+                if (presentInContracts.Contains(guid))
+                    continue; // still present — nothing to do
+
+                // Check ContractsFinished: if the contract ended up there it completed/failed
+                // legitimately (e.g. ExplorationContract auto-completed because the milestone
+                // was already achieved in ProgressTracking). Log it and skip.
+                var inFinished = false;
+                foreach (var fc in cs.ContractsFinished)
+                {
+                    if (fc != null && fc.ContractGuid.ToString().Equals(guid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        inFinished = true;
+                        LunaLog.Log($"[ShareContracts]: Contract {guid} ({contract.GetType().Name}) is in ContractsFinished " +
+                                    $"(state: {fc.ContractState}) — this is correct, not restoring.");
+                        break;
+                    }
+                }
+
+                if (inFinished) continue;
+
+                // The contract was removed from Contracts and is NOT in ContractsFinished —
+                // it was silently discarded (e.g. by a slot-limit enforcement mechanism or a
+                // WithdrawAndRemoveContract call from a ContractOffered race). Re-add it.
+                LunaLog.LogWarning($"[ShareContracts]: Contract {guid} ({contract.GetType().Name}, " +
+                                   $"state: {contract.ContractState}) was silently removed from " +
+                                   $"ContractSystem.Contracts after load. Restoring.");
+
+                System.StartIgnoringEvents();
+                try
+                {
+                    cs.Contracts.Add(contract);
+                    restored++;
+                }
+                finally
+                {
+                    System.StopIgnoringEvents();
+                }
+            }
+
+            if (restored > 0)
+            {
+                LunaLog.Log($"[ShareContracts]: Restored {restored} silently-removed server Offered contract(s).");
+                GameEvents.Contract.onContractsListChanged.Fire();
             }
         }
 
@@ -399,12 +520,14 @@ namespace LmpClient.Systems.ShareContracts
             // ContractSystem.OnLoad() (scenario restore path) via ContractSystem_OnLoad patch.
             if (System.IgnoreEvents) return;
 
+            var guidStr = contract.ContractGuid.ToString();
+
             // Protect every contract that was part of the server's Offered snapshot.
             // ContractPreLoader (KSPCF) subscribes to onContractsLoaded and re-fires onOffered
             // for contracts already in the system so it can register them in its persistent list.
             // If we intercepted those events we would withdraw valid server contracts regardless
             // of lock status. Contracts not in this set are locally generated and handled normally.
-            if (System.ServerOfferedContractGuids.Contains(contract.ContractGuid.ToString()))
+            if (System.ServerOfferedContractGuids.Contains(guidStr))
                 return;
 
             if (!LockSystem.LockQuery.ContractLockBelongsToPlayer(SettingsSystem.CurrentSettings.PlayerName))
@@ -412,6 +535,9 @@ namespace LmpClient.Systems.ShareContracts
                 //We don't have the contract lock, so discard any contract KSP generated locally.
                 //New generation is already suppressed via generateContractIterations = 0; this
                 //is a safety net for any edge case where KSP still fires the event.
+                LunaLog.LogWarning($"[ShareContracts]: ContractOffered — withdrawing locally-generated contract " +
+                                   $"{guidStr} ({contract.GetType().Name}) — not in server Offered snapshot " +
+                                   $"({System.ServerOfferedContractGuids.Count} GUIDs tracked), no contract lock.");
                 WithdrawAndRemoveContract(contract);
                 return;
             }

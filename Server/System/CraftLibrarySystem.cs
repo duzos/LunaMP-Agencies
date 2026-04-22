@@ -66,11 +66,12 @@ namespace Server.System
                     var fileName = $"{data.Craft.CraftName}.craft";
                     var fullPath = Path.Combine(playerFolderType, fileName);
 
-                    if (FileHandler.FileExists(fullPath))
+                    var alreadyExisted = FileHandler.FileExists(fullPath);
+                    if (alreadyExisted)
                     {
                         LunaLog.Normal($"Overwriting craft {data.Craft.CraftName} ({ByteSize.FromBytes(data.Craft.NumBytes).KiloBytes}{ByteSize.KiloByteSymbol}) from: {client.PlayerName}.");
 
-                        //Send a msg to all the players so they remove the old copy
+                        //Tell all players to drop their cached copy before we replace the file on disk
                         var deleteMsg = ServerContext.ServerMessageFactory.CreateNewMessageData<CraftLibraryDeleteRequestMsgData>();
                         deleteMsg.CraftToDelete.CraftType = data.Craft.CraftType;
                         deleteMsg.CraftToDelete.CraftName = data.Craft.CraftName;
@@ -81,8 +82,10 @@ namespace Server.System
                     else
                     {
                         LunaLog.Normal($"Saving craft {data.Craft.CraftName} ({ByteSize.FromBytes(data.Craft.NumBytes).KiloBytes} KB) from: {client.PlayerName}.");
-                        FileHandler.WriteToFile(fullPath, data.Craft.Data, data.Craft.NumBytes);
                     }
+
+                    //Always persist the latest bytes, regardless of whether this is a new craft or an overwrite
+                    FileHandler.WriteToFile(fullPath, data.Craft.Data, data.Craft.NumBytes);
                     SendNotification(client.PlayerName);
                 }
                 else

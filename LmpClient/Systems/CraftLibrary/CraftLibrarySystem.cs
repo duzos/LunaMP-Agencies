@@ -71,7 +71,7 @@ namespace LmpClient.Systems.CraftLibrary
         /// </summary>
         public void RefreshOwnCrafts()
         {
-            Task.Run(RefreshOwnCraftsAsync);
+            OwnCrafts.Clear();
             
             LoadCraftsFromFolder(CommonUtil.CombinePaths(SaveFolder, "Ships", "VAB"), CraftType.Vab);
             LoadCraftsFromFolder(CommonUtil.CombinePaths(SaveFolder, "Ships", "SPH"), CraftType.Sph);

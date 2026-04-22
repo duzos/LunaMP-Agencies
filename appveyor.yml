@@ -141,7 +141,7 @@ deploy:
     Make sure to read [Create a server](https://github.com/LunaMultiplayer/LunaMultiplayer/wiki/Create-a-server) before creating a server.
    artifact: /LunaMultiplayer-(Client|Server)-.*\.zip/
    auth_token:
-    secure: cWdElZ0dY+JI561mo0WYuq+/rQ2rqYddc5lMUKJu1I+I8SylbnOykLR95GzrfJFhbcQtiUgKbn03Z9XeYKIycASrWJjx5IjkNUr37TGRQzI3QH1iT0TAmdjs21xoHofy
+    secure: cWdElZ0dY+JI561mo0WYumzsD6WYlaWcP4lrZ4ul0OVM+bQvnaDw70wa2Qs8PMWB/EQB5vVyBXzkKJ1MuIqeL3tiq+KznWSsJzvO6ogXq5axPdyGXU4SQxBKScHR9kTz
    draft: false
    prerelease: true
    force_update: true

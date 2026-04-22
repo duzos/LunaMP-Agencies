@@ -154,6 +154,7 @@ namespace Server
             LunaLog.Debug("Loading settings...");
             SettingsHandler.LoadSettings();
             SettingsHandler.ValidateDifficultySettings();
+            DefaultSettingsChecker.WarnIfUsingDefaults();
 
             if (GeneralSettings.SettingsStore.ModControl)
             {

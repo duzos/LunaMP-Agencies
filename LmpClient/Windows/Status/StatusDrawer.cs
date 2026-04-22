@@ -6,6 +6,7 @@ using LmpClient.Systems.SettingsSys;
 using LmpClient.Systems.Status;
 using LmpClient.Systems.Warp;
 using LmpClient.Windows.Admin;
+using LmpClient.Windows.Agency;
 using LmpClient.Windows.Chat;
 using LmpClient.Windows.CraftLibrary;
 using LmpClient.Windows.Debug;
@@ -60,6 +61,13 @@ namespace LmpClient.Windows.Status
             {
                 AdminWindow.Singleton.Display = GUILayout.Toggle(AdminWindow.Singleton.Display, AdminIcon, ToggleButtonStyle);
             }
+
+            // Agencies window toggle — labeled rather than iconified to keep
+            // the toolbar workable without adding new texture assets.
+            AgencyWindow.Singleton.DisplayToggle = GUILayout.Toggle(
+                AgencyWindow.Singleton.DisplayToggle,
+                new GUIContent("Agency", "Open the agency management window"),
+                ToggleButtonStyle);
 
             GUILayout.EndHorizontal();
         }

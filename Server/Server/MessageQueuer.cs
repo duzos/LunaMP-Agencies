@@ -1,6 +1,7 @@
 ﻿using LmpCommon.Message.Interface;
 using Server.Client;
 using Server.Context;
+using System;
 using System.Linq;
 
 namespace Server.Server
@@ -47,6 +48,30 @@ namespace Server.Server
             if (data == null) return;
 
             foreach (var otherClient in ServerContext.Clients.Values.Where(c => !Equals(c, exceptClient)))
+                SendToClient(otherClient, GenerateMessage<T>(data));
+        }
+
+        /// <summary>
+        /// Sends a message to all clients whose AgencyId matches <paramref name="agencyId"/>
+        /// except the one passed as parameter. Used to scope career-state updates to the
+        /// owning agency instead of broadcasting globally.
+        /// </summary>
+        public static void RelayMessageToAgency<T>(ClientStructure exceptClient, Guid agencyId, IMessageData data) where T : class, IServerMessageBase
+        {
+            if (data == null || agencyId == Guid.Empty) return;
+
+            foreach (var otherClient in ServerContext.Clients.Values.Where(c => c.AgencyId == agencyId && !Equals(c, exceptClient)))
+                SendToClient(otherClient, GenerateMessage<T>(data));
+        }
+
+        /// <summary>
+        /// Sends a message to every client in the given agency (including the sender).
+        /// </summary>
+        public static void SendMessageToAgency<T>(Guid agencyId, IMessageData data) where T : class, IServerMessageBase
+        {
+            if (data == null || agencyId == Guid.Empty) return;
+
+            foreach (var otherClient in ServerContext.Clients.Values.Where(c => c.AgencyId == agencyId))
                 SendToClient(otherClient, GenerateMessage<T>(data));
         }
 

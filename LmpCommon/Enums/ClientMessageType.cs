@@ -21,5 +21,6 @@
         Facility = 17,
         Screenshot = 18,
         ShareProgress = 19,
+        Agency = 20,
     }
 }

@@ -1,9 +1,9 @@
-﻿using LmpCommon.Message.Data.ShareProgress;
+using LmpCommon.Message.Data.ShareProgress;
 using LmpCommon.Message.Server;
+using Server.Agency;
 using Server.Client;
 using Server.Log;
 using Server.Server;
-using Server.System.Scenario;
 
 namespace Server.System
 {
@@ -11,11 +11,19 @@ namespace Server.System
     {
         public static void ReputationReceived(ClientStructure client, ShareProgressReputationMsgData data)
         {
-            LunaLog.Debug($"Reputation received: {data.Reputation} Reason: {data.Reason}");
+            var agency = AgencySystem.GetAgency(client.AgencyId);
+            if (agency == null)
+            {
+                LunaLog.Warning($"[Agency] Dropping reputation update from {client.PlayerName}: no agency assigned.");
+                return;
+            }
 
-            //send the reputation update to all other clients
-            MessageQueuer.RelayMessage<ShareProgressSrvMsg>(client, data);
-            ScenarioDataUpdater.WriteReputationDataToFile(data.Reputation);
+            LunaLog.Info($"[Agency] ReputationUpdate agency='{agency.Name}' player={client.PlayerName} before={agency.Reputation} after={data.Reputation} reason={data.Reason}");
+
+            AgencyScenarioUpdater.WriteReputation(agency.Id, data.Reputation);
+            AgencySystem.SetAgencyReputation(agency, data.Reputation, data.Reason ?? "reputation-update");
+
+            MessageQueuer.RelayMessageToAgency<ShareProgressSrvMsg>(client, agency.Id, data);
         }
     }
 }

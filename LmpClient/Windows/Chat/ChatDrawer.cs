@@ -1,6 +1,7 @@
 ﻿using LmpClient.Localization;
 using LmpClient.Systems.Chat;
 using LmpClient.Systems.PlayerColorSys;
+using LmpCommon.Message.Types;
 using UnityEngine;
 
 namespace LmpClient.Windows.Chat
@@ -8,6 +9,7 @@ namespace LmpClient.Windows.Chat
     public partial class ChatWindow
     {
         private static string _chatInputText = string.Empty;
+        private static ChatChannel _channel = ChatChannel.Global;
 
         protected override void DrawWindowContent(int windowId)
         {
@@ -15,10 +17,23 @@ namespace LmpClient.Windows.Chat
             GUILayout.BeginVertical();
             GUI.DragWindow(MoveRect);
 
+            DrawChannelBar();
             DrawChatMessageBox();
             DrawTextInput(pressedEnter);
             GUILayout.Space(5);
             GUILayout.EndVertical();
+        }
+
+        private static readonly string[] _channelLabels = { "Global", "Agency" };
+
+        private static void DrawChannelBar()
+        {
+            // Use a Toolbar so the two options render as a clean segmented
+            // control instead of two GUILayout.Toggle widgets that overlap
+            // when the chat window is narrow.
+            var idx = _channel == ChatChannel.Agency ? 1 : 0;
+            idx = GUILayout.Toolbar(idx, _channelLabels);
+            _channel = idx == 1 ? ChatChannel.Agency : ChatChannel.Global;
         }
 
         private static void DrawChatMessageBox()
@@ -45,7 +60,7 @@ namespace LmpClient.Windows.Chat
             {
                 if (!string.IsNullOrEmpty(_chatInputText))
                 {
-                    ChatSystem.Singleton.MessageSender.SendChatMsg(_chatInputText.Trim('\n'));
+                    ChatSystem.Singleton.MessageSender.SendChatMsg(_chatInputText.Trim('\n'), _channel);
                 }
 
                 _chatInputText = string.Empty;

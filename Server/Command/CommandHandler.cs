@@ -36,6 +36,21 @@ namespace Server.Command
             RegisterCommand("say", new SayCommand().Execute, "Broadcasts a message to clients");
             RegisterCommand("vessel", new VesselCommand().Execute, "Vessel related commands. Usage: /vessel info [name/guid]");
             RegisterCommand("backup", new BackupCommand().Execute, "Backup related commands. Usage: /backup [now]");
+
+            // Agency commands (fork feature)
+            RegisterCommand("listagencies", new ListAgenciesCommand().Execute, "Lists all agencies with summary info");
+            RegisterCommand("agencyinfo", new AgencyInfoCommand().Execute, "Dumps full info for one agency. Usage: /agencyinfo <name|id>");
+            RegisterCommand("createagency", new CreateAgencyCommand().Execute, "Creates an agency. Usage: /createagency <name> [ownerUniqueId] [ownerDisplayName]");
+            RegisterCommand("deleteagency", new DeleteAgencyCommand().Execute, "Deletes an agency. Usage: /deleteagency <name|id> [--force]");
+            RegisterCommand("renameagency", new RenameAgencyCommand().Execute, "Renames an agency. Usage: /renameagency <name|id> <newName>");
+            RegisterCommand("moveplayeragency", new MovePlayerAgencyCommand().Execute, "Moves a player into an agency. Usage: /moveplayeragency <playerUniqueId> <name|id>");
+            RegisterCommand("transferagencyowner", new TransferAgencyOwnerCommand().Execute, "Transfers agency ownership. Usage: /transferagencyowner <name|id> <newOwnerUniqueId>");
+            RegisterCommand("setagencyfunds", new SetAgencyFundsCommand().Execute, "Sets an agency's funds. Usage: /setagencyfunds <name|id> <value>");
+            RegisterCommand("setagencyscience", new SetAgencyScienceCommand().Execute, "Sets an agency's science. Usage: /setagencyscience <name|id> <value>");
+            RegisterCommand("setagencyrep", new SetAgencyReputationCommand().Execute, "Sets an agency's reputation. Usage: /setagencyrep <name|id> <value>");
+            RegisterCommand("unlockagencytech", new UnlockAgencyTechCommand().Execute, "Force-unlocks a tech node for an agency. Usage: /unlockagencytech <name|id> <techNodeId>");
+            RegisterCommand("completeagencycontract", new CompleteAgencyContractCommand().Execute, "Force-completes a contract for an agency. Usage: /completeagencycontract <name|id> <contractGuid>");
+            RegisterCommand("cancelagencycontract", new CancelAgencyContractCommand().Execute, "Force-cancels a contract for an agency. Usage: /cancelagencycontract <name|id> <contractGuid>");
         }
 
         /// <summary>

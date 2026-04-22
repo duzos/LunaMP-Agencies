@@ -1,5 +1,6 @@
 ﻿using LmpCommon;
 using LmpCommon.Time;
+using Server.Agency;
 using Server.Client;
 using Server.Command;
 using Server.Context;
@@ -89,6 +90,21 @@ namespace Server
                 VesselStoreSystem.LoadExistingVessels();
                 var scenariosCreated = ScenarioSystem.GenerateDefaultScenarios();
                 ScenarioStoreSystem.LoadExistingScenarios(scenariosCreated);
+                AgencyStore.LoadExistingAgencies();
+                AgencyScenarioStore.LoadAllExisting();
+                AgencyMigration.RunIfNeeded();
+
+                // Defensive: reconcile each agency's headline entity values
+                // (funds/sci/rep/techCount) with what the per-agency scenario
+                // ConfigNodes actually contain. This corrects any drift from
+                // earlier migrations or third-party edits to Universe files.
+                foreach (var a in AgencyStore.Agencies.Values)
+                {
+                    AgencyMigration.SyncEntityFromScenarios(a);
+                    AgencyStore.PersistAgency(a);
+                }
+
+                LunaLog.Info($"[Agency] Loaded {AgencyStore.Agencies.Count} agencies at startup.");
                 LmpPluginHandler.LoadPlugins();
                 WarpSystem.Reset();
                 TimeSystem.Reset();

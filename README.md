@@ -47,9 +47,93 @@
 - [x] Based on tasks instead of threads.
 - [x] Supports career and science modes (funds, science, strategies, etc are shared between all players).
 - [x] Cached [QuickLZ](http://www.quicklz.com) for fast compression without generating garbage.
-- [ ] Support for groups/companies inside career and science modes.
+- [x] Support for groups/companies inside career and science modes (this fork — see **Agencies** below).
 
 Please check the [wiki](../../wiki) to see how to [install](../../wiki/How-to-install-LMP), [run](../../wiki/How-to-play-with-LMP), [build](../../wiki/How-to-compile-LMP) or [debug](../../wiki/Debugging-in-Visual-studio) LMP among other things
+
+---
+
+### Fork feature: Agencies
+
+This fork adds **agency-based career progression**. Instead of one shared career pool,
+the server tracks multiple agencies (groups/companies) and every authenticated player
+belongs to exactly one of them. Each agency owns its own:
+
+- Funds, Science, and Reputation pools
+- Tech-tree unlocks and purchased parts
+- Chat channel (`Global` and `Agency` scopes, toggled in the chat window)
+
+**Contracts.** Every contract the server generates is visible to every player in Mission
+Control — you all browse the same list. The **first agency to accept a given contract becomes
+its owner**; it's locked to that agency from then on, and only the owning agency's members can
+progress or complete it. Rewards (funds, science, reputation) and penalties go only to the
+owning agency. Other agencies see the contract flagged as owned and cannot re-accept it.
+
+**Science across agencies.** Each agency's *total science pool* is fully private — spending
+science on tech nodes only deducts from your own agency. However, per-subject experiment caps
+(e.g. `temperature@KerbinSrfLandedLaunchPad`) are tracked server-wide: once any agency has
+maxed out a specific experiment/biome combo, other agencies running the same experiment get
+reduced science from it. This is **intentional** — it preserves each agency's career
+independence while still rewarding the "first to do it" agency with the lion's share of any
+given experiment, rather than letting every agency independently grind the same handful of
+biome checks for infinite science.
+
+**No-agency fallback.** Every player always has an agency. If they haven't created or joined one
+explicitly, the server auto-creates a private `Solo-<name>` agency on handshake so the "career is
+per-agency" invariant never breaks. Solo agencies are hidden from the Browse UI and auto-deleted
+when their sole member disconnects permanently.
+
+**Migration.** When the server first boots with pre-existing career state in
+`Universe/Scenarios/`, a one-off migration creates a *Default Agency* that inherits all of it
+(funds, science, reputation, tech tree, contracts). No data is lost on upgrade.
+
+**UI.** An Agency toolbar button opens a window with three tabs:
+
+- *Mine* — your agency's details, resources, members, owner-only actions (rename / kick /
+  transfer ownership), and inter-agency resource transfer (send funds or science to another agency).
+- *Browse* — every public agency on the server with a "Request to join" button.
+- *Create* — name and submit a new agency; you automatically become its owner.
+
+The in-game admin window (press Admin, enter admin password) gets a new **Agencies** tab with:
+
+- List / inspect / rename / force-delete agencies
+- Move any player into any agency
+- Force-set any player as an agency's owner
+- Cheat controls: set funds / science / reputation, force-unlock a tech node,
+  force-complete or cancel a specific contract
+
+**Console commands.** For ops without an in-game client the server console exposes the same
+operations:
+
+```
+/listagencies                              List all agencies with summary info
+/agencyinfo <name|id>                      Dump full info for one agency
+/createagency <name> [ownerUid] [display]  Create an agency from the console
+/deleteagency <name|id> [--force]          Delete an agency
+/renameagency <name|id> <newName>
+/moveplayeragency <playerUid> <name|id>
+/transferagencyowner <name|id> <newOwnerUid>
+/setagencyfunds <name|id> <value>          Cheat funds
+/setagencyscience <name|id> <value>        Cheat science
+/setagencyrep <name|id> <value>            Cheat reputation
+/unlockagencytech <name|id> <techNodeId>   Force-unlock a tech node
+/completeagencycontract <name|id> <guid>
+/cancelagencycontract <name|id> <guid>
+```
+
+**Agency-change UX.** Creating an agency, being approved into one, being kicked, leaving,
+or being admin-moved all force a clean reconnect — the client is disconnected with a
+human-readable reason ("You joined 'Kerbin Dynamics'. Reconnecting..."), re-authenticates,
+and loads the new agency's career state on re-entry. This is necessary because KSP's stock
+scenario modules cannot cleanly swap career state at runtime (the tech tree in particular
+has no "un-unlock" API).
+
+**Persistence.** Each agency lives in
+`Universe/Agencies/<guid>/meta.txt` (name, owner, members, headline funds/sci/rep) plus a
+`Universe/Agencies/<guid>/Scenarios/` folder containing the agency's own copy of Funding,
+Reputation, ResearchAndDevelopment, ContractSystem, and related career modules. Non-career
+scenarios (DeployedScience, CommNetScenario, etc.) remain in the global `Universe/Scenarios/`
+folder and are shared.
 
 ---
 ### Troubleshooting:

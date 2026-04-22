@@ -281,6 +281,9 @@ namespace LmpClient.Network
                 case ServerMessageType.Screenshot:
                     ScreenshotSystem.Singleton.EnqueueMessage(msg);
                     break;
+                case ServerMessageType.Agency:
+                    LmpClient.Systems.Agency.AgencySystem.Singleton.EnqueueMessage(msg);
+                    break;
                 default:
                     LunaLog.LogError($"[LMP]: Unhandled Message type {msg.MessageType}");
                     break;

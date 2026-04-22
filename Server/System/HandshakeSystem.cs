@@ -2,6 +2,7 @@
 using LmpCommon.Message.Data.Handshake;
 using LmpCommon.Message.Data.PlayerConnection;
 using LmpCommon.Message.Server;
+using Server.Agency;
 using Server.Client;
 using Server.Context;
 using Server.Log;
@@ -37,9 +38,19 @@ namespace Server.System
 
                 LmpPluginHandler.FireOnClientAuthenticated(client);
 
+                // Resolve or create this player's agency so career state is
+                // always keyed to exactly one agency. See AgencySystem for the
+                // no-agency fallback policy (solo implicit agency).
+                AgencySystem.AssignAgencyOnConnect(client);
+                LunaLog.Info($"[Agency] Connect player={client.PlayerName}({client.UniqueIdentifier}) agency={client.AgencyId}");
+
                 LunaLog.Normal($"Client {data.PlayerName} ({data.UniqueIdentifier}) handshake successful, LMP Version: {client.LmpVersion}, KSP Version: {client.KspVersion}");
 
                 HandshakeSystemSender.SendHandshakeReply(client, HandshakeReply.HandshookSuccessfully, "success");
+
+                // Push agency state before scenarios so the client knows its
+                // identity before career data arrives.
+                AgencyNetwork.SendSyncAllTo(client);
 
                 var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<PlayerConnectionJoinMsgData>();
                 msgData.PlayerName = client.PlayerName;

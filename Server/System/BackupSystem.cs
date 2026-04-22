@@ -1,4 +1,5 @@
-﻿using Server.Context;
+﻿using Server.Agency;
+using Server.Context;
 using Server.Events;
 using Server.Log;
 using Server.Settings.Structures;
@@ -43,6 +44,8 @@ namespace Server.System
                 WarpSystem.BackupSubspaces();
                 TimeSystem.BackupStartTime();
                 ScenarioStoreSystem.BackupScenarios();
+                AgencyStore.PersistAll();
+                AgencyScenarioStore.BackupAll();
                 LunaLog.Debug("Backups done");
             }
         }

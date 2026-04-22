@@ -2,6 +2,7 @@
 using KSP.UI.Screens;
 using LmpClient.Base;
 using LmpClient.Events;
+using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Reflection;
@@ -32,7 +33,7 @@ namespace LmpClient.Systems.KerbalSys
             {
                 if (_astronautComplex == null)
                 {
-                    _astronautComplex = Object.FindObjectOfType<AstronautComplex>();
+                    _astronautComplex = UnityEngine.Object.FindObjectOfType<AstronautComplex>();
                 }
                 return _astronautComplex;
             }
@@ -202,23 +203,50 @@ namespace LmpClient.Systems.KerbalSys
         }
 
         /// <summary>
-        /// Call this method to refresh the crews in the vessel spawn, vessel editor and astronaut complex
+        /// Call this method to refresh the crews in the vessel spawn, vessel editor and astronaut complex.
+        ///
+        /// Wrapped in try/catch because KSP's <c>CrewAssignmentDialog.ButtonClear</c>
+        /// and <c>ButtonFill</c> can NRE inside <c>BaseCrewAssignmentDialog.GetManifest(true)</c>
+        /// when the dialog singleton exists but its internal manifest/roster
+        /// isn't initialised yet (observed during scene transitions and editor
+        /// reloads — reproducible on any modpack heavy enough to slow initial
+        /// UI setup). An uncaught exception here would propagate up
+        /// <c>SystemsHandler.Update</c> and force-disconnect the client for a
+        /// cosmetic UI refresh, so we swallow and log instead.
         /// </summary>
         public void RefreshCrewDialog()
         {
-            if (CrewAssignmentDialog.Instance != null)
+            try
             {
-                CrewAssignmentDialog.Instance.RefreshCrewLists(CrewAssignmentDialog.Instance.GetManifest(), false, true);
-                CrewAssignmentDialog.Instance.ButtonClear();
-                CrewAssignmentDialog.Instance.ButtonFill();
+                if (CrewAssignmentDialog.Instance != null)
+                {
+                    var manifest = CrewAssignmentDialog.Instance.GetManifest();
+                    if (manifest != null)
+                    {
+                        CrewAssignmentDialog.Instance.RefreshCrewLists(manifest, false, true);
+                        CrewAssignmentDialog.Instance.ButtonClear();
+                        CrewAssignmentDialog.Instance.ButtonFill();
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                LunaLog.LogWarning($"[LMP]: CrewAssignmentDialog refresh threw, skipping: {e.GetType().Name} at {e.StackTrace?.Split('\n')[0]?.Trim()}");
             }
 
-            if (AstronautComplex != null)
+            try
             {
-                InitiateGui.Invoke(AstronautComplex, null);
-                CreateAvailableList.Invoke(AstronautComplex, null);
-                CreateAssignedList.Invoke(AstronautComplex, null);
-                CreateKiaList.Invoke(AstronautComplex, null);
+                if (AstronautComplex != null)
+                {
+                    InitiateGui.Invoke(AstronautComplex, null);
+                    CreateAvailableList.Invoke(AstronautComplex, null);
+                    CreateAssignedList.Invoke(AstronautComplex, null);
+                    CreateKiaList.Invoke(AstronautComplex, null);
+                }
+            }
+            catch (Exception e)
+            {
+                LunaLog.LogWarning($"[LMP]: AstronautComplex refresh threw, skipping: {e.GetType().Name} at {e.StackTrace?.Split('\n')[0]?.Trim()}");
             }
         }
 

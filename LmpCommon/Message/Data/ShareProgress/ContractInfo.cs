@@ -13,6 +13,14 @@ namespace LmpCommon.Message.Data.ShareProgress
         public int NumBytes;
         public byte[] Data = new byte[0];
 
+        /// <summary>
+        /// Agency that owns this contract. Guid.Empty means unowned
+        /// (visible to all agencies, acceptable by the first agency to try).
+        /// Set on server when a contract is first accepted; relayed to all
+        /// clients so listings show ownership consistently.
+        /// </summary>
+        public Guid OwningAgencyId = Guid.Empty;
+
         public ContractInfo() { }
 
         /// <summary>
@@ -21,6 +29,7 @@ namespace LmpCommon.Message.Data.ShareProgress
         public ContractInfo(ContractInfo copyFrom)
         {
             ContractGuid = copyFrom.ContractGuid;
+            OwningAgencyId = copyFrom.OwningAgencyId;
             NumBytes = copyFrom.NumBytes;
             if (Data.Length < NumBytes)
                 Data = new byte[NumBytes];
@@ -31,6 +40,7 @@ namespace LmpCommon.Message.Data.ShareProgress
         public void Serialize(NetOutgoingMessage lidgrenMsg)
         {
             GuidUtil.Serialize(ContractGuid, lidgrenMsg);
+            GuidUtil.Serialize(OwningAgencyId, lidgrenMsg);
 
             Common.ThreadSafeCompress(this, ref Data, ref NumBytes);
 
@@ -41,6 +51,7 @@ namespace LmpCommon.Message.Data.ShareProgress
         public void Deserialize(NetIncomingMessage lidgrenMsg)
         {
             ContractGuid = GuidUtil.Deserialize(lidgrenMsg);
+            OwningAgencyId = GuidUtil.Deserialize(lidgrenMsg);
 
             NumBytes = lidgrenMsg.ReadInt32();
             if (Data.Length < NumBytes)
@@ -53,7 +64,7 @@ namespace LmpCommon.Message.Data.ShareProgress
 
         public int GetByteCount()
         {
-            return GuidUtil.ByteSize + sizeof(int) + sizeof(byte) * NumBytes;
+            return GuidUtil.ByteSize * 2 + sizeof(int) + sizeof(byte) * NumBytes;
         }
     }
 }

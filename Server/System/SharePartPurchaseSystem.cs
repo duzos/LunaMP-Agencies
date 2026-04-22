@@ -1,9 +1,9 @@
-﻿using LmpCommon.Message.Data.ShareProgress;
+using LmpCommon.Message.Data.ShareProgress;
 using LmpCommon.Message.Server;
+using Server.Agency;
 using Server.Client;
 using Server.Log;
 using Server.Server;
-using Server.System.Scenario;
 
 namespace Server.System
 {
@@ -11,11 +11,18 @@ namespace Server.System
     {
         public static void PurchaseReceived(ClientStructure client, ShareProgressPartPurchaseMsgData data)
         {
-            LunaLog.Debug($"Part purchased: {data.PartName} Tech: {data.TechId}");
+            var agency = AgencySystem.GetAgency(client.AgencyId);
+            if (agency == null)
+            {
+                LunaLog.Warning($"[Agency] Dropping part purchase from {client.PlayerName}: no agency assigned.");
+                return;
+            }
 
-            //send the part purchase to all other clients
-            MessageQueuer.RelayMessage<ShareProgressSrvMsg>(client, data);
-            ScenarioDataUpdater.WritePartPurchaseDataToFile(data);
+            LunaLog.Info($"[Agency] PartPurchase agency='{agency.Name}' player={client.PlayerName} tech='{data.TechId}' part='{data.PartName}'");
+
+            AgencyScenarioUpdater.AppendPartPurchase(agency.Id, data.TechId, data.PartName);
+
+            MessageQueuer.RelayMessageToAgency<ShareProgressSrvMsg>(client, agency.Id, data);
         }
     }
 }

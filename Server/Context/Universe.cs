@@ -1,4 +1,5 @@
 ﻿using ByteSizeLib;
+using Server.Agency;
 using Server.Log;
 using Server.System;
 using System;
@@ -60,6 +61,8 @@ namespace Server.Context
                 FileHandler.FolderCreate(ScenarioSystem.ScenariosPath);
             if (!FileHandler.FolderExists(VesselStoreSystem.VesselsPath))
                 FileHandler.FolderCreate(VesselStoreSystem.VesselsPath);
+            if (!FileHandler.FolderExists(AgencyStore.AgenciesPath))
+                FileHandler.FolderCreate(AgencyStore.AgenciesPath);
         }
     }
 }

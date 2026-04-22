@@ -3,10 +3,12 @@
 *.mdb
 *.nupkg
 
+.claude/
 .fleet/
 .idea/
 .vs/
 .vscode/
+Artifacts/
 
 **/bin/
 **/obj/

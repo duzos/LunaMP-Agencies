@@ -1,6 +1,7 @@
-﻿using LmpCommon.Enums;
+using LmpCommon.Enums;
 using LmpCommon.Message.Data.Scenario;
 using LmpCommon.Message.Server;
+using Server.Agency;
 using Server.Client;
 using Server.Context;
 using Server.Log;
@@ -8,6 +9,7 @@ using Server.Properties;
 using Server.Server;
 using Server.Settings.Structures;
 using Server.System.Scenario;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -66,25 +68,72 @@ namespace Server.System
             return scenarioFilesCreated;
         }
 
+        /// <summary>
+        /// Modules that are stored per-agency. For a career-mode client, these
+        /// come from the client's agency; all other modules come from the
+        /// global store.
+        /// </summary>
+        private static readonly HashSet<string> AgencyScopedModules = new HashSet<string>(AgencyMigration.AgencyScopedModuleNames);
+
         public static void SendScenarioModules(ClientStructure client)
         {
-            var scenarioDataArray = ScenarioStoreSystem.CurrentScenarios.Keys.Select(s =>
+            // Deduplicate module names: take the agency's copy when available,
+            // fall back to the global copy otherwise.
+            var agencyDict = client.AgencyId != global::System.Guid.Empty
+                ? AgencyScenarioStore.GetOrCreateDict(client.AgencyId)
+                : null;
+
+            var names = new HashSet<string>(ScenarioStoreSystem.CurrentScenarios.Keys);
+            if (agencyDict != null)
             {
-                var scenarioConfigNode = ScenarioStoreSystem.GetScenarioInConfigNodeFormat(s);
-                var serializedData = Encoding.UTF8.GetBytes(scenarioConfigNode);
-                return new ScenarioInfo
+                foreach (var k in agencyDict.Keys) names.Add(k);
+            }
+
+            var list = new List<ScenarioInfo>(names.Count);
+            foreach (var moduleName in names)
+            {
+                string text = null;
+
+                if (agencyDict != null && AgencyScopedModules.Contains(moduleName)
+                    && agencyDict.TryGetValue(moduleName, out var agencyNode) && agencyNode != null)
+                {
+                    text = agencyNode.ToString();
+                }
+                else
+                {
+                    text = ScenarioStoreSystem.GetScenarioInConfigNodeFormat(moduleName);
+                }
+
+                if (string.IsNullOrEmpty(text)) continue;
+
+                var serializedData = Encoding.UTF8.GetBytes(text);
+                list.Add(new ScenarioInfo
                 {
                     Data = serializedData,
                     NumBytes = serializedData.Length,
-                    Module = Path.GetFileNameWithoutExtension(s)
-                };
-            }).ToArray();
+                    Module = Path.GetFileNameWithoutExtension(moduleName),
+                });
+            }
 
             var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<ScenarioDataMsgData>();
-            msgData.ScenariosData = scenarioDataArray;
-            msgData.ScenarioCount = scenarioDataArray.Length;
+            msgData.ScenariosData = list.ToArray();
+            msgData.ScenarioCount = list.Count;
 
+            LunaLog.Info($"[Agency] Sending {list.Count} scenario modules to {client.PlayerName} agency={client.AgencyId}");
             MessageQueuer.SendToClient<ScenarioSrvMsg>(client, msgData);
+
+            // KSP's scenario-load path is additive: HighLogic.CurrentGame.scenarios.Add
+            // on the client does not displace any existing module KSP loaded from
+            // persistent.sfs, so Funding.Instance can keep a stale local value after
+            // reconnect. Push the agency's career state as ShareProgress* deltas in
+            // addition — the client handler calls Funding.Instance.SetFunds(...) which
+            // is authoritative regardless of what the scenario loader produced.
+            var agency = AgencySystem.GetAgency(client.AgencyId);
+            if (agency != null)
+            {
+                AgencyFanout.PushCareerToClient(client, agency);
+                LunaLog.Info($"[Agency] Pushed career-state delta to {client.PlayerName}: funds={agency.Funds} sci={agency.Science} rep={agency.Reputation}");
+            }
         }
 
 
@@ -92,10 +141,27 @@ namespace Server.System
         {
             var data = (ScenarioDataMsgData)messageData;
             LunaLog.Debug($"Saving {data.ScenarioCount} scenario modules from {client.PlayerName}");
+
+            // The client runs a 30s periodic routine that re-uploads every
+            // loaded ScenarioModule. With the per-agency model, blindly
+            // accepting agency-scoped modules lets stale client state (for
+            // example an uninitialised Funding.Instance reading as 0) clobber
+            // the authoritative server copy the next time the player is in a
+            // different agency than their cached KSP state reflects.
+            //
+            // For agency-scoped modules the incremental deltas already arrive
+            // via the ShareProgress* messages, so we drop the uploads.
             for (var i = 0; i < data.ScenarioCount; i++)
             {
+                var moduleName = data.ScenariosData[i].Module;
+                if (AgencyScopedModules.Contains(moduleName))
+                {
+                    LunaLog.Debug($"[Agency] Ignoring scenario upload for agency-scoped module '{moduleName}' from {client.PlayerName}");
+                    continue;
+                }
+
                 var scenarioAsConfigNode = Encoding.UTF8.GetString(data.ScenariosData[i].Data, 0, data.ScenariosData[i].NumBytes);
-                ScenarioDataUpdater.RawConfigNodeInsertOrUpdate(data.ScenariosData[i].Module, scenarioAsConfigNode);
+                ScenarioDataUpdater.RawConfigNodeInsertOrUpdate(moduleName, scenarioAsConfigNode);
             }
         }
     }

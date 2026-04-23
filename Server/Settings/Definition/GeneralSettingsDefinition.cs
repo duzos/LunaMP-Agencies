@@ -80,5 +80,19 @@ namespace Server.Settings.Definition
 
         [XmlComment(Value = "Max number of parts that a vessel can have when spawning")]
         public int MaxVesselParts { get; set; } = 200;
+
+        // ---- Agencies fork ----
+
+        [XmlComment(Value = "If true, per-subject science caps (thermometer@KerbinSrfLandedLaunchPad etc) " +
+                            "are tracked separately per agency so each agency independently grinds the " +
+                            "same experiments. If false (default), the first agency to max a subject " +
+                            "also consumes the cap for all other agencies. Agencies-feature only.")]
+        public bool AgencyExperimentsPerAgency { get; set; } = false;
+
+        [XmlComment(Value = "If true, the kerbal roster (astronaut complex) is tracked per agency. " +
+                            "Each agency has its own pool of pilots/engineers/scientists, and recruits " +
+                            "into one agency do not appear in another. If false (default), the kerbal " +
+                            "pool is shared globally across all agencies. Agencies-feature only.")]
+        public bool AgencyKerbalsPerAgency { get; set; } = false;
     }
 }

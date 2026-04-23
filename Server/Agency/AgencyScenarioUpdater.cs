@@ -112,6 +112,33 @@ namespace Server.Agency
             }
         }
 
+        /// <summary>
+        /// Upserts a Science subject (per-experiment/biome cap record) into
+        /// the agency's ResearchAndDevelopment scenario. Mirrors the global
+        /// <c>ScenarioDataUpdater.WriteScienceSubjectDataToFile</c> behaviour.
+        /// Called when the agency config flag <c>AgencyExperimentsPerAgency</c>
+        /// is true.
+        /// </summary>
+        public static void WriteScienceSubject(Guid agencyId, byte[] subjectBytes, int numBytes)
+        {
+            if (subjectBytes == null || numBytes <= 0) return;
+
+            lock (AgencyScenarioStore.SemaphoreFor(agencyId, "ResearchAndDevelopment"))
+            {
+                var rd = AgencyScenarioStore.GetOrNull(agencyId, "ResearchAndDevelopment");
+                if (rd == null) return;
+
+                var received = new ConfigNode(Encoding.UTF8.GetString(subjectBytes, 0, numBytes)) { Parent = rd, Name = "Science" };
+                if (received.IsEmpty()) return;
+
+                var existing = rd.GetNodes("Science").Select(v => v.Value)
+                    .FirstOrDefault(n => n.GetValue("id")?.Value == received.GetValue("id")?.Value);
+
+                if (existing != null) rd.ReplaceNode(existing, received);
+                else rd.AddNode(received);
+            }
+        }
+
         public static bool AppendPartPurchase(Guid agencyId, string techId, string partName)
         {
             if (string.IsNullOrEmpty(techId) || string.IsNullOrEmpty(partName)) return false;

@@ -1,10 +1,12 @@
-﻿using LmpCommon.Message.Data.Kerbal;
+using LmpCommon.Message.Data.Kerbal;
 using LmpCommon.Message.Server;
+using Server.Agency;
 using Server.Client;
 using Server.Context;
 using Server.Log;
 using Server.Properties;
 using Server.Server;
+using Server.Settings.Structures;
 using System.IO;
 using System.Linq;
 
@@ -24,17 +26,48 @@ namespace Server.System
 
         public static void HandleKerbalProto(ClientStructure client, KerbalProtoMsgData data)
         {
-            LunaLog.Debug($"Saving kerbal {data.Kerbal.KerbalName} from {client.PlayerName}");
+            if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty)
+            {
+                // Write into the agency's private kerbal folder and only relay
+                // to members of that agency. Ensures agency rosters stay
+                // isolated — recruits, promotions, and deaths don't cross over.
+                var dir = AgencyKerbalStore.KerbalsPath(client.AgencyId);
+                if (!FileHandler.FolderExists(dir))
+                    FileHandler.FolderCreate(dir);
 
-            var path = Path.Combine(KerbalsPath, $"{data.Kerbal.KerbalName}.txt");
-            FileHandler.WriteToFile(path, data.Kerbal.KerbalData, data.Kerbal.NumBytes);
+                var path = AgencyKerbalStore.KerbalPath(client.AgencyId, data.Kerbal.KerbalName);
+                FileHandler.WriteToFile(path, data.Kerbal.KerbalData, data.Kerbal.NumBytes);
+                LunaLog.Debug($"[Agency] Saved kerbal '{data.Kerbal.KerbalName}' for agency {client.AgencyId} (from {client.PlayerName})");
+
+                MessageQueuer.RelayMessageToAgency<KerbalSrvMsg>(client, client.AgencyId, data);
+                return;
+            }
+
+            LunaLog.Debug($"Saving kerbal {data.Kerbal.KerbalName} from {client.PlayerName}");
+            var globalPath = Path.Combine(KerbalsPath, $"{data.Kerbal.KerbalName}.txt");
+            FileHandler.WriteToFile(globalPath, data.Kerbal.KerbalData, data.Kerbal.NumBytes);
 
             MessageQueuer.RelayMessage<KerbalSrvMsg>(client, data);
         }
 
         public static void HandleKerbalsRequest(ClientStructure client)
         {
-            var kerbalFiles = FileHandler.GetFilesInPath(KerbalsPath);
+            string[] kerbalFiles;
+
+            if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty)
+            {
+                // Seed default roster on first access so new agencies (or
+                // agencies from before the flag flipped) aren't empty.
+                AgencyKerbalStore.EnsureDefaultRoster(client.AgencyId);
+                kerbalFiles = FileHandler.GetFilesInPath(AgencyKerbalStore.KerbalsPath(client.AgencyId));
+                LunaLog.Debug($"[Agency] Sending {client.PlayerName} {kerbalFiles.Length} kerbals from agency {client.AgencyId}");
+            }
+            else
+            {
+                kerbalFiles = FileHandler.GetFilesInPath(KerbalsPath);
+                LunaLog.Debug($"Sending {client.PlayerName} {kerbalFiles.Length} kerbals...");
+            }
+
             var kerbalsData = kerbalFiles.Select(k =>
             {
                 var kerbalData = FileHandler.ReadFile(k);
@@ -45,7 +78,6 @@ namespace Server.System
                     KerbalName = Path.GetFileNameWithoutExtension(k)
                 };
             });
-            LunaLog.Debug($"Sending {client.PlayerName} {kerbalFiles.Length} kerbals...");
 
             var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<KerbalReplyMsgData>();
             msgData.Kerbals = kerbalsData.ToArray();
@@ -58,9 +90,16 @@ namespace Server.System
         {
             var kerbalToRemove = message.KerbalName;
 
+            if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty)
+            {
+                LunaLog.Debug($"[Agency] Removing kerbal {kerbalToRemove} from agency {client.AgencyId} (by {client.PlayerName})");
+                FileHandler.FileDelete(AgencyKerbalStore.KerbalPath(client.AgencyId, kerbalToRemove));
+                MessageQueuer.RelayMessageToAgency<KerbalSrvMsg>(client, client.AgencyId, message);
+                return;
+            }
+
             LunaLog.Debug($"Removing kerbal {kerbalToRemove} from {client.PlayerName}");
             FileHandler.FileDelete(Path.Combine(KerbalsPath, $"{kerbalToRemove}.txt"));
-
             MessageQueuer.RelayMessage<KerbalSrvMsg>(client, message);
         }
     }

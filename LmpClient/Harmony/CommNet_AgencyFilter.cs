@@ -26,8 +26,16 @@ namespace LmpClient.Harmony
     /// to no-op (vanilla behaviour). Look for the
     /// <c>[CommNet_AgencyFilter]: patch attached</c> log line on first
     /// connect to confirm it's active.
+    ///
+    /// Intentionally NOT decorated with <c>[HarmonyPatch]</c>: the attribute
+    /// would make <c>HarmonyInstance.PatchAll(Assembly)</c> try to attach
+    /// this class via reflection, but the target method signature varies
+    /// across KSP versions and we have to look it up dynamically. PatchAll
+    /// would throw <c>ArgumentException: Undefined target method</c> and
+    /// abort the rest of <see cref="Base.HarmonyPatcher.Awake"/>, leaving
+    /// LMP half-initialised (no toolbar button etc.). We attach
+    /// imperatively instead via <see cref="TryAttach"/>.
     /// </summary>
-    [HarmonyPatch]
     public static class CommNet_AgencyFilter
     {
         private static MethodBase _setNodeConnection;

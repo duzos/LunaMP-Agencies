@@ -37,6 +37,14 @@ namespace Server.Message
             msgData.MaxScreenshotHeight = ScreenshotSettings.SettingsStore.MaxScreenshotHeight;
             msgData.MinCraftLibraryRequestIntervalMs = CraftSettings.SettingsStore.MinCraftLibraryRequestIntervalMs;
             msgData.PrintMotdInChat = GeneralSettings.SettingsStore.PrintMotdInChat;
+            // Agencies-feature flags. Sent so the client can adjust UI/Harmony
+            // patches at runtime (e.g. activate the per-agency CommNet filter
+            // only when the server has opted in).
+            msgData.AgencyExperimentsPerAgency = GeneralSettings.SettingsStore.AgencyExperimentsPerAgency;
+            msgData.AgencyKerbalsPerAgency = GeneralSettings.SettingsStore.AgencyKerbalsPerAgency;
+            msgData.AgencyScansatPerAgency = GeneralSettings.SettingsStore.AgencyScansatPerAgency;
+            msgData.AgencyContractsPoolPerAgency = GeneralSettings.SettingsStore.AgencyContractsPoolPerAgency;
+            msgData.AgencyCommNetPerAgency = GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
 
             if (GeneralSettings.SettingsStore.GameDifficulty == GameDifficulty.Custom && GameplaySettings.SettingsStore != null)
             {

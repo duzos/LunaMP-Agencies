@@ -10,6 +10,11 @@ namespace LmpClient.Base
         {
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
             PatchOptionalMods();
+            // Per-agency CommNet uses imperative attachment so it can search
+            // for a method signature that varies across KSP versions and
+            // silently skip if not found. The HarmonyPatch attribute pattern
+            // would throw on missing target.
+            LmpClient.Harmony.CommNet_AgencyFilter.TryAttach(HarmonyInstance);
         }
 
         /// <summary>

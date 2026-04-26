@@ -52,6 +52,11 @@ namespace Server.System
                 // identity before career data arrives.
                 AgencyNetwork.SendSyncAllTo(client);
 
+                // Push the vessel→agency map so the per-agency CommNet
+                // filter has every existing vessel tagged before any
+                // VesselProto messages start arriving.
+                AgencyNetwork.SendVesselMapSyncTo(client);
+
                 var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<PlayerConnectionJoinMsgData>();
                 msgData.PlayerName = client.PlayerName;
                 MessageQueuer.RelayMessage<PlayerConnectionSrvMsg>(client, msgData);

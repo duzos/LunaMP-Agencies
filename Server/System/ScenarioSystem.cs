@@ -73,7 +73,12 @@ namespace Server.System
         /// come from the client's agency; all other modules come from the
         /// global store.
         /// </summary>
-        private static readonly HashSet<string> AgencyScopedModules = new HashSet<string>(AgencyMigration.AgencyScopedModuleNames);
+        /// <summary>
+        /// Modules whose state is mutated through ShareProgress* delta
+        /// messages — client uploads of these must be dropped to avoid
+        /// stale local KSP state clobbering the server.
+        /// </summary>
+        private static readonly HashSet<string> DeltaManagedModules = new HashSet<string>(AgencyMigration.DeltaManagedModules);
 
         public static void SendScenarioModules(ClientStructure client)
         {
@@ -82,6 +87,10 @@ namespace Server.System
             var agencyDict = client.AgencyId != global::System.Guid.Empty
                 ? AgencyScenarioStore.GetOrCreateDict(client.AgencyId)
                 : null;
+
+            // Re-read the active set on every send so config flags toggled
+            // mid-server-life take effect on the next client connect.
+            var agencyScoped = AgencyMigration.GetActiveAgencyScopedModules();
 
             var names = new HashSet<string>(ScenarioStoreSystem.CurrentScenarios.Keys);
             if (agencyDict != null)
@@ -94,7 +103,7 @@ namespace Server.System
             {
                 string text = null;
 
-                if (agencyDict != null && AgencyScopedModules.Contains(moduleName)
+                if (agencyDict != null && agencyScoped.Contains(moduleName)
                     && agencyDict.TryGetValue(moduleName, out var agencyNode) && agencyNode != null)
                 {
                     text = agencyNode.ToString();
@@ -151,16 +160,35 @@ namespace Server.System
             //
             // For agency-scoped modules the incremental deltas already arrive
             // via the ShareProgress* messages, so we drop the uploads.
+            // Re-read the active snapshot set so config flag toggles take
+            // effect mid-life. Computed once per upload, not per module.
+            var snapshotManaged = AgencyMigration.GetActiveSnapshotManagedModules();
+
             for (var i = 0; i < data.ScenarioCount; i++)
             {
                 var moduleName = data.ScenariosData[i].Module;
-                if (AgencyScopedModules.Contains(moduleName))
+
+                // Delta-managed: server is authoritative via ShareProgress*
+                // messages. Drop the client's snapshot.
+                if (DeltaManagedModules.Contains(moduleName))
                 {
-                    LunaLog.Debug($"[Agency] Ignoring scenario upload for agency-scoped module '{moduleName}' from {client.PlayerName}");
+                    LunaLog.Debug($"[Agency] Ignoring scenario upload for delta-managed module '{moduleName}' from {client.PlayerName}");
                     continue;
                 }
 
                 var scenarioAsConfigNode = Encoding.UTF8.GetString(data.ScenariosData[i].Data, 0, data.ScenariosData[i].NumBytes);
+
+                // Snapshot-managed: no delta channel, so route the upload
+                // into the player's agency scenario store. Preserves
+                // SCANsat coverage / strategy state / facility upgrades
+                // per agency.
+                if (snapshotManaged.Contains(moduleName) && client.AgencyId != global::System.Guid.Empty)
+                {
+                    LunaLog.Debug($"[Agency] Storing scenario upload '{moduleName}' from {client.PlayerName} into agency {client.AgencyId}");
+                    AgencyScenarioUpdater.RawConfigNodeInsertOrUpdate(client.AgencyId, moduleName, scenarioAsConfigNode);
+                    continue;
+                }
+
                 ScenarioDataUpdater.RawConfigNodeInsertOrUpdate(moduleName, scenarioAsConfigNode);
             }
         }

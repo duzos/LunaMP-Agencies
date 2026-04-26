@@ -94,5 +94,23 @@ namespace Server.Settings.Definition
                             "into one agency do not appear in another. If false (default), the kerbal " +
                             "pool is shared globally across all agencies. Agencies-feature only.")]
         public bool AgencyKerbalsPerAgency { get; set; } = false;
+
+        [XmlComment(Value = "If true, SCANsat satellite-imaging coverage (the SCANcontroller scenario) " +
+                            "is tracked per agency. Each agency scans the planets independently. If " +
+                            "false (default), every agency shares one global coverage map. " +
+                            "Agencies-feature only.")]
+        public bool AgencyScansatPerAgency { get; set; } = false;
+
+        [XmlComment(Value = "If true, the contract pool itself is split per agency: each agency has " +
+                            "its own contract lock holder generating an independent set of available " +
+                            "contracts. If false (default), one server-wide contract pool is generated " +
+                            "and ownership only locks on accept (existing behaviour). " +
+                            "Agencies-feature only.")]
+        public bool AgencyContractsPoolPerAgency { get; set; } = false;
+
+        [XmlComment(Value = "If true, the CommNet relay graph is filtered per agency: only your own " +
+                            "agency's relay sats can connect your probes. If false (default), every " +
+                            "player's relays cooperate (vanilla behaviour). Agencies-feature only.")]
+        public bool AgencyCommNetPerAgency { get; set; } = false;
     }
 }

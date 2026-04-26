@@ -1,5 +1,6 @@
 ﻿using LmpCommon.Locks;
 using Server.Client;
+using Server.Settings.Structures;
 using System.Linq;
 
 namespace Server.System
@@ -20,7 +21,16 @@ namespace Server.System
                 return true;
             }
 
-            if (force || !LockQuery.LockExists(lockDef))
+            // When the per-agency contracts pool is on, multiple players can
+            // hold a Contract lock simultaneously — each agency gets its own
+            // pool generator. Standard exclusivity is skipped for this lock
+            // type. The agency-scoped relay in LockSystemSender ensures
+            // other agencies are never told about it (so their clients keep
+            // thinking they can also acquire).
+            var contractsPerAgency = GeneralSettings.SettingsStore.AgencyContractsPoolPerAgency
+                                     && lockDef.Type == LockType.Contract;
+
+            if (force || contractsPerAgency || !LockQuery.LockExists(lockDef))
             {
                 if (lockDef.Type == LockType.Control)
                 {

@@ -115,9 +115,33 @@ namespace Server.Message
                 return;
             }
 
-            if (!VesselStoreSystem.VesselExists(msgData.VesselId))
+            var isNewVessel = !VesselStoreSystem.VesselExists(msgData.VesselId);
+            if (isNewVessel)
             {
                 LunaLog.Debug($"Saving vessel {msgData.VesselId} ({ByteSize.FromBytes(msgData.NumBytes).KiloBytes} KB) from {client.PlayerName}.");
+
+                // Leaderboard: count this vessel toward the launching agency,
+                // but only the first time we see it. CountedVesselIds keeps
+                // the increment idempotent across re-syncs and crashes.
+                var agency = global::Server.Agency.AgencySystem.GetAgency(client.AgencyId);
+                if (agency != null)
+                {
+                    bool counted;
+                    lock (agency.Lock)
+                    {
+                        counted = agency.CountedVesselIds.Add(msgData.VesselId);
+                        if (counted) agency.VesselsLaunched++;
+                    }
+                    if (counted)
+                    {
+                        global::Server.Agency.AgencyStore.PersistAgency(agency);
+                        global::Server.Agency.AgencyNetwork.BroadcastUpsert(agency);
+                    }
+
+                    // Record vessel→agency for the per-agency CommNet filter.
+                    global::Server.Agency.AgencyVesselMap.Set(msgData.VesselId, agency.Id);
+                    global::Server.Agency.AgencyNetwork.BroadcastVesselMapEntry(msgData.VesselId, agency.Id);
+                }
             }
 
             VesselDataUpdater.RawConfigNodeInsertOrUpdate(msgData.VesselId, Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes));

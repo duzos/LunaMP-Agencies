@@ -36,10 +36,32 @@ namespace LmpClient.Systems.Agency
                 case AgencyMessageType.SrvReply:
                     Handle((AgencyReplyMsgData)data);
                     break;
+                case AgencyMessageType.SrvVesselMapSync:
+                    Handle((AgencyVesselMapSyncMsgData)data);
+                    break;
+                case AgencyMessageType.SrvVesselMapEntry:
+                    Handle((AgencyVesselMapEntryMsgData)data);
+                    break;
                 default:
                     LunaLog.LogWarning($"[Agency] Unhandled Srv subtype {data.AgencyMessageType}");
                     break;
             }
+        }
+
+        private static void Handle(AgencyVesselMapSyncMsgData data)
+        {
+            System.VesselAgencyMap.Clear();
+            for (int i = 0; i < data.VesselIds.Length; i++)
+                System.VesselAgencyMap[data.VesselIds[i]] = data.AgencyIds[i];
+            LunaLog.Log($"[Agency] VesselMapSync received: {data.VesselIds.Length} vessels.");
+        }
+
+        private static void Handle(AgencyVesselMapEntryMsgData data)
+        {
+            if (data.AgencyId == global::System.Guid.Empty)
+                System.VesselAgencyMap.TryRemove(data.VesselId, out _);
+            else
+                System.VesselAgencyMap[data.VesselId] = data.AgencyId;
         }
 
         private static void Handle(AgencySyncAllMsgData data)

@@ -14,6 +14,8 @@ namespace LmpCommon.Message.Types
         SrvJoinRequestPosted = 3,
         SrvJoinRequestResolved = 4,
         SrvReply = 5,
+        SrvVesselMapSync = 6,
+        SrvVesselMapEntry = 7,
 
         // Client -> Server (player actions)
         CliCreate = 20,

@@ -30,6 +30,26 @@ namespace Server.Agency
         public bool IsSolo;
         public int UnlockedTechCount;
 
+        // ---- Leaderboard metrics (server-authoritative, monotonic) ----
+        public double LifetimeFundsEarned;
+        public float LifetimeScienceGenerated;
+        public int VesselsLaunched;
+
+        /// <summary>
+        /// Server-wide "first to X" milestones this agency has claimed.
+        /// Key is the achievement key (e.g. "RecoverFromOrbit:Mun"); value
+        /// is the UTC ticks the agency claimed it. AgencyAchievementRegistry
+        /// guards against duplicate claims across agencies.
+        /// </summary>
+        public readonly Dictionary<string, long> FirstAchievements = new Dictionary<string, long>();
+
+        /// <summary>
+        /// Tracks vessel guids the server has already counted toward
+        /// <see cref="VesselsLaunched"/>. Used to make the increment
+        /// idempotent when the same vessel proto re-syncs.
+        /// </summary>
+        public readonly HashSet<Guid> CountedVesselIds = new HashSet<Guid>();
+
         public bool HasMember(string uniqueId)
         {
             if (string.IsNullOrEmpty(uniqueId)) return false;
@@ -60,6 +80,10 @@ namespace Server.Agency
                     CreatedUtcTicks = CreatedUtcTicks,
                     IsSolo = IsSolo,
                     UnlockedTechCount = UnlockedTechCount,
+                    LifetimeFundsEarned = LifetimeFundsEarned,
+                    LifetimeScienceGenerated = LifetimeScienceGenerated,
+                    VesselsLaunched = VesselsLaunched,
+                    FirstAchievementsCount = FirstAchievements.Count,
                     MemberUniqueIds = Members.Select(m => m.UniqueId ?? string.Empty).ToArray(),
                     MemberDisplayNames = Members.Select(m => m.DisplayName ?? string.Empty).ToArray(),
                 };

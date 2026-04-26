@@ -70,6 +70,15 @@ namespace LmpCommon.Message.Data.Settings
         public int MinCraftLibraryRequestIntervalMs;
         public bool PrintMotdInChat;
 
+        // Agencies-feature flags. Default false so old-version clients still
+        // get sane values (the field is appended at the end of the wire so a
+        // legacy client running an old reader simply doesn't see them).
+        public bool AgencyExperimentsPerAgency;
+        public bool AgencyKerbalsPerAgency;
+        public bool AgencyScansatPerAgency;
+        public bool AgencyContractsPoolPerAgency;
+        public bool AgencyCommNetPerAgency;
+
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
 
         internal override void InternalSerialize(NetOutgoingMessage lidgrenMsg)
@@ -134,6 +143,11 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(MaxScreenshotHeight);
             lidgrenMsg.Write(MinCraftLibraryRequestIntervalMs);
             lidgrenMsg.Write(PrintMotdInChat);
+            lidgrenMsg.Write(AgencyExperimentsPerAgency);
+            lidgrenMsg.Write(AgencyKerbalsPerAgency);
+            lidgrenMsg.Write(AgencyScansatPerAgency);
+            lidgrenMsg.Write(AgencyContractsPoolPerAgency);
+            lidgrenMsg.Write(AgencyCommNetPerAgency);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -198,12 +212,31 @@ namespace LmpCommon.Message.Data.Settings
             MaxScreenshotHeight = lidgrenMsg.ReadInt32();
             MinCraftLibraryRequestIntervalMs = lidgrenMsg.ReadInt32();
             PrintMotdInChat = lidgrenMsg.ReadBoolean();
+
+            // Defensive read: old servers don't write these. Lidgren read
+            // past end-of-stream throws, so we wrap in a position-check.
+            try
+            {
+                AgencyExperimentsPerAgency = lidgrenMsg.ReadBoolean();
+                AgencyKerbalsPerAgency = lidgrenMsg.ReadBoolean();
+                AgencyScansatPerAgency = lidgrenMsg.ReadBoolean();
+                AgencyContractsPoolPerAgency = lidgrenMsg.ReadBoolean();
+                AgencyCommNetPerAgency = lidgrenMsg.ReadBoolean();
+            }
+            catch
+            {
+                AgencyExperimentsPerAgency = false;
+                AgencyKerbalsPerAgency = false;
+                AgencyScansatPerAgency = false;
+                AgencyContractsPoolPerAgency = false;
+                AgencyCommNetPerAgency = false;
+            }
         }
 
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 24 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 29 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

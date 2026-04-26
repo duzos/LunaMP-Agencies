@@ -92,6 +92,7 @@ namespace Server
                 ScenarioStoreSystem.LoadExistingScenarios(scenariosCreated);
                 AgencyStore.LoadExistingAgencies();
                 AgencyScenarioStore.LoadAllExisting();
+                AgencyVesselMap.Load();
                 AgencyMigration.RunIfNeeded();
 
                 // Defensive: reconcile each agency's headline entity values
@@ -105,6 +106,16 @@ namespace Server
                 {
                     AgencyKerbalStore.MigrateGlobalKerbalsIfNeeded();
                 }
+
+                if (GeneralSettings.SettingsStore.AgencyScansatPerAgency)
+                {
+                    AgencyScansatMigration.RunIfNeeded();
+                }
+
+                // Rebuild the cross-agency "first to X" claim registry from
+                // each agency's persisted FirstAchievements dict. Always-on,
+                // since the leaderboard surface is always-on.
+                AgencyAchievementRegistry.RebuildFromAgencies();
 
                 foreach (var a in AgencyStore.Agencies.Values)
                 {

@@ -20,6 +20,16 @@ namespace Server.System
 
             LunaLog.Info($"[Agency] FundsUpdate agency='{agency.Name}' player={client.PlayerName} before={agency.Funds} after={data.Funds} reason={data.Reason}");
 
+            // Leaderboard: only positive deltas count toward lifetime earned.
+            // Spending money on parts / contracts shouldn't reduce the
+            // historical total, but receiving rewards / transfers / recoveries
+            // should accumulate. Computed BEFORE we update agency.Funds.
+            var delta = data.Funds - agency.Funds;
+            if (delta > 0)
+            {
+                lock (agency.Lock) agency.LifetimeFundsEarned += delta;
+            }
+
             // Persist to this agency's Funding scenario, not the global one.
             AgencyScenarioUpdater.WriteFunds(agency.Id, data.Funds);
 

@@ -20,6 +20,15 @@ namespace Server.System
 
             LunaLog.Info($"[Agency] ScienceUpdate agency='{agency.Name}' player={client.PlayerName} before={agency.Science} after={data.Science} reason={data.Reason}");
 
+            // Leaderboard: only positive deltas count toward lifetime
+            // generated. Spending science on tech nodes shouldn't reduce
+            // the cumulative produced figure.
+            var delta = data.Science - agency.Science;
+            if (delta > 0)
+            {
+                lock (agency.Lock) agency.LifetimeScienceGenerated += delta;
+            }
+
             AgencyScenarioUpdater.WriteScience(agency.Id, data.Science);
             AgencySystem.SetAgencyScience(agency, data.Science, data.Reason ?? "science-update");
 

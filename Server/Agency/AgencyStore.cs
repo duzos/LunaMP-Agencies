@@ -137,6 +137,28 @@ namespace Server.Agency
             sb.Append($"isSolo = {(agency.IsSolo ? "true" : "false")}\n");
             sb.Append($"unlockedTechCount = {agency.UnlockedTechCount.ToString(inv)}\n");
 
+            // Leaderboard metrics
+            sb.Append($"lifetimeFundsEarned = {agency.LifetimeFundsEarned.ToString(inv)}\n");
+            sb.Append($"lifetimeScienceGenerated = {agency.LifetimeScienceGenerated.ToString(inv)}\n");
+            sb.Append($"vesselsLaunched = {agency.VesselsLaunched.ToString(inv)}\n");
+
+            sb.Append("ACHIEVEMENTS\n{\n");
+            foreach (var kv in agency.FirstAchievements)
+            {
+                sb.Append("\tACHIEVEMENT\n\t{\n");
+                sb.Append($"\t\tkey = {EscapeText(kv.Key)}\n");
+                sb.Append($"\t\tutcTicks = {kv.Value.ToString(inv)}\n");
+                sb.Append("\t}\n");
+            }
+            sb.Append("}\n");
+
+            sb.Append("COUNTED_VESSELS\n{\n");
+            foreach (var vid in agency.CountedVesselIds)
+            {
+                sb.Append($"\tid = {vid.ToString("N")}\n");
+            }
+            sb.Append("}\n");
+
             sb.Append("MEMBERS\n{\n");
             foreach (var m in agency.Members)
             {
@@ -188,7 +210,36 @@ namespace Server.Agency
                 CreatedUtcTicks = ParseLongSafe(GetValueOrDefault(node, "createdUtcTicks", "0")),
                 IsSolo = string.Equals(GetValueOrDefault(node, "isSolo", "false"), "true", StringComparison.OrdinalIgnoreCase),
                 UnlockedTechCount = ParseIntSafe(GetValueOrDefault(node, "unlockedTechCount", "0")),
+                LifetimeFundsEarned = ParseDoubleSafe(GetValueOrDefault(node, "lifetimeFundsEarned", "0")),
+                LifetimeScienceGenerated = ParseFloatSafe(GetValueOrDefault(node, "lifetimeScienceGenerated", "0")),
+                VesselsLaunched = ParseIntSafe(GetValueOrDefault(node, "vesselsLaunched", "0")),
             };
+
+            var achievementsNode = FindChildNode(node, "ACHIEVEMENTS");
+            if (achievementsNode != null)
+            {
+                foreach (var an in EnumerateChildNodes(achievementsNode, "ACHIEVEMENT"))
+                {
+                    var key = GetValueOrDefault(an, "key", string.Empty);
+                    if (string.IsNullOrEmpty(key)) continue;
+                    var ticks = ParseLongSafe(GetValueOrDefault(an, "utcTicks", "0"));
+                    agency.FirstAchievements[key] = ticks;
+                }
+            }
+
+            var countedVesselsNode = FindChildNode(node, "COUNTED_VESSELS");
+            if (countedVesselsNode != null)
+            {
+                try
+                {
+                    foreach (var entry in countedVesselsNode.GetValues("id"))
+                    {
+                        if (Guid.TryParseExact(entry?.Value, "N", out var vid))
+                            agency.CountedVesselIds.Add(vid);
+                    }
+                }
+                catch { /* ignore parse errors, treat as empty */ }
+            }
 
             var membersNode = FindChildNode(node, "MEMBERS");
             if (membersNode != null)

@@ -108,18 +108,70 @@ namespace Server.Agency
         }
 
         /// <summary>
-        /// Scenario module names that should be managed per-agency rather than
-        /// globally. Other modules (Kerbals, warp, etc.) stay global.
+        /// Modules whose authoritative state lives on the server and is
+        /// updated via ShareProgress* delta messages (Funds, Science,
+        /// Reputation, contract accept/complete, tech-node unlock). Client
+        /// scenario uploads of these modules are dropped — accepting them
+        /// would let stale local KSP state (e.g. uninitialised Funding =
+        /// 0 during early scene transitions) clobber the server's value
+        /// before the deltas catch up.
         /// </summary>
-        public static readonly string[] AgencyScopedModuleNames =
+        public static readonly string[] DeltaManagedModules =
         {
             "Funding",
             "Reputation",
             "ResearchAndDevelopment",
             "ContractSystem",
+        };
+
+        /// <summary>
+        /// Snapshot-managed modules that are ALWAYS per-agency when the
+        /// agencies feature is on — they have no ShareProgress delta channel
+        /// and their semantics are clearly agency-scoped (per-agency mission
+        /// progress, per-agency facility upgrades, per-agency active
+        /// strategies).
+        /// </summary>
+        public static readonly string[] AlwaysSnapshotManagedModules =
+        {
             "ScenarioContractEvents",
             "ScenarioUpgradeableFacilities",
             "StrategySystem",
         };
+
+        /// <summary>
+        /// Snapshot-managed modules that are per-agency only when their
+        /// corresponding config flag is on. If the flag is off the module
+        /// stays globally shared as before.
+        /// </summary>
+        /// <returns>The set of module names that should be treated as
+        /// per-agency snapshot-managed for this server's current settings.</returns>
+        public static global::System.Collections.Generic.HashSet<string> GetActiveSnapshotManagedModules()
+        {
+            var set = new global::System.Collections.Generic.HashSet<string>(AlwaysSnapshotManagedModules);
+            if (global::Server.Settings.Structures.GeneralSettings.SettingsStore.AgencyScansatPerAgency)
+                set.Add("SCANcontroller");
+            return set;
+        }
+
+        /// <summary>
+        /// Convenience: union of delta-managed + currently-active snapshot-
+        /// managed module names. Use for "is this module agency-scoped right
+        /// now?" tests on the hot path.
+        /// </summary>
+        public static global::System.Collections.Generic.HashSet<string> GetActiveAgencyScopedModules()
+        {
+            var set = GetActiveSnapshotManagedModules();
+            foreach (var m in DeltaManagedModules) set.Add(m);
+            return set;
+        }
+
+        /// <summary>
+        /// Backwards-compatible static union (delta + always-snapshot, no
+        /// flag-gated entries). Existing callers that need a static list at
+        /// type-init time use this; runtime callers should use
+        /// <see cref="GetActiveAgencyScopedModules"/> instead.
+        /// </summary>
+        public static readonly string[] AgencyScopedModuleNames =
+            DeltaManagedModules.Concat(AlwaysSnapshotManagedModules).ToArray();
     }
 }

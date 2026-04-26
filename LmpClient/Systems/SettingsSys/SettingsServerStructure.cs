@@ -27,5 +27,14 @@ namespace LmpClient.Systems.SettingsSys
         public int MaxScreenshotHeight { get; set; }
         public int MinCraftLibraryRequestIntervalMs { get; set; }
         public bool PrintMotdInChat { get; set; }
+
+        // Agencies-feature flags propagated from server. Default false so any
+        // code that reads them when the client isn't fully connected sees
+        // legacy behaviour.
+        public bool AgencyExperimentsPerAgency { get; set; }
+        public bool AgencyKerbalsPerAgency { get; set; }
+        public bool AgencyScansatPerAgency { get; set; }
+        public bool AgencyContractsPoolPerAgency { get; set; }
+        public bool AgencyCommNetPerAgency { get; set; }
     }
 }

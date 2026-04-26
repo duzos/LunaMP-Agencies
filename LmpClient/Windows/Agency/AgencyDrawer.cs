@@ -9,11 +9,17 @@ namespace LmpClient.Windows.Agency
     public partial class AgencyWindow
     {
         private static int _tab;
-        private static readonly string[] TabLabels = { "Mine", "Browse", "Create" };
+        private static readonly string[] TabLabels = { "Mine", "Browse", "Create", "Leaderboard" };
         private static string _createName = "";
         private static string _renameName = "";
         private static string _lastStatusMessage = "";
         private static Vector2 _scrollPos;
+
+        // Leaderboard tab state.
+        private static int _leaderboardSort; // 0=firsts 1=funds 2=science 3=vessels
+        private static readonly string[] _leaderboardSortLabels =
+            { "Firsts", "Funds", "Science", "Vessels" };
+        private static Vector2 _leaderboardScrollPos;
 
         protected override void DrawWindowContent(int windowId)
         {
@@ -31,6 +37,7 @@ namespace LmpClient.Windows.Agency
                 case 0: DrawMineTab(); break;
                 case 1: DrawBrowseTab(); break;
                 case 2: DrawCreateTab(); break;
+                case 3: DrawLeaderboardTab(); break;
             }
 
             GUILayout.EndVertical();
@@ -252,6 +259,58 @@ namespace LmpClient.Windows.Agency
                     _lastStatusMessage = "Name cannot be empty.";
                 }
             }
+        }
+
+        private static void DrawLeaderboardTab()
+        {
+            GUILayout.Label("Cross-agency leaderboard. Sort by:");
+            _leaderboardSort = GUILayout.Toolbar(_leaderboardSort, _leaderboardSortLabels);
+
+            GUILayout.Space(6);
+
+            // Solo agencies are excluded — they're hidden book-keeping.
+            var rows = AgencySystem.Singleton.KnownAgencies.Values
+                .Where(a => !a.IsSolo)
+                .ToArray();
+
+            switch (_leaderboardSort)
+            {
+                case 0: rows = rows.OrderByDescending(a => a.FirstAchievementsCount).ThenByDescending(a => a.LifetimeFundsEarned).ToArray(); break;
+                case 1: rows = rows.OrderByDescending(a => a.LifetimeFundsEarned).ToArray(); break;
+                case 2: rows = rows.OrderByDescending(a => a.LifetimeScienceGenerated).ToArray(); break;
+                case 3: rows = rows.OrderByDescending(a => a.VesselsLaunched).ToArray(); break;
+            }
+
+            // Header row.
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("#", GUILayout.Width(24));
+            GUILayout.Label("Agency");
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("Firsts", GUILayout.Width(50));
+            GUILayout.Label("Funds", GUILayout.Width(90));
+            GUILayout.Label("Science", GUILayout.Width(70));
+            GUILayout.Label("Vessels", GUILayout.Width(60));
+            GUILayout.EndHorizontal();
+
+            _leaderboardScrollPos = GUILayout.BeginScrollView(_leaderboardScrollPos);
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var a = rows[i];
+                GUILayout.BeginHorizontal();
+                GUILayout.Label((i + 1).ToString(), GUILayout.Width(24));
+                GUILayout.Label(a.Id == AgencySystem.Singleton.MyAgencyId ? a.Name + "  (you)" : a.Name);
+                GUILayout.FlexibleSpace();
+                GUILayout.Label(a.FirstAchievementsCount.ToString(), GUILayout.Width(50));
+                GUILayout.Label(a.LifetimeFundsEarned.ToString("N0"), GUILayout.Width(90));
+                GUILayout.Label(a.LifetimeScienceGenerated.ToString("N1"), GUILayout.Width(70));
+                GUILayout.Label(a.VesselsLaunched.ToString(), GUILayout.Width(60));
+                GUILayout.EndHorizontal();
+            }
+            GUILayout.EndScrollView();
+
+            GUILayout.Space(4);
+            GUILayout.Label("Firsts: server-wide milestones (first to orbit, first to dock, etc.).");
+            GUILayout.Label("Funds / Science: lifetime totals — only positive deltas accumulate.");
         }
     }
 }

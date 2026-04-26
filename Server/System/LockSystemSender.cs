@@ -1,10 +1,12 @@
 ﻿using LmpCommon.Locks;
 using LmpCommon.Message.Data.Lock;
 using LmpCommon.Message.Server;
+using Server.Agency;
 using Server.Client;
 using Server.Context;
 using Server.Log;
 using Server.Server;
+using Server.Settings.Structures;
 using System.Linq;
 
 namespace Server.System
@@ -13,8 +15,24 @@ namespace Server.System
     {
         public static void SendAllLocks(ClientStructure client)
         {
+            var allLocks = LockSystem.LockQuery.GetAllLocks();
+
+            // Per-agency contract pool: hide Contract locks held by players
+            // outside this client's agency, so its agency-mate sees the
+            // Contract lock as available and can claim it.
+            if (GeneralSettings.SettingsStore.AgencyContractsPoolPerAgency
+                && client != null && client.AgencyId != global::System.Guid.Empty)
+            {
+                allLocks = allLocks.Where(l =>
+                {
+                    if (l.Type != LockType.Contract) return true;
+                    var holder = ClientRetriever.GetClientByName(l.PlayerName);
+                    return holder == null || holder.AgencyId == client.AgencyId;
+                });
+            }
+
             var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<LockListReplyMsgData>();
-            msgData.Locks = LockSystem.LockQuery.GetAllLocks().ToArray();
+            msgData.Locks = allLocks.ToArray();
             msgData.LocksCount = msgData.Locks.Length;
 
             MessageQueuer.SendToClient<LockSrvMsg>(client, msgData);
@@ -29,7 +47,18 @@ namespace Server.System
                 msgData.Lock = lockDefinition;
                 msgData.LockResult = true;
 
-                MessageQueuer.RelayMessage<LockSrvMsg>(client, msgData);
+                // Mirror the acquire scoping: per-agency Contract locks only
+                // notify the agency members about a release.
+                if (GeneralSettings.SettingsStore.AgencyContractsPoolPerAgency
+                    && lockDefinition.Type == LockType.Contract
+                    && client != null && client.AgencyId != global::System.Guid.Empty)
+                {
+                    MessageQueuer.RelayMessageToAgency<LockSrvMsg>(client, client.AgencyId, msgData);
+                }
+                else
+                {
+                    MessageQueuer.RelayMessage<LockSrvMsg>(client, msgData);
+                }
                 LunaLog.Debug($"{lockDefinition.PlayerName} released lock {lockDefinition}");
             }
             else
@@ -47,7 +76,20 @@ namespace Server.System
                 msgData.Lock = lockDefinition;
                 msgData.Force = force;
 
-                MessageQueuer.SendToAllClients<LockSrvMsg>(msgData);
+                // Per-agency contract lock: only members of the acquiring
+                // player's agency hear about it. Other agencies stay
+                // blissfully unaware so their first member to ask can grab
+                // the lock for their own pool.
+                if (GeneralSettings.SettingsStore.AgencyContractsPoolPerAgency
+                    && lockDefinition.Type == LockType.Contract
+                    && client != null && client.AgencyId != global::System.Guid.Empty)
+                {
+                    MessageQueuer.SendMessageToAgency<LockSrvMsg>(client.AgencyId, msgData);
+                }
+                else
+                {
+                    MessageQueuer.SendToAllClients<LockSrvMsg>(msgData);
+                }
 
                 //Just log it if we actually changed the value. Users might send repeated acquire locks as they take a bit of time to reach them...
                 if (!repeatedAcquire)

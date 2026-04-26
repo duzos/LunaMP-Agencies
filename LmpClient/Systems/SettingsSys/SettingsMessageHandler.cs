@@ -35,6 +35,12 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.MaxScreenshotHeight = msgData.MaxScreenshotHeight;
             SettingsSystem.ServerSettings.MinCraftLibraryRequestIntervalMs = msgData.MinScreenshotIntervalMs;
             SettingsSystem.ServerSettings.PrintMotdInChat = msgData.PrintMotdInChat;
+            // Agencies-feature flags propagated to the client.
+            SettingsSystem.ServerSettings.AgencyExperimentsPerAgency = msgData.AgencyExperimentsPerAgency;
+            SettingsSystem.ServerSettings.AgencyKerbalsPerAgency = msgData.AgencyKerbalsPerAgency;
+            SettingsSystem.ServerSettings.AgencyScansatPerAgency = msgData.AgencyScansatPerAgency;
+            SettingsSystem.ServerSettings.AgencyContractsPoolPerAgency = msgData.AgencyContractsPoolPerAgency;
+            SettingsSystem.ServerSettings.AgencyCommNetPerAgency = msgData.AgencyCommNetPerAgency;
 
             SettingsSystem.ServerSettings.ServerParameters =
                 GameParameters.GetDefaultParameters(

@@ -33,6 +33,10 @@ namespace LmpCommon.Agency
             msg.Write(a.CreatedUtcTicks);
             msg.Write(a.IsSolo);
             msg.Write(a.UnlockedTechCount);
+            msg.Write(a.LifetimeFundsEarned);
+            msg.Write(a.LifetimeScienceGenerated);
+            msg.Write(a.VesselsLaunched);
+            msg.Write(a.FirstAchievementsCount);
         }
 
         public static AgencyInfo ReadAgencyInfo(NetIncomingMessage msg)
@@ -59,6 +63,10 @@ namespace LmpCommon.Agency
             a.CreatedUtcTicks = msg.ReadInt64();
             a.IsSolo = msg.ReadBoolean();
             a.UnlockedTechCount = msg.ReadInt32();
+            a.LifetimeFundsEarned = msg.ReadDouble();
+            a.LifetimeScienceGenerated = msg.ReadFloat();
+            a.VesselsLaunched = msg.ReadInt32();
+            a.FirstAchievementsCount = msg.ReadInt32();
             return a;
         }
 

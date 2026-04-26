@@ -29,7 +29,27 @@ namespace LmpClient.Systems.Agency
         public readonly List<JoinRequestInfo> PendingIncomingRequests = new List<JoinRequestInfo>();
         public readonly object RequestsLock = new object();
 
+        /// <summary>
+        /// Vessel id → owning agency id. Populated from the server's
+        /// AgencyVesselMapSync at handshake and updated incrementally via
+        /// AgencyVesselMapEntry. Used by the per-agency CommNet filter to
+        /// decide whether a foreign-agency relay can connect our probes.
+        /// </summary>
+        public readonly ConcurrentDictionary<Guid, Guid> VesselAgencyMap = new ConcurrentDictionary<Guid, Guid>();
+
         public Guid MyAgencyId { get; set; } = Guid.Empty;
+
+        /// <summary>
+        /// Convenience: returns the agency id that owns the given vessel,
+        /// or Guid.Empty if unknown (legacy vessels without a recorded
+        /// mapping default to "unknown owner" — the CommNet filter
+        /// treats unknown as visible to keep CommNet working when the
+        /// per-agency flag is on but data is incomplete).
+        /// </summary>
+        public Guid GetVesselAgency(Guid vesselId)
+        {
+            return VesselAgencyMap.TryGetValue(vesselId, out var agencyId) ? agencyId : Guid.Empty;
+        }
 
         /// <summary>Tuple list of (timestamp, message) for server replies,
         /// consumed by the AgencyWindow for transient UI toasts.</summary>
@@ -59,6 +79,7 @@ namespace LmpClient.Systems.Agency
         {
             base.OnDisabled();
             KnownAgencies.Clear();
+            VesselAgencyMap.Clear();
             lock (RequestsLock) PendingIncomingRequests.Clear();
             MyAgencyId = Guid.Empty;
             LunaLog.Log("[Agency] Client AgencySystem disabled and cleared.");

@@ -30,5 +30,25 @@ namespace LmpCommon.Agency
         /// displayed in the agency window without shipping full tech state.
         /// </summary>
         public int UnlockedTechCount;
+
+        // ---- Leaderboard metrics (cumulative; never decrease) ----
+
+        /// <summary>Total funds the agency has received from incoming positive
+        /// deltas (contract rewards, transfers in, recoveries). Spending does
+        /// not reduce this. Used for the lifetime-funds-earned leaderboard.</summary>
+        public double LifetimeFundsEarned;
+
+        /// <summary>Total science the agency has produced from positive
+        /// deltas. Spending science on tech nodes does not reduce this.</summary>
+        public float LifetimeScienceGenerated;
+
+        /// <summary>Distinct vessels created under this agency since the
+        /// metric was introduced. Increments on first proto-vessel sync.</summary>
+        public int VesselsLaunched;
+
+        /// <summary>Number of "first to X" milestones this agency holds
+        /// server-wide. Each milestone is awarded to whichever agency reports
+        /// it first; subsequent agencies don't displace the holder.</summary>
+        public int FirstAchievementsCount;
     }
 }

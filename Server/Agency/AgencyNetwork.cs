@@ -68,6 +68,42 @@ namespace Server.Agency
             MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
         }
 
+        /// <summary>
+        /// Sends the entire vessel→agency mapping to a single client.
+        /// Used at handshake so the client's per-agency CommNet filter has
+        /// data to work with from the moment the player enters flight.
+        /// </summary>
+        public static void SendVesselMapSyncTo(ClientStructure client)
+        {
+            if (client == null) return;
+            var snapshot = AgencyVesselMap.Snapshot;
+            var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyVesselMapSyncMsgData>();
+            var n = snapshot.Count;
+            data.VesselIds = new global::System.Guid[n];
+            data.AgencyIds = new global::System.Guid[n];
+            int i = 0;
+            foreach (var kv in snapshot)
+            {
+                data.VesselIds[i] = kv.Key;
+                data.AgencyIds[i] = kv.Value;
+                i++;
+            }
+            MessageQueuer.SendToClient<AgencySrvMsg>(client, data);
+        }
+
+        /// <summary>
+        /// Broadcasts a single vessel→agency mapping update to every
+        /// authenticated client. AgencyId == Guid.Empty means "remove the
+        /// mapping" — used when a vessel is destroyed.
+        /// </summary>
+        public static void BroadcastVesselMapEntry(global::System.Guid vesselId, global::System.Guid agencyId)
+        {
+            var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyVesselMapEntryMsgData>();
+            data.VesselId = vesselId;
+            data.AgencyId = agencyId;
+            MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
+        }
+
         public static void SendSyncAllTo(ClientStructure client)
         {
             if (client == null) return;

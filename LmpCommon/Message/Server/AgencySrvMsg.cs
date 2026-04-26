@@ -22,6 +22,8 @@ namespace LmpCommon.Message.Server
             [(ushort)AgencyMessageType.SrvJoinRequestPosted] = typeof(AgencyJoinRequestPostedMsgData),
             [(ushort)AgencyMessageType.SrvJoinRequestResolved] = typeof(AgencyJoinRequestResolvedMsgData),
             [(ushort)AgencyMessageType.SrvReply] = typeof(AgencyReplyMsgData),
+            [(ushort)AgencyMessageType.SrvVesselMapSync] = typeof(AgencyVesselMapSyncMsgData),
+            [(ushort)AgencyMessageType.SrvVesselMapEntry] = typeof(AgencyVesselMapEntryMsgData),
         };
 
         public override ServerMessageType MessageType => ServerMessageType.Agency;

@@ -1,6 +1,7 @@
 ﻿using LmpClient.Extensions;
 using LmpClient.Utilities;
 using System;
+using System.Linq;
 
 namespace LmpClient.VesselUtilities
 {
@@ -105,6 +106,16 @@ namespace LmpClient.VesselUtilities
             //Defend against NaN orbits
             if (configNode.VesselHasNaNPosition())
             {
+                var rejectedNode = configNode;
+                Diagnostics.PlaytestDiagnostics.Write("client.vessel.invalid-position", () =>
+                {
+                    var orbit = rejectedNode.GetNode("ORBIT");
+                    var surface = rejectedNode.GetValue("landed") == "True" || rejectedNode.GetValue("splashed") == "True";
+                    var zeroOrbit = orbit != null && orbit.values.DistinctNames().Select(k => orbit.GetValue(k)).Take(7).All(v => v == "0");
+                    return $"vessel={vesselId} frame={UnityEngine.Time.frameCount} reason={(surface ? "nonfinite-surface" : zeroOrbit ? "zero-orbit" : "nonfinite-orbit")} " +
+                           string.Join(" ", new[] { "landed", "splashed", "sit", "lat", "lon", "alt" }.Select(k => k + "=" + rejectedNode.GetValue(k))) +
+                           " orbit=" + (orbit == null ? "missing" : string.Join(",", orbit.values.DistinctNames().Take(16).Select(k => k + "=" + orbit.GetValue(k))));
+                });
                 LunaLog.LogError($"[LMP]: Vessel {vesselId} has NaN position");
                 return false;
             }

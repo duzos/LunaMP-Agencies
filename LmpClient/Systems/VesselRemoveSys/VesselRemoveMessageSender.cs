@@ -38,7 +38,11 @@ namespace LmpClient.Systems.VesselRemoveSys
         /// </summary>
         public void SendVesselRemove(Guid vesselId, bool keepVesselInRemoveList = true, string reason = null)
         {
-            if (LmpClient.Systems.Agency.VesselPublicationGuard.Pending) return;
+            if (LmpClient.Systems.Agency.VesselPublicationGuard.Pending)
+            {
+                Diagnostics.PlaytestDiagnostics.Write("client.vessel.remove-blocked", () => $"vessel={vesselId} permanent={keepVesselInRemoveList} reason={reason}");
+                return;
+            }
             LunaLog.Log($"[LMP]: Removing {vesselId} from the server ({reason ?? "Unknown reason"})");
             var msgData = NetworkMain.CliMsgFactory.CreateNewMessageData<VesselRemoveMsgData>();
             msgData.GameTime = TimeSyncSystem.UniversalTime;

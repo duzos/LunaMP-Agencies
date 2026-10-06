@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using LmpClient.Network;
 using LmpClient.Systems.TimeSync;
 using LmpClient.Systems.VesselLockSys;
@@ -31,31 +32,57 @@ namespace LmpClient.Systems.Agency
         internal static bool HasSplitPending => splitting != null;
         internal static void CaptureSplit(Vessel parent, Vessel child, uint part, float force, DockedVesselInfo info = null)
         {
+            var operation = Guid.NewGuid();
+            var stage = "participants";
             try
             {
+                Diagnostics.PlaytestDiagnostics.Write("client.split.capture", () => $"operation={operation} frame={UnityEngine.Time.frameCount} part={part} undock={info != null} queued={splitQueue.Count} " +
+                    "parent=" + SplitVesselDetails(parent) + " child=" + SplitVesselDetails(child));
                 if (!parent || !child || parent.id == child.id) throw new InvalidOperationException("Invalid split participants.");
-                var next = new PendingSplit { Operation = Guid.NewGuid(), Parent = parent.id, Child = child.id, Part = part, Force = force,
+                var next = new PendingSplit { Operation = operation, Parent = parent.id, Child = child.id, Part = part, Force = force,
                     Undock = info != null, Name = info?.name, RootPart = info?.rootPartUId ?? 0, VesselType = info == null ? 0 : (int)info.vesselType };
                 if (splitting == null)
                 {
                     if (!VesselPublicationGuard.Begin(next.Operation, next.Parent, next.Child)) throw new InvalidOperationException("Another topology transaction is pending.");
                     InputLockManager.SetControlLock(VesselLockSystem.BlockAllControls, SplitLock);
                 }
+                stage = "child-backup";
                 var childProto = child.BackupVessel();
+                stage = "child-serialize";
                 next.ChildData = SerializeTopology(childProto);
-                next.ParentData = SerializeTopology(parent.BackupVessel());
+                stage = "parent-backup";
+                var parentProto = parent.BackupVessel();
+                stage = "parent-serialize";
+                next.ParentData = SerializeTopology(parentProto);
+                stage = "cargo";
                 next.Cargo = ToolingManifestBuilder.CaptureCargo(childProto);
                 var size = next.ChildData.Length + next.ParentData.Length;
                 if (splitQueue.Count >= 64 || splitBytes + size > 64L * 1024 * 1024) throw new InvalidOperationException("Too many pending split snapshots.");
                 splitBytes += size;
+                Diagnostics.PlaytestDiagnostics.Write("client.split.captured", () => $"operation={operation} parent={next.Parent} child={next.Child} bytes={size} queued={splitQueue.Count}");
+                stage = "queue-send";
                 if (splitting == null) { splitting = next; SendSplit(); }
                 else splitQueue.Enqueue(next);
             }
-            catch (Exception e) { RecoveryDisconnect("Cannot confirm split: " + e.Message); }
+            catch (Exception e)
+            {
+                Diagnostics.PlaytestDiagnostics.Write("client.split.capture-failed", () =>
+                {
+                    var methods = new System.Diagnostics.StackTrace().GetFrames()?.Select(f => f.GetMethod()).Where(m => m != null).ToArray();
+                    var partDie = methods?.Any(m => m.DeclaringType == typeof(Part) && m.Name == "Die" || m.Name.StartsWith("Part.Die", StringComparison.Ordinal)) == true;
+                    return $"operation={operation} stage={stage} frame={UnityEngine.Time.frameCount} partDie={partDie} error={e.GetType().Name}:{e.Message} stack=" +
+                           (methods == null ? "unavailable" : string.Join(">", methods.Take(24).Select(m => m.Name)));
+                });
+                RecoveryDisconnect("Cannot confirm split: " + e.Message);
+            }
         }
+        private static string SplitVesselDetails(Vessel vessel) => !vessel ? "missing" :
+            $"{vessel.id}/state:{vessel.state}/situation:{vessel.situation}/loaded:{vessel.loaded}/packed:{vessel.packed}/count:{vessel.parts.Count}/parts:" +
+            string.Join(",", vessel.parts.Take(32).Select(p => p ? p.flightID.ToString() : "missing"));
         private static void SendSplit()
         {
             var current = splitting;
+            Diagnostics.PlaytestDiagnostics.Write("client.split.send", () => $"operation={current.Operation} parent={current.Parent} child={current.Child} queued={splitQueue.Count}");
             current.Deadline = DateTime.UtcNow.AddSeconds(45);
             VesselBaseMsgData announcement;
             if (current.Undock)
@@ -92,6 +119,7 @@ namespace LmpClient.Systems.Agency
         private static bool HandleSplit(EconomyResult result)
         {
             if (splitting == null || result.Operation != EconomyOperation.Split || result.RequestId != splitting.Operation) return false;
+            Diagnostics.PlaytestDiagnostics.Write("client.split.result", () => $"operation={result.RequestId} success={result.Success} recoveryRequired={result.RecoveryRequired} reason={result.Reason}");
             if (!result.Success || result.RecoveryRequired) { RecoveryDisconnect(result.Reason); return true; }
             var accepted = splitting;
             splitBytes -= accepted.ChildData.Length + accepted.ParentData.Length;

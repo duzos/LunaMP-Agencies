@@ -1,6 +1,14 @@
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$KspDirectory, [Parameter(Mandatory)][string]$ClientPlugins)
 $ErrorActionPreference = 'Stop'
+# KSP's AssemblyLoader constructs Version(FileVersionInfo.FileVersion) before loading plugins.
+# Check every delivered DLL, including dependencies not reached by the managed reference traversal.
+foreach ($plugin in Get-ChildItem -LiteralPath $ClientPlugins -Filter '*.dll' -File -Recurse) {
+    $version = $null
+    if (![version]::TryParse([Diagnostics.FileVersionInfo]::GetVersionInfo($plugin.FullName).FileVersion, [ref]$version)) {
+        throw "KSP loader cannot parse native FileVersion: $($plugin.FullName)"
+    }
+}
 $roots = @($ClientPlugins, (Join-Path $KspDirectory 'KSP_x64_Data/Managed'), (Join-Path $KspDirectory 'GameData/000_Harmony'))
 $available = @{}
 foreach ($root in $roots) {
@@ -47,5 +55,3 @@ if (!$http.GetType('System.Net.Http.HttpClientHandler').GetProperty('ServerCerti
     throw 'Bundled Http implementation lacks the APIs used by BannedIpsRetriever'
 }
 Write-Output "Client runtime dependency closure and Http member checks passed ($($checked.Count) assemblies). Version binding and gameplay still require KSP verification."
-
-

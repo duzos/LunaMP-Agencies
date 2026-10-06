@@ -38,8 +38,15 @@ Before building the client, run `Scripts/Prepare-KspRuntime.ps1 -KspDirectory "<
 This imports the compatible Mono runtime dependencies from that installation's launcher into ignored
 `External/KSPRuntime`. The client build requires these files and includes them in its output, including
 before the Debug deployment step. Do not substitute SDK reference assemblies for runtime implementations.
+Some KSP launchers include `System.EnterpriseServices.dll` without native file-version metadata, which
+KSP's plugin loader cannot parse. In that case pass `-EnterpriseServicesPath "<versioned Mono runtime DLL>"`
+to the preparation script. The runtime implementation from the official Mono 6.12.0.206 Windows package
+(file version 4.6.57.0, SHA256 `2A42E612BBC18E08D6F7619934A0294EBAFF90C00544AB8C5452CE712984F471`)
+was checked against KSP 1.12.5's loader metadata path and embedded Mono. Extracting that DLL does not
+require installing Mono. Preserve the other runtime dependencies from the KSP installation.
 Run `Scripts/Test-ClientRuntime.ps1 -KspDirectory "<KSP installation>" -ClientPlugins "<built plugin directory>"`
-to check the dependency set. Any reported binding differences still require verification with KSP's Mono runtime.
+to check every packaged DLL's native file version and the dependency set. Any reported binding differences
+still require verification with KSP's Mono runtime.
 
 When tooling or trading is enabled, `client.economy.snapshot` should identify a ready snapshot and a
 nonempty session. A local funds/science change produces `client.economy.command` with its delta and

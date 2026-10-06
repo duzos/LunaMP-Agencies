@@ -1,3 +1,4 @@
+using LmpCommon.Agency;
 using LmpCommon.Enums;
 using LmpCommon.Xml;
 using System;
@@ -105,9 +106,13 @@ namespace Server.Settings.Definition
         public bool AgencyTooling { get; set; } = false;
         public bool AgencyTrade { get; set; } = false;
         public bool AgencyHideCraft { get; set; } = false;
-        public double ToolingCostMultiplier { get; set; } = 10;
-        public double TooledLaunchMultiplier { get; set; } = 0.1;
-        public double ToolingCombineMultiplier { get; set; } = 0.1;
+        public double ToolingCostMultiplier { get; set; } = ToolingDefaults.ToolingCost;
+        public double TooledLaunchMultiplier { get; set; } = ToolingDefaults.TooledLaunch;
+        public double ToolingCombineMultiplier { get; set; } = ToolingDefaults.Combine;
+
+        [XmlComment(Value = "Launch price multiplier for a craft whose exact part list is not tooled yet: 2 charges double the part cost. " +
+                            "Science parts and inventory always stay at 1x. Recovery never refunds more than was paid. Tooling gameplay only.")]
+        public double UntooledLaunchMultiplier { get; set; } = ToolingDefaults.UntooledLaunch;
         public int AgencyDockRequestTimeoutSeconds { get; set; } = 30;
         public int AgencyDockGrantTimeoutSeconds { get; set; } = 30;
 

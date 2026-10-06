@@ -1,4 +1,5 @@
 using Lidgren.Network;
+using LmpCommon.Agency;
 using LmpCommon.Enums;
 using LmpCommon.Message.Base;
 using LmpCommon.Message.Types;
@@ -84,7 +85,7 @@ namespace LmpCommon.Message.Data.Settings
         public bool AgencyTooling;
         public bool AgencyTrade;
         public bool AgencyHideCraft;
-        public double ToolingCostMultiplier = 10, TooledLaunchMultiplier = 0.1, ToolingCombineMultiplier = 0.1;
+        public double ToolingCostMultiplier = ToolingDefaults.ToolingCost, TooledLaunchMultiplier = ToolingDefaults.TooledLaunch, ToolingCombineMultiplier = ToolingDefaults.Combine, UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch;
 
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
 
@@ -164,6 +165,7 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(ToolingCombineMultiplier);
             lidgrenMsg.Write(AgencyTrade);
             lidgrenMsg.Write(AgencyHideCraft);
+            lidgrenMsg.Write(UntooledLaunchMultiplier);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -257,7 +259,7 @@ namespace LmpCommon.Message.Data.Settings
             AgencyTooling = false;
             AgencyTrade = false;
             AgencyHideCraft = false;
-            ToolingCostMultiplier = 10; TooledLaunchMultiplier = 0.1; ToolingCombineMultiplier = 0.1;
+            ToolingCostMultiplier = ToolingDefaults.ToolingCost; TooledLaunchMultiplier = ToolingDefaults.TooledLaunch; ToolingCombineMultiplier = ToolingDefaults.Combine; UntooledLaunchMultiplier = ToolingDefaults.LegacyUntooledLaunch;
             if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 193)
             {
                 AgencyTooling = lidgrenMsg.ReadBoolean();
@@ -266,13 +268,15 @@ namespace LmpCommon.Message.Data.Settings
                 ToolingCombineMultiplier = lidgrenMsg.ReadDouble();
                 AgencyTrade = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
                 AgencyHideCraft = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
+                // Appended last: Lidgren does not throw on an over-read in release builds, so only read what is really there.
+                if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 64) UntooledLaunchMultiplier = lidgrenMsg.ReadDouble();
             }
         }
 
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 35 + sizeof(double) * 3 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 35 + sizeof(double) * 4 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

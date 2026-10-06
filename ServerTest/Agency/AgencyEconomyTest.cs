@@ -33,6 +33,7 @@ namespace ServerTest.Agency
             private readonly object savedInitialized = Field("Initialized").GetValue(null);
             private readonly bool oldEnabled = GeneralSettings.SettingsStore.AgencyTooling;
             private readonly bool oldCanRevert = GameplaySettings.SettingsStore.CanRevert;
+            private readonly ToolingRates oldRates = SettingsRates();
             private readonly Action<string> checkpoint = AgencyEconomyStore.PersistenceCheckpoint;
             private readonly Func<DateTime> clock = AgencyEconomyStore.UtcNow;
             private readonly System.Collections.Generic.KeyValuePair<IPEndPoint, ClientStructure>[] clients;
@@ -55,6 +56,8 @@ namespace ServerTest.Agency
                 ServerContext.Clients.Clear(); VesselStoreSystem.CurrentVessels.Clear();
                 GeneralSettings.SettingsStore.AgencyTooling = true; GeneralSettings.SettingsStore.GameMode = GameMode.Career;
                 GameplaySettings.SettingsStore.CanRevert = true;
+                // The older cases were written against these rates. The shipped defaults are covered by AgencyToolingRatesTest.
+                UseRates(new ToolingRates(10, .1, 1, .1));
                 AgencyEconomyStore.PersistenceCheckpoint = null;
                 var connection = (NetConnection)RuntimeHelpers.GetUninitializedObject(typeof(NetConnection));
                 typeof(NetConnection).GetField("m_remoteEndPoint", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(connection, new IPEndPoint(IPAddress.Loopback, 32251));
@@ -71,6 +74,16 @@ namespace ServerTest.Agency
                 AgencyEconomyStore.Load(); RefreshSession();
             }
             private static FieldInfo Field(string name) => typeof(AgencyEconomyStore).GetField(name, BindingFlags.Static | BindingFlags.NonPublic);
+            internal static ToolingRates SettingsRates()
+            {
+                var settings = GeneralSettings.SettingsStore;
+                return new ToolingRates(settings.ToolingCostMultiplier, settings.TooledLaunchMultiplier, settings.UntooledLaunchMultiplier, settings.ToolingCombineMultiplier);
+            }
+            internal static void UseRates(ToolingRates rates)
+            {
+                var settings = GeneralSettings.SettingsStore;
+                settings.ToolingCostMultiplier = rates.Tooling; settings.TooledLaunchMultiplier = rates.TooledLaunch; settings.UntooledLaunchMultiplier = rates.UntooledLaunch; settings.ToolingCombineMultiplier = rates.Combine;
+            }
             public void RefreshSession()
             {
                 AgencyEconomyStore.SendTo(Client);
@@ -93,6 +106,7 @@ namespace ServerTest.Agency
                 sessions.Clear(); foreach (var old in oldSessions) sessions.Add(old.Key, old.Value);
                 GeneralSettings.SettingsStore.AgencyTooling = oldEnabled;
                 GameplaySettings.SettingsStore.CanRevert = oldCanRevert;
+                UseRates(oldRates);
                 ServerContext.Clients.Clear(); foreach (var pair in clients) ServerContext.Clients[pair.Key] = pair.Value;
                 VesselStoreSystem.CurrentVessels.Clear(); foreach (var pair in vessels) VesselStoreSystem.CurrentVessels[pair.Key] = pair.Value;
                 scope.Dispose();
@@ -150,6 +164,6 @@ namespace ServerTest.Agency
                 Assert.IsFalse(VesselStoreSystem.VesselExists(id)); Assert.AreEqual(50000d, f.Snapshot.Funds);
             }
         }
-        private static string Proto(Guid id) => "pid = " + id.ToString("N") + "\nname = Fixture\nroot = 0\nPART\n{\nname = probe\nuid = 701\n}\nPART\n{\nname = science\nuid = 702\n}\n" + string.Concat(new[] { "ORBIT", "ACTIONGROUPS", "DISCOVERY", "FLIGHTPLAN", "CTRLSTATE", "VESSELMODULES" }.Select(n => n + "\n{\n}\n"));
+        internal static string Proto(Guid id) => "pid = " + id.ToString("N") + "\nname = Fixture\nroot = 0\nPART\n{\nname = probe\nuid = 701\n}\nPART\n{\nname = science\nuid = 702\n}\n" + string.Concat(new[] { "ORBIT", "ACTIONGROUPS", "DISCOVERY", "FLIGHTPLAN", "CTRLSTATE", "VESSELMODULES" }.Select(n => n + "\n{\n}\n"));
     }
 }

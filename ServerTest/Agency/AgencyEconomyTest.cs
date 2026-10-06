@@ -32,6 +32,7 @@ namespace ServerTest.Agency
             private readonly object savedError = Field("_error").GetValue(null);
             private readonly object savedInitialized = Field("Initialized").GetValue(null);
             private readonly bool oldEnabled = GeneralSettings.SettingsStore.AgencyTooling;
+            private readonly bool oldCanRevert = GameplaySettings.SettingsStore.CanRevert;
             private readonly Action<string> checkpoint = AgencyEconomyStore.PersistenceCheckpoint;
             private readonly Func<DateTime> clock = AgencyEconomyStore.UtcNow;
             private readonly System.Collections.Generic.KeyValuePair<IPEndPoint, ClientStructure>[] clients;
@@ -53,6 +54,7 @@ namespace ServerTest.Agency
                 oldSessions = previousSessions.ToArray(); sessions.Clear();
                 ServerContext.Clients.Clear(); VesselStoreSystem.CurrentVessels.Clear();
                 GeneralSettings.SettingsStore.AgencyTooling = true; GeneralSettings.SettingsStore.GameMode = GameMode.Career;
+                GameplaySettings.SettingsStore.CanRevert = true;
                 AgencyEconomyStore.PersistenceCheckpoint = null;
                 var connection = (NetConnection)RuntimeHelpers.GetUninitializedObject(typeof(NetConnection));
                 typeof(NetConnection).GetField("m_remoteEndPoint", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(connection, new IPEndPoint(IPAddress.Loopback, 32251));
@@ -90,6 +92,7 @@ namespace ServerTest.Agency
                 blocked.Clear(); foreach (var old in oldBlocked) blocked.Add(old);
                 sessions.Clear(); foreach (var old in oldSessions) sessions.Add(old.Key, old.Value);
                 GeneralSettings.SettingsStore.AgencyTooling = oldEnabled;
+                GameplaySettings.SettingsStore.CanRevert = oldCanRevert;
                 ServerContext.Clients.Clear(); foreach (var pair in clients) ServerContext.Clients[pair.Key] = pair.Value;
                 VesselStoreSystem.CurrentVessels.Clear(); foreach (var pair in vessels) VesselStoreSystem.CurrentVessels[pair.Key] = pair.Value;
                 scope.Dispose();

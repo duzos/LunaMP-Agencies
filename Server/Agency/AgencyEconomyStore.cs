@@ -756,6 +756,7 @@ namespace Server.Agency
 
         private static void Revert(EconomyDocument candidate, ClientStructure client, EconomyCommand command)
         {
+            if (!GameplaySettings.SettingsStore.CanRevert) throw new InvalidOperationException("Reverting is disabled by the server.");
             if (!candidate.Launches.TryGetValue(command.LaunchId, out var launch) || launch.AgencyId != client.AgencyId || launch.ActorId != client.UniqueIdentifier || launch.State != LaunchState.Registered || launch.ExternallySettled) throw new InvalidOperationException("Launch cannot be reverted after external settlement.");
             var vessels = candidate.Vessels.Values.Where(v => v.Parts.Any(p => p.LaunchId == launch.LaunchId)).ToArray();
             if (vessels.Length == 0 || vessels.Any(v => v.Parts.Any(p => p.LaunchId != launch.LaunchId) || AgencyVesselMap.Get(v.VesselId)?.OwnerAgencyId != client.AgencyId)) throw new InvalidOperationException("Undock or recover separately; launch ownership has changed.");

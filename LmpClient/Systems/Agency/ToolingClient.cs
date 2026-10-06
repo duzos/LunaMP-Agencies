@@ -213,6 +213,13 @@ namespace LmpClient.Systems.Agency
         }
         internal static bool BeginRevert(EditorFacility facility, bool toLaunch)
         {
+            if (MainSystem.NetworkState >= ClientState.Connected && !SettingsSystem.ServerSettings.CanRevert)
+            {
+                resumeRevert = false;
+                LatestStatus = "Reverting is disabled by the server.";
+                Diagnostics.PlaytestDiagnostics.Write("client.revert.denied", () => $"toLaunch={toLaunch} reason=server-policy");
+                return false;
+            }
             if (!Enabled || resumeRevert) { resumeRevert = false; return true; }
             if (pendingRevert != Guid.Empty || !Ready || !FlightGlobals.ActiveVessel) return false;
             var paid = PaidVessel(FlightGlobals.ActiveVessel.id);

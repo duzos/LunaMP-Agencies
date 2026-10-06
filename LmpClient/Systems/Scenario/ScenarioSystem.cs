@@ -235,8 +235,8 @@ namespace LmpClient.Systems.Scenario
                     // onContractsLoaded handler subsequently calls GenerateContracts(0), KSPCF's
                     // patched implementation restores every contract whose GUID is in
                     // ContractPreLoader's list rather than clearing them all.
-                    // Without this injection the list is empty → all 43 server contracts are
-                    // cleared → 0 Available in Mission Control for non-lock-holders.
+                    // Only ConfiguredContract nodes belong in that mod-specific loader.
+                    // Stock contracts remain in the ContractSystem scenario.
                     try
                     {
                         InjectServerContractsIntoPreLoader(scenarioEntry.ScenarioNode);
@@ -309,7 +309,7 @@ namespace LmpClient.Systems.Scenario
         }
 
         /// <summary>
-        /// Injects the full CONTRACT nodes from the server snapshot into the ContractPreLoader
+        /// Injects only ConfiguredContract nodes from the server snapshot into ContractPreLoader.
         /// scenario node so that KSPCF's ContractPreLoader.OnLoad will store them and
         /// subsequently restore them when ContractConfigurator triggers
         /// <c>ContractSystem.GenerateContracts</c> from its <c>onContractsLoaded</c> handler.
@@ -318,7 +318,7 @@ namespace LmpClient.Systems.Scenario
         /// a whitelist.  Any contract not in that list is removed.  With an empty list every
         /// server contract is cleared and, since <c>generateContractIterations == 0</c> for
         /// non-lock-holders, nothing new is generated → 0 Available.  With full nodes in the
-        /// list KSPCF recognises and restores all server contracts.
+        /// list KSPCF recognises and restores the server's configured contracts.
         ///
         /// The nodes come from <see cref="ShareContracts.ShareContractsSystem.ServerOfferedContractNodes"/>,
         /// which is populated in <see cref="ScenarioMessageHandler.QueueScenarioBytes"/> when
@@ -345,6 +345,9 @@ namespace LmpClient.Systems.Scenario
             var injected = 0;
             foreach (var contractNode in nodes)
             {
+                // CC's loader always constructs ConfiguredContract, regardless of the node's
+                // type. Passing stock contracts here makes it misread their fields and fail them.
+                if (!LmpClient.Harmony.ContractPreLoader_Filter.IsConfiguredContractNode(contractNode)) continue;
                 var guid = contractNode.GetValue("guid");
                 if (string.IsNullOrEmpty(guid) || existingGuids.Contains(guid))
                     continue;

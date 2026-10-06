@@ -20,6 +20,7 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.GameMode = msgData.GameMode;
             SettingsSystem.ServerSettings.TerrainQuality = msgData.TerrainQuality;
             SettingsSystem.ServerSettings.AllowCheats = msgData.AllowCheats;
+            SettingsSystem.ServerSettings.CanRevert = msgData.CanRevert;
             SettingsSystem.ServerSettings.AllowAdmin = msgData.AllowAdmin;
             SettingsSystem.ServerSettings.AllowSackKerbals = msgData.AllowSackKerbals;
             SettingsSystem.ServerSettings.MaxNumberOfAsteroids = msgData.MaxNumberOfAsteroids;
@@ -125,6 +126,9 @@ namespace LmpClient.Systems.SettingsSys
             }
 
             //Never allow quickload, it's useless in a multiplayer game
+            // Revert permission is a server policy even when using a stock difficulty preset.
+            SettingsSystem.ServerSettings.ServerParameters.Flight.CanRestart = msgData.CanRevert;
+            SettingsSystem.ServerSettings.ServerParameters.Flight.CanLeaveToEditor = msgData.CanRevert;
             SettingsSystem.ServerSettings.ServerParameters.Flight.CanQuickLoad = false;
 
             LmpClient.Diagnostics.PlaytestDiagnostics.RequestSnapshot();

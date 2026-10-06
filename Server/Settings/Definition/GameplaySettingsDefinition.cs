@@ -8,7 +8,7 @@ namespace Server.Settings.Definition
     {
         //General options
 
-        [XmlComment(Value = "Allow Reverting")]
+        [XmlComment(Value = "Allow reverting to launch or the editor. Also enforced for agency economy settlements.")]
         public bool CanRevert { get; set; }
 
         [XmlComment(Value = "Missing Crews Respawn")]

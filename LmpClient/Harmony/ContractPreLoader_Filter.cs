@@ -83,15 +83,27 @@ namespace LmpClient.Harmony
         {
             if (MainSystem.NetworkState < ClientState.Connected) return;
 
+            // This check needs no live ContractSystem. The preloader can run before its
+            // singleton exists and always instantiates ConfiguredContract for each node.
+            foreach (var child in new List<ConfigNode>(node.GetNodes("CONTRACT")))
+            {
+                var type = child.GetValue("type");
+                if (string.IsNullOrEmpty(type) || IsConfiguredContractNode(child)) continue;
+                node.RemoveNode(child);
+                Diagnostics.PlaytestDiagnostics.Write("client.contract.preloader-excluded", () => $"guid={child.GetValue("guid")} type={type} reason=stock-loader-only");
+            }
+
             // Guard: ensure ContractSystem has been initialised (it loads before ContractPreLoader).
             if (ContractSystem.Instance == null)
             {
-                LunaLog.LogWarning("[ContractPreLoader_Filter]: ContractSystem.Instance is null — skipping pre-validation.");
+                LunaLog.LogWarning("[ContractPreLoader_Filter]: ContractSystem.Instance is null — skipping parameter validation.");
                 return;
             }
 
             FilterContracts(node);
         }
+        internal static bool IsConfiguredContractNode(ConfigNode node) =>
+            string.Equals(node.GetValue("type"), "ConfiguredContract", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// Removes CONTRACT child nodes from <paramref name="scenarioNode"/> that would

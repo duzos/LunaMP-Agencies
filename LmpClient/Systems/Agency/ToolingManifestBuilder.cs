@@ -24,7 +24,7 @@ namespace LmpClient.Systems.Agency
                     AddCargo(inventory, cargo, index);
                 }
                 parts.Add(new ToolingPart { Name = part.partInfo.name, UnitCost = Math.Max(0, cost),
-                    IsScience = part.partInfo.category == PartCategories.Science || part.FindModuleImplementing<ModuleScienceExperiment>() != null });
+                    IsScience = part.partInfo.category == PartCategories.Science });
             }
             if (crew != null)
                 foreach (var kerbal in crew.GetAllCrew(false))
@@ -68,7 +68,7 @@ namespace LmpClient.Systems.Agency
                         cargo.Add(new ToolingCargo { Name = storedName, Count = quantity, UnitCost = cargoCost, ContainerPartIndex = index });
                     }
                 }
-                parts.Add(new ToolingPart { Name = name, UnitCost = Math.Max(0, cost), IsScience = info.category == PartCategories.Science || info.partPrefab.FindModuleImplementing<ModuleScienceExperiment>() != null });
+                parts.Add(new ToolingPart { Name = name, UnitCost = Math.Max(0, cost), IsScience = info.category == PartCategories.Science });
             }
             if (crew != null)
                 foreach (var kerbal in crew.GetAllCrew(false))

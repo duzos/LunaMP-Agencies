@@ -206,5 +206,42 @@ namespace ServerTest.Agency
                 Assert.AreEqual(49875d, fixture.Snapshot.Funds);
             }
         }
+
+        [DataTestMethod]
+        [DataRow(EconomyOperation.Revert, false)]
+        [DataRow(EconomyOperation.RevertLaunch, false)]
+        [DataRow(EconomyOperation.Revert, true)]
+        [DataRow(EconomyOperation.RevertLaunch, true)]
+        public void RevertPermissionGatesBothSettlementPaths(EconomyOperation operation, bool allowed)
+        {
+            using (var fixture = new AgencyEconomyTest.Fixture())
+            {
+                var id = Launch(fixture, 975, out var launch);
+                var before = fixture.Snapshot;
+                var ownership = AgencyVesselMap.CaptureEpoch();
+                Server.Settings.Structures.GameplaySettings.SettingsStore.CanRevert = allowed;
+                var result = fixture.Execute(new EconomyCommand { Operation = operation, LaunchId = launch });
+                Assert.AreEqual(allowed, result.Success, result.Reason);
+                if (!allowed)
+                {
+                    StringAssert.Contains(result.Reason, "disabled by the server");
+                    Assert.IsFalse(result.RecoveryRequired);
+                    Assert.AreEqual(before.Revision, fixture.Snapshot.Revision);
+                    Assert.AreEqual(before.Funds, fixture.Snapshot.Funds);
+                    Assert.AreEqual(ownership, AgencyVesselMap.CaptureEpoch());
+                    Assert.IsTrue(VesselStoreSystem.VesselExists(id));
+                    Assert.IsTrue(fixture.Snapshot.Vessels.Any(v => v.VesselId == id));
+                    Assert.IsTrue(AgencyEconomyStore.MayPublish(fixture.Client));
+                    // The refusal did not consume or settle the launch: changing the policy
+                    // allows this same request to execute normally.
+                    Server.Settings.Structures.GameplaySettings.SettingsStore.CanRevert = true;
+                    var retry = fixture.Execute(new EconomyCommand { Operation = operation, LaunchId = launch });
+                    Assert.IsTrue(retry.Success, retry.Reason);
+                }
+                Assert.IsFalse(AgencyEconomyStore.MayPublish(fixture.Client));
+                Assert.AreEqual(operation == EconomyOperation.Revert ? 50000d : before.Funds, fixture.Snapshot.Funds);
+                Assert.AreEqual(operation == EconomyOperation.RevertLaunch, VesselStoreSystem.VesselExists(id));
+            }
+        }
     }
 }

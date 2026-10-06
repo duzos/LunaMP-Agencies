@@ -23,9 +23,18 @@ public class ProtoVessel { public Guid vesselID; public bool landed, splashed; p
 public class ShipTemplate { public ConfigNode config; }
 public class ConfigNode
 {
+    public string name;
+    public class Value { public string name, value; }
+    public List<ConfigNode> nodes = new List<ConfigNode>();
+    public List<Value> values = new List<Value>();
+    public ConfigNode(string name = "") { this.name = name; }
+    public void AddValue(string key, string value) => values.Add(new Value { name = key, value = value });
+    public void AddNode(ConfigNode node) => nodes.Add(node);
+    public void RemoveNode(ConfigNode node) => nodes.Remove(node);
+    public void ClearNodes() => nodes.Clear();
     public static ConfigNode Load(string path) => throw new NotSupportedException();
-    public ConfigNode[] GetNodes(string name) => throw new NotSupportedException();
-    public string GetValue(string name) => throw new NotSupportedException();
+    public ConfigNode[] GetNodes(string name) => nodes.FindAll(n => n.name == name).ToArray();
+    public string GetValue(string name) => values.Find(v => v.name == name)?.value;
 }
 public class EditorLogic { public static EditorLogic fetch; public ShipConstruct ship; }
 public static class ShipConstruction { public static VesselCrewManifest ShipManifest; }
@@ -57,6 +66,7 @@ namespace LmpClient.Systems.SettingsSys
     internal sealed class TestSettings
     {
         internal bool AgencyTooling, AgencyTrade;
+        internal bool CanRevert = true;
         internal double ToolingCostMultiplier = 10, TooledLaunchMultiplier = .1, ToolingCombineMultiplier = .1;
     }
     internal static class SettingsSystem { internal static TestSettings ServerSettings = new TestSettings(); }

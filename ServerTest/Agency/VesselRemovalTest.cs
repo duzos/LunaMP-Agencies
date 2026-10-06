@@ -240,12 +240,15 @@ namespace ServerTest.Agency
                 if (economy) id = AgencyEconomyTopologyTest.Launch(fixture, 4601, out _);
                 else id = Stored(fixture.Client.AgencyId, 4601);
                 Assert.IsTrue(File.Exists(VesselFile(id)));
-                var result = VesselRemovalService.Remove(new[] { id }, "test", VesselRemovalMode.Ordinary, null, new VesselRemovalOptions());
-                Assert.IsTrue(result.Success);
-                // No awaiting: the delete is not a background task.
-                Assert.IsFalse(File.Exists(VesselFile(id)));
-                Assert.IsFalse(VesselStoreSystem.VesselExists(id));
-                Assert.IsNull(AgencyVesselMap.Get(id));
+                // Holding the gate blocks any background store task (BackupLock is the same gate), so only a synchronous delete can pass.
+                lock (AgencyVesselMap.TransactionGate)
+                {
+                    var result = VesselRemovalService.Remove(new[] { id }, "test", VesselRemovalMode.Ordinary, null, new VesselRemovalOptions());
+                    Assert.IsTrue(result.Success);
+                    Assert.IsFalse(File.Exists(VesselFile(id)));
+                    Assert.IsFalse(VesselStoreSystem.VesselExists(id));
+                    Assert.IsNull(AgencyVesselMap.Get(id));
+                }
             }
         }
 

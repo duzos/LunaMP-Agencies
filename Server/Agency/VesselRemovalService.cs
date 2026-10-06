@@ -91,7 +91,10 @@ namespace Server.Agency
                 if (permanent) foreach (var id in accepted) if (VesselContext.RemovedVessels.TryAdd(id, 0)) killed.Add(id);
                 // 3. One ownership commit for the whole pass.
                 var epoch = AgencyVesselMap.CaptureEpoch();
-                if (AgencyVesselMap.MapMaintained)
+                if (AgencyVesselMap.MapMaintained && !rules && !AgencyVesselMap.Ready)
+                    // Pure stock mode must not lose upstream removals because the bookkeeping map failed to load.
+                    LunaLog.Warning($"[Agency] Ownership map unavailable; removing without bookkeeping ({reason}).");
+                else if (AgencyVesselMap.MapMaintained)
                 {
                     try { AgencyVesselMap.RemoveMany(accepted, mode, permanent); }
                     catch (Exception e)

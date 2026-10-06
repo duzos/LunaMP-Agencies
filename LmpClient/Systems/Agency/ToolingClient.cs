@@ -297,7 +297,7 @@ namespace LmpClient.Systems.Agency
             }
             if (result.RecoveryRequired) { RecoveryDisconnect(result.Reason); return; }
             // Empty ids are never a match: a RegisterEva result carries neither a launch nor a request of this client.
-            if (pending != null && pending.Launch != Guid.Empty && result.Operation == EconomyOperation.RegisterLaunch && result.LaunchId == pending.Launch)
+            if (pending != null && result.LaunchId != Guid.Empty && result.Operation == EconomyOperation.RegisterLaunch && result.LaunchId == pending.Launch)
             {
                 if (!result.Success) { RecoveryDisconnect(result.Reason); return; }
                 lock (stateLock) bindings.Remove(result.VesselId);

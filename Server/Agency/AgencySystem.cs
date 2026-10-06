@@ -142,7 +142,7 @@ namespace Server.Agency
         {
             var agency = GetAgency(agencyId);
             if (agency == null) return (false, "Agency not found.");
-            if (agency.IsSolo) return (false, "Cannot rename a solo agency.");
+            if (agency.IsSolo && !isAdmin) return (false, "Cannot rename a solo agency.");
             if (!isAdmin && !string.Equals(agency.OwnerUniqueId, actorUniqueId, StringComparison.Ordinal))
                 return (false, "Only the owner (or an admin) can rename.");
             if (string.IsNullOrWhiteSpace(newName)) return (false, "Name cannot be empty.");
@@ -155,12 +155,24 @@ namespace Server.Agency
                 return (false, $"Agency name '{newName}' already in use.");
 
             var before = agency.Name;
+            var promoted = false;
             lock (agency.Lock)
             {
                 agency.Name = newName.Trim();
+                // An admin rename is the only way a solo agency becomes a public one. It keeps its
+                // id, owner, members and data; IsSolo flips with the name so nobody sees one without the other.
+                // Note: AgencyScansatMigration.PickInheritor takes the oldest non-solo agency, so promoting
+                // a solo agency older than every public one can make it the SCANsat inheritor.
+                if (isAdmin && agency.IsSolo)
+                {
+                    agency.IsSolo = false;
+                    promoted = true;
+                }
             }
             AgencyStore.PersistAgency(agency);
             LunaLog.Info($"[Agency] Rename id={agencyId} '{before}'->'{agency.Name}' actor={actorUniqueId} admin={isAdmin}");
+            if (promoted)
+                LunaLog.Info($"[Agency] Promoted solo agency id={agencyId} '{before}' to a public agency named '{agency.Name}' actor={actorUniqueId}");
             AgencyNetwork.BroadcastUpsert(agency);
             return (true, $"Renamed to '{agency.Name}'.");
         }

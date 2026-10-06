@@ -108,6 +108,98 @@ namespace ServerTest.Agency
             Assert.IsTrue(File.Exists(globalFile), "Migration must not remove global crew.");
         }
 
+        private static string MarkerPath => Path.Combine(ServerContext.AgenciesDirectory, ".kerbals-migrated");
+
+        private static string WriteGlobalKerbal()
+        {
+            Directory.CreateDirectory(KerbalSystem.KerbalsPath);
+            var globalFile = Path.Combine(KerbalSystem.KerbalsPath, "Veteran.txt");
+            File.WriteAllText(globalFile, "name = Veteran\nexperience = 15\n");
+            return globalFile;
+        }
+
+        [TestMethod]
+        public void MigrationWritesMarkerWhenThereIsNoGlobalFolder()
+        {
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
+            Assert.IsFalse(Directory.Exists(KerbalSystem.KerbalsPath));
+            Assert.IsFalse(File.Exists(MarkerPath));
+            AgencyKerbalStore.MigrateGlobalKerbalsIfNeeded();
+            Assert.IsTrue(File.Exists(MarkerPath));
+            Assert.IsTrue(AgencyKerbalStore.GlobalMigrationCompleted);
+        }
+
+        [TestMethod]
+        public void MigrationWritesMarkerWhenTheGlobalFolderIsEmpty()
+        {
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
+            Directory.CreateDirectory(KerbalSystem.KerbalsPath);
+            AgencyKerbalStore.MigrateGlobalKerbalsIfNeeded();
+            Assert.IsTrue(File.Exists(MarkerPath));
+        }
+
+        [TestMethod]
+        public void FirstEverMigrationCopiesGlobalRosterIntoLegacyAgenciesAndWritesMarker()
+        {
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = false;
+            var legacy = Create(false);
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
+            GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = true;
+            WriteGlobalKerbal();
+            Assert.IsFalse(File.Exists(MarkerPath));
+            AgencyKerbalStore.MigrateGlobalKerbalsIfNeeded();
+            Assert.IsTrue(File.Exists(MarkerPath));
+            Assert.AreEqual("name = Veteran\nexperience = 15\n", File.ReadAllText(AgencyKerbalStore.KerbalPath(legacy.Id, "Veteran")));
+            Assert.AreEqual(1, Directory.GetFiles(AgencyKerbalStore.KerbalsPath(legacy.Id)).Length);
+        }
+
+        [DataTestMethod]
+        [DataRow(true, 0)]
+        [DataRow(false, 4)]
+        public void AfterMigrationBootInitializesFolderlessAgencyAsNewInsteadOfCopyingGlobalRoster(bool zero, int expectedCount)
+        {
+            // First correct boot: the universe is migrated and the marker written.
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
+            GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = zero;
+            var established = Create(false);
+            var custom = AgencyKerbalStore.KerbalPath(established.Id, "Custom Recruit");
+            File.WriteAllText(custom, "name = Custom Recruit\n");
+            WriteGlobalKerbal();
+            AgencyKerbalStore.MigrateGlobalKerbalsIfNeeded();
+            Assert.IsTrue(File.Exists(MarkerPath));
+
+            // A boot with per-agency kerbals off creates an agency with no Kerbals folder.
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = false;
+            var late = Create(false);
+            Assert.IsFalse(Directory.Exists(AgencyKerbalStore.KerbalsPath(late.Id)));
+
+            // The next correct boot must not treat it as a legacy agency.
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
+            AgencyKerbalStore.MigrateGlobalKerbalsIfNeeded();
+            var lateDir = AgencyKerbalStore.KerbalsPath(late.Id);
+            Assert.IsTrue(Directory.Exists(lateDir));
+            Assert.AreEqual(expectedCount, Directory.GetFiles(lateDir).Length);
+            Assert.IsFalse(File.Exists(AgencyKerbalStore.KerbalPath(late.Id, "Veteran")), "The global roster must not be copied after the migration marker exists.");
+            Assert.AreEqual("name = Custom Recruit\n", File.ReadAllText(custom), "Existing rosters stay untouched.");
+        }
+
+        [DataTestMethod]
+        [DataRow(true, 0)]
+        [DataRow(false, 4)]
+        public void AfterMigrationEnsureDefaultRosterInitializesFolderlessAgencyAsNew(bool zero, int expectedCount)
+        {
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = false;
+            var late = Create(false);
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
+            GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = zero;
+            File.WriteAllText(MarkerPath, "migrated");
+            AgencyKerbalStore.EnsureDefaultRoster(late.Id);
+            Assert.AreEqual(expectedCount, Directory.GetFiles(AgencyKerbalStore.KerbalsPath(late.Id)).Length);
+            GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = !zero;
+            AgencyKerbalStore.EnsureDefaultRoster(late.Id);
+            Assert.AreEqual(expectedCount, Directory.GetFiles(AgencyKerbalStore.KerbalsPath(late.Id)).Length, "An initialized roster must not be reseeded.");
+        }
+
         [TestMethod]
         public void SavedRecruitSurvivesAgencyReloadAndRepeatedAccess()
         {

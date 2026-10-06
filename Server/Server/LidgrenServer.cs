@@ -114,10 +114,12 @@ namespace Server.Server
             using var idleTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(tickMs));
             var shutdownToken = MainServer.CancellationTokenSrc.Token;
 
+            var ownershipSweep = DateTime.UtcNow;
             try
             {
                 while (ServerContext.ServerRunning)
                 {
+                    if(global::Server.Agency.VesselOwnershipSystem.Enabled && DateTime.UtcNow>=ownershipSweep) { global::Server.Agency.VesselOwnershipSystem.SweepExpired(); ownershipSweep=DateTime.UtcNow.AddSeconds(1); }
                     var msg = Server.ReadMessage();
                     if (msg != null)
                     {

@@ -25,7 +25,10 @@ namespace LmpClient.Systems.VesselProtoSys
         /// </summary>
         public void FlightReady()
         {
-            if (VesselCommon.IsSpectating || FlightGlobals.ActiveVessel == null || FlightGlobals.ActiveVessel.id == Guid.Empty)
+            if (FlightGlobals.ActiveVessel == null || FlightGlobals.ActiveVessel.id == Guid.Empty ||
+                (VesselCommon.IsSpectating && !(LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled &&
+                LmpClient.Systems.Agency.AgencySystem.Singleton.CanControlVessel(FlightGlobals.ActiveVessel.id) &&
+                !System.VesselProtos.ContainsKey(FlightGlobals.ActiveVessel.id))))
                 return;
 
             System.MessageSender.SendVesselMessage(FlightGlobals.ActiveVessel, true, BuildFlightReadyReason());
@@ -119,6 +122,7 @@ namespace LmpClient.Systems.VesselProtoSys
 
         public void PartUndocked(Part part, DockedVesselInfo dockedInfo, Vessel originalVessel)
         {
+            if (LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled) return; // Ordered after the split announcement by its completion handler.
             if (VesselCommon.IsSpectating) return;
 
             //Quarantine both vessel ids to avoid applying stale proto updates during local rewrites.
@@ -135,6 +139,7 @@ namespace LmpClient.Systems.VesselProtoSys
 
         public void PartDecoupled(Part part, float breakForce, Vessel originalVessel)
         {
+            if (LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled) return; // Ordered after the split announcement by its completion handler.
             if (VesselCommon.IsSpectating || originalVessel == null) return;
 
             //Quarantine both vessel ids; local topology changes can arrive in bursts.
@@ -151,6 +156,7 @@ namespace LmpClient.Systems.VesselProtoSys
 
         public void PartCoupled(Part partFrom, Part partTo, Guid removedVesselId)
         {
+            if (LmpClient.Systems.Agency.DockingCoordinator.Replaying) return;
             if (VesselCommon.IsSpectating) return;
 
             //Quarantine both surviving and removed ids to block stale resurrection updates.

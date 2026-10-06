@@ -56,8 +56,9 @@ namespace LmpClient.Network
         /// <summary>
         /// Adds a new message to the queue
         /// </summary>
-        public static void QueueOutgoingMessage(IMessageBase message)
+        public static void QueueOutgoingMessage(IMessageBase message, long? vesselEpoch = null)
         {
+            LmpClient.Systems.Agency.VesselPublicationGuard.Stamp(message, vesselEpoch ?? LmpClient.Systems.Agency.VesselPublicationGuard.CaptureEpoch());
             OutgoingMessages.Enqueue(message);
         }
 
@@ -67,6 +68,9 @@ namespace LmpClient.Network
         /// </summary>
         private static bool SendNetworkMessage(IMessageBase message)
         {
+            using (LmpClient.Systems.Agency.VesselPublicationGuard.EnterSend(message, out var allowed))
+            {
+            if (!allowed) { message.Recycle(); return false; }
             message.Data.SentTime = LunaNetworkTime.UtcNow.Ticks;
             try
             {
@@ -125,6 +129,7 @@ namespace LmpClient.Network
             {
                 NetworkMain.HandleDisconnectException(e);
                 return false;
+            }
             }
         }
     }

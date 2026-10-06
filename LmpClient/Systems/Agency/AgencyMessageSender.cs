@@ -10,7 +10,7 @@ using System;
 
 namespace LmpClient.Systems.Agency
 {
-    public class AgencyMessageSender : SubSystem<AgencySystem>, IMessageSender
+    public partial class AgencyMessageSender : SubSystem<AgencySystem>, IMessageSender
     {
         public void SendMessage(IMessageData msg)
         {

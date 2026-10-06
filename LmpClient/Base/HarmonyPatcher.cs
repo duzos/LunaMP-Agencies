@@ -57,6 +57,7 @@ namespace LmpClient.Base
         private static void PatchOptionalMods()
         {
             AgencyLaunchSites.Install(HarmonyInstance);
+            AgencyVesselDocking.Install(HarmonyInstance);
             SuppressClickThroughBlockerPopup();
             PatchContractPreLoader();
         }

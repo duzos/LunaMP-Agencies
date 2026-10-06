@@ -1,3 +1,5 @@
+using Server.Agency;
+using LmpCommon.Agency;
 using Server.Diagnostics;
 using ByteSizeLib;
 using LmpCommon.Message.Data.Vessel;
@@ -22,6 +24,7 @@ namespace Server.Message
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
             var messageData = message.Data as VesselBaseMsgData;
+            if (VesselOwnershipSystem.Enabled && (VesselOwnershipSystem.IsRejected(client) || !AgencyVesselMap.Ready || (messageData != null && AgencyVesselMap.IsAbsorbed(messageData.VesselId) && messageData.VesselMessageType != VesselMessageType.Couple))) return;
             switch (messageData?.VesselMessageType)
             {
                 case VesselMessageType.Sync:
@@ -71,12 +74,14 @@ namespace Server.Message
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Decouple:
+                    if (VesselOwnershipSystem.Enabled) { var split=(VesselDecoupleMsgData)messageData; lock(AgencyVesselMap.TransactionGate) if(!VesselOwnershipSystem.CanControl(client,split.VesselId) || !AgencyVesselMap.RestoreSplit(split.VesselId,split.NewVesselId,0,split.PartFlightId)) return; VesselOwnershipSystem.Changed(); }
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Couple:
                     HandleVesselCouple(client, messageData);
                     break;
                 case VesselMessageType.Undock:
+                    if (VesselOwnershipSystem.Enabled) { var split=(VesselUndockMsgData)messageData; lock(AgencyVesselMap.TransactionGate) if(!VesselOwnershipSystem.CanControl(client,split.VesselId) || !AgencyVesselMap.RestoreSplit(split.VesselId,split.NewVesselId,split.DockedInfoRootPartUId,split.PartFlightId)) return; VesselOwnershipSystem.Changed(); }
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 default:
@@ -87,9 +92,26 @@ namespace Server.Message
         private static void HandleVesselRemove(ClientStructure client, VesselBaseMsgData message)
         {
             var data = (VesselRemoveMsgData)message;
+            if(VesselOwnershipSystem.Enabled)
+            {
+                string removedName;
+                bool existed;
+                lock(AgencyVesselMap.TransactionGate)
+                {
+                    if(!VesselOwnershipSystem.CanControl(client,data.VesselId) || (LockSystem.LockQuery.ControlLockExists(data.VesselId) && !LockSystem.LockQuery.ControlLockBelongsToPlayer(data.VesselId,client.PlayerName))) return;
+                    existed = VesselStoreSystem.VesselExists(data.VesselId);
+                    removedName = existed ? TryGetVesselName(data.VesselId) : null;
+                    AgencyVesselMap.Remove(data.VesselId);
+                    if(data.AddToKillList) VesselContext.RemovedVessels.TryAdd(data.VesselId,0);
+                    VesselStoreSystem.RemoveVessel(data.VesselId);
+                }
+                if (existed) CraftCreationAndRemovalLog.LogRemoved(data.VesselId, removedName, client.PlayerName, data.Reason);
+                VesselOwnershipSystem.Changed();MessageQueuer.RelayMessage<VesselSrvMsg>(client,data);return;
+            }
 
             if (LockSystem.LockQuery.ControlLockExists(data.VesselId) && !LockSystem.LockQuery.ControlLockBelongsToPlayer(data.VesselId, client.PlayerName))
                 return;
+
 
             // Publish the kill-list entry BEFORE touching the store so any in-flight proto task
             // (VesselDataUpdater.RawConfigNodeInsertOrUpdate schedules its store write on Task.Run)
@@ -130,6 +152,31 @@ namespace Server.Message
             }
 
             var vesselText = Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes);
+            if(VesselOwnershipSystem.Enabled)
+            {
+                lock(AgencyVesselMap.TransactionGate)
+                {
+                    if(!AgencyVesselMap.Ready || AgencyVesselMap.IsAbsorbed(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
+                    global::Server.System.Vessel.Classes.Vessel parsed;
+                    try { parsed=new global::Server.System.Vessel.Classes.Vessel(vesselText); } catch { return; }
+                    if(!Guid.TryParse(parsed.Fields.GetSingle("pid")?.Value,out var parsedId) || parsedId!=msgData.VesselId) return;
+                    if(global::Server.Settings.Structures.GeneralSettings.SettingsStore.ModControl && parsed.Parts.GetAllValues().Select(p=>p.Fields.GetSingle("name").Value).Except(ModFileSystem.ModControl.AllowedParts).Any()) return;
+                    var topologyChild=AgencyVesselMap.IsPendingSplit(msgData.VesselId) || AgencyVesselMap.Get(msgData.VesselId)!=null;
+                    if(!AgencyVesselMap.ResolveSplit(msgData.VesselId,AgencyVesselMap.PartIds(parsed))) return;
+                    var existing=VesselStoreSystem.VesselExists(msgData.VesselId);
+                    if(!existing) AgencyVesselMap.RegisterNew(msgData.VesselId,client.AgencyId);
+                    VesselStoreSystem.CurrentVessels[msgData.VesselId]=parsed;
+                    if(!existing && !topologyChild)
+                    {
+                        var agency=AgencySystem.GetAgency(client.AgencyId);
+                        if(agency!=null) { bool counted;lock(agency.Lock) { counted=agency.CountedVesselIds.Add(msgData.VesselId);if(counted) agency.VesselsLaunched++; } if(counted) { AgencyStore.PersistAgency(agency);AgencyNetwork.BroadcastUpsert(agency); } }
+                        CraftCreationAndRemovalLog.LogCreated(msgData.VesselId,CraftCreationAndRemovalLog.ExtractVesselName(vesselText),client.PlayerName,msgData.Reason);
+                    }
+                }
+                AgencyNetwork.BroadcastVesselMapEntry(msgData.VesselId,AgencyVesselMap.Get(msgData.VesselId)?.OwnerAgencyId??Guid.Empty);
+                MessageQueuer.RelayMessage<VesselSrvMsg>(client,msgData);
+                return;
+            }
             var isNewVessel = !VesselStoreSystem.VesselExists(msgData.VesselId);
             PlaytestDiagnostics.Write("vessel.proto", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} firstSeen={isNewVessel} bytes={msgData.NumBytes}", true);
             if (isNewVessel)
@@ -223,6 +270,16 @@ namespace Server.Message
         {
             var msgData = (VesselCoupleMsgData)message;
 
+            if(VesselOwnershipSystem.Enabled)
+            {
+                var removedName = TryGetVesselName(msgData.CoupledVesselId);
+                if(!VesselOwnershipSystem.Couple(client,msgData,out var newlyApplied) || !newlyApplied) return;
+                CraftCreationAndRemovalLog.LogRemoved(msgData.CoupledVesselId, removedName, client.PlayerName, "Coupled/Docked");
+                MessageQueuer.RelayMessage<VesselSrvMsg>(client,msgData);
+                var merged=ServerContext.ServerMessageFactory.CreateNewMessageData<VesselProtoMsgData>(); merged.VesselId=msgData.VesselId; merged.ForceReload=true;merged.Data=msgData.MergedVesselData;merged.NumBytes=merged.Data.Length;merged.Reason="Authoritative coupled vessel";MessageQueuer.RelayMessage<VesselSrvMsg>(client,merged);
+                var removed=ServerContext.ServerMessageFactory.CreateNewMessageData<VesselRemoveMsgData>(); removed.VesselId=msgData.CoupledVesselId;removed.Reason="Coupled/Docked";MessageQueuer.SendToAllClients<VesselSrvMsg>(removed);
+                return;
+            }
             LunaLog.Debug($"Coupling message received! Dominant vessel: {msgData.VesselId}");
             MessageQueuer.RelayMessage<VesselSrvMsg>(client, msgData);
 

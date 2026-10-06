@@ -1,4 +1,4 @@
-﻿using LmpClient.Extensions;
+using LmpClient.Extensions;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.VesselPositionSys;
 using LmpClient.VesselUtilities;
@@ -34,6 +34,11 @@ namespace LmpClient.Systems.VesselDecoupleSys
             {
                 if (protoPart.partRef)
                 {
+                    var previousIgnore = VesselDecoupleSystem.Singleton.IgnoreEvents;
+                    var previousVessel = VesselDecoupleSystem.Singleton.ManuallyDecouplingVesselId;
+                    using (LmpClient.Systems.Agency.DockingCoordinator.Replay())
+                    try
+                    {
                     VesselDecoupleSystem.Singleton.ManuallyDecouplingVesselId = protoPart.partRef.vessel.id;
                     VesselDecoupleSystem.Singleton.IgnoreEvents = true;
 
@@ -47,8 +52,12 @@ namespace LmpClient.Systems.VesselDecoupleSys
 
                     VesselPositionSystem.Singleton.ForceUpdateVesselPosition(NewVesselId);
 
-                    VesselDecoupleSystem.Singleton.IgnoreEvents = false;
-                    VesselDecoupleSystem.Singleton.ManuallyDecouplingVesselId = Guid.Empty;
+                    }
+                    finally
+                    {
+                        VesselDecoupleSystem.Singleton.IgnoreEvents = previousIgnore;
+                        VesselDecoupleSystem.Singleton.ManuallyDecouplingVesselId = previousVessel;
+                    }
                 }
             }
         }

@@ -1,4 +1,4 @@
-namespace LmpCommon.Message.Types
+﻿namespace LmpCommon.Message.Types
 {
     /// <summary>
     /// Subtypes carried by AgencyCliMsg / AgencySrvMsg.
@@ -16,6 +16,11 @@ namespace LmpCommon.Message.Types
         SrvReply = 5,
         SrvVesselMapSync = 6,
         SrvVesselMapEntry = 7,
+        SrvDockStatus = 8,
+        SrvVesselOwnershipResult = 9,
+        CliVesselOwnershipCommand = 30,
+        CliDockRequest = 31,
+        CliDockResponse = 32,
 
         // Client -> Server (player actions)
         CliCreate = 20,

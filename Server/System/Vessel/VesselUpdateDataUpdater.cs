@@ -29,6 +29,7 @@ namespace Server.System.Vessel
         /// </summary>
         public static void WriteUpdateDataToFile(VesselBaseMsgData message)
         {
+            var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
             if (!(message is VesselUpdateMsgData msgData)) return;
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
@@ -38,9 +39,10 @@ namespace Server.System.Vessel
 
                 _ = Task.Run(() =>
                 {
-                    lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
+                    lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
+                lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!global::Server.Agency.AgencyVesselMap.CanApplyEpoch(msgData.VesselId,ownershipEpoch) || !VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
                         vessel.Fields.Update("name", msgData.Name);
                         vessel.Fields.Update("type", msgData.Type);

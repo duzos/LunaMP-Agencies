@@ -20,6 +20,7 @@ namespace LmpClient.Systems.VesselRemoveSys
         /// </summary>
         public void OnVesselWillDestroy(Vessel dyingVessel)
         {
+            if (!LmpClient.Systems.Agency.DockingCoordinator.BeforeDestroy(dyingVessel)) return;
             //Only send the vessel remove msg if we own the unloaded update lock
             if (!LockSystem.LockQuery.UnloadedUpdateLockExists(dyingVessel.id) ||
                 LockSystem.LockQuery.UnloadedUpdateLockBelongsToPlayer(dyingVessel.id, SettingsSystem.CurrentSettings.PlayerName) || dyingVessel.id == _recoveringTerminatingVesselId)

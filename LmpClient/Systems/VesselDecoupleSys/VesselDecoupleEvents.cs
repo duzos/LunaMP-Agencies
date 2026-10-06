@@ -28,6 +28,13 @@ namespace LmpClient.Systems.VesselDecoupleSys
 
             LunaLog.Log($"Decouple complete! Part: {part.partName} Vessel: {part.vessel.id}");
             System.MessageSender.SendVesselDecouple(originalVessel, part.flightID, breakForce, part.vessel.id);
+            if (LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled)
+            {
+                LmpClient.Systems.VesselProtoSys.LocalTopologyTracker.RecordMutation(part.vessel.id);
+                LmpClient.Systems.VesselProtoSys.LocalTopologyTracker.RecordMutation(originalVessel.id);
+                LmpClient.Systems.VesselProtoSys.VesselProtoSystem.Singleton.MessageSender.SendVesselMessage(part.vessel, reason: "Agency split child");
+                LmpClient.Systems.VesselProtoSys.VesselProtoSystem.Singleton.DelayedSendVesselMessage(originalVessel.id, 0.5f, reason: "Agency split parent");
+            }
         }
     }
 }

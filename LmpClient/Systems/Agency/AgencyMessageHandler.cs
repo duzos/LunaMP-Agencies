@@ -43,6 +43,16 @@ namespace LmpClient.Systems.Agency
                 case AgencyMessageType.SrvVesselMapEntry:
                     Handle((AgencyVesselMapEntryMsgData)data);
                     break;
+                case AgencyMessageType.SrvDockStatus:
+                    var dock = (AgencyDockStatusMsgData)data;
+                    System.ApplyDockStatus(new DockConsentSnapshot { RequestId = dock.RequestId, SourceVesselId = dock.SourceVesselId, TargetVesselId = dock.TargetVesselId,
+                        RequesterAgencyId = dock.RequesterAgencyId, RequesterName = dock.RequesterName, Status = dock.Status, ExpiresUtcTicks = dock.ExpiresUtcTicks,
+                        Reason = dock.Reason, GrantId = dock.GrantId, OperationId = dock.OperationId });
+                    break;
+                case AgencyMessageType.SrvVesselOwnershipResult:
+                    var result = (AgencyVesselOwnershipResultMsgData)data;
+                    System.ApplyOwnershipResult(new OwnershipResultSnapshot { RequestId = result.RequestId, VesselId = result.VesselId, Success = result.Success, Reason = result.Reason });
+                    break;
                 default:
                     LunaLog.LogWarning($"[Agency] Unhandled Srv subtype {data.AgencyMessageType}");
                     break;
@@ -52,6 +62,7 @@ namespace LmpClient.Systems.Agency
 
         private static void Handle(AgencyVesselMapSyncMsgData data)
         {
+            System.ApplyOwnership(data.OwnershipSnapshotPresent, data.OwnershipRevision, data.OwnershipRecords, true);
             System.VesselAgencyMap.Clear();
             for (int i = 0; i < data.VesselIds.Length; i++)
                 System.VesselAgencyMap[data.VesselIds[i]] = data.AgencyIds[i];
@@ -60,6 +71,7 @@ namespace LmpClient.Systems.Agency
 
         private static void Handle(AgencyVesselMapEntryMsgData data)
         {
+            System.ApplyOwnershipEntry(data);
             if (data.AgencyId == global::System.Guid.Empty)
                 System.VesselAgencyMap.TryRemove(data.VesselId, out _);
             else

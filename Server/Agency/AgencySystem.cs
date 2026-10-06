@@ -1,4 +1,4 @@
-using Server.Diagnostics;
+﻿using Server.Diagnostics;
 using LmpCommon.Agency;
 using Server.Client;
 using Server.Context;
@@ -180,6 +180,7 @@ namespace Server.Agency
             if (!removal.Success) return removal;
             AgencyScenarioStore.RemoveAgency(agencyId);
             AgencyStore.DeleteAgencyFiles(agencyId);
+            if(VesselOwnershipSystem.Enabled) { try { AgencyVesselMap.RemoveAgency(agencyId); } catch(Exception e) { LunaLog.Warning("Ownership cleanup deferred: "+e.GetType().Name); } VesselOwnershipSystem.Changed(); }
 
             // Demote members to solo agencies to preserve invariant.
             string[] orphans;
@@ -194,6 +195,7 @@ namespace Server.Agency
                 var solo = EnsureSoloAgency(orphan, display);
                 if (client != null)
                     client.AgencyId = solo.Id;
+                    if (VesselOwnershipSystem.Enabled) VesselOwnershipSystem.Changed();
             }
 
             LunaLog.Info($"[Agency] Delete id={agencyId} name='{agency.Name}' by={actorUniqueId} force={force} orphans={orphans.Length}");
@@ -582,6 +584,7 @@ namespace Server.Agency
                 }
                 AgencyScenarioStore.RemoveAgency(agency.Id);
                 AgencyStore.DeleteAgencyFiles(agency.Id);
+                if(VesselOwnershipSystem.Enabled) { try { AgencyVesselMap.RemoveAgency(agency.Id); } catch(Exception e) { LunaLog.Warning("Ownership cleanup deferred: "+e.GetType().Name); } VesselOwnershipSystem.Changed(); }
                 AgencyNetwork.BroadcastDelete(agency.Id);
                 return;
             }
@@ -611,6 +614,7 @@ namespace Server.Agency
             if (client == null) return;
 
             client.AgencyId = agencyId;
+            if (VesselOwnershipSystem.Enabled) VesselOwnershipSystem.Changed();
             if (!string.IsNullOrEmpty(reconnectReason))
                 AgencyNetwork.KickForAgencyChange(uniqueId, reconnectReason);
         }
@@ -621,7 +625,7 @@ namespace Server.Agency
         private static void ApplyClientAgencyAssignmentSilent(string uniqueId, Guid agencyId)
         {
             var client = AgencyNetwork.GetOnlinePlayerByUniqueId(uniqueId);
-            if (client != null) client.AgencyId = agencyId;
+            if (client != null) { client.AgencyId = agencyId; if (VesselOwnershipSystem.Enabled) VesselOwnershipSystem.Changed(); }
         }
 
         #endregion

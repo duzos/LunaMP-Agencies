@@ -1,4 +1,4 @@
-using Server.Diagnostics;
+﻿using Server.Diagnostics;
 using LmpCommon;
 using LmpCommon.Time;
 using Server.Agency;
@@ -146,6 +146,7 @@ namespace Server
                 AgencyStore.LoadExistingAgencies();
                 AgencyScenarioStore.LoadAllExisting();
                 AgencyVesselMap.Load();
+                if (GeneralSettings.SettingsStore.AgencyVesselOwnership) { AgencyVesselMap.RecoverJournal(); if (!AgencyVesselMap.Ready) throw new global::System.IO.InvalidDataException("Ownership data unavailable."); }
                 AgencyLaunchSiteStore.Load();
                 AgencyMigration.RunIfNeeded();
 

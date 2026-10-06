@@ -44,6 +44,11 @@ namespace LmpClient.Systems.Lock
         /// <param name="immediate">Acquire the lock immediately without waiting confirmation from the server</param>
         private void AcquireLock(LockDefinition lockDefinition, bool force = false, bool immediate = false)
         {
+            if (lockDefinition.Type == LockType.Control && LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled)
+            {
+                if (!LmpClient.Systems.Agency.AgencySystem.Singleton.CanControlVessel(lockDefinition.VesselId) || LmpClient.Systems.Agency.VesselPublicationGuard.Pending) return;
+                immediate = false;
+            }
             var msgData = NetworkMain.CliMsgFactory.CreateNewMessageData<LockAcquireMsgData>();
             msgData.Lock = lockDefinition;
             msgData.Force = force;
@@ -148,6 +153,7 @@ namespace LmpClient.Systems.Lock
         /// </summary>
         private void ReleaseLock(LockDefinition lockDefinition)
         {
+            if (LmpClient.Systems.Agency.VesselPublicationGuard.Pending) return;
             var msgData = NetworkMain.CliMsgFactory.CreateNewMessageData<LockReleaseMsgData>();
             msgData.Lock = lockDefinition;
 

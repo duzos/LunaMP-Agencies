@@ -1,4 +1,4 @@
-using LmpCommon.Agency;
+﻿using LmpCommon.Agency;
 using Server.Client;
 using Server.Context;
 using Server.Diagnostics;
@@ -125,6 +125,10 @@ namespace Server.Agency
                 {
                     try { Persist(candidate); }
                     catch (Exception e) { return (false, $"Launch-site assignments were not changed: persistence failed ({e.GetType().Name})."); }
+                }
+
+                if (changed)
+                {
                     _assignments = candidate;
                     _revision++;
                 }

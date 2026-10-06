@@ -17,6 +17,7 @@ namespace LmpClient.Harmony
         [HarmonyPrefix]
         private static bool PrefixUndock(Part __instance, DockedVesselInfo newVesselInfo, ref Vessel __state)
         {
+            if (!LmpClient.Systems.Agency.DockingCoordinator.BeforeTopologyChange()) { __state = null; return false; }
             var dockingNode = __instance.FindModulesImplementing<ModuleDockingNode>().FirstOrDefault();
             if (dockingNode != null && !DockingPortUtil.EnsureRecoverableForUndock(dockingNode,
                     "Part.Undock", out var failureReason))
@@ -28,6 +29,7 @@ namespace LmpClient.Harmony
             }
 
             __state = __instance.vessel;
+            LmpClient.Systems.Agency.VesselOwnershipClient.BeginSplit();
             PartEvent.onPartUndocking.Fire(__instance, newVesselInfo);
             return true;
         }
@@ -39,6 +41,12 @@ namespace LmpClient.Harmony
                 return;
 
             PartEvent.onPartUndocked.Fire(__instance, newVesselInfo, __state);
+        }
+        [HarmonyFinalizer]
+        private static System.Exception Finalizer(System.Exception __exception, Vessel __state)
+        {
+            if (__state != null) LmpClient.Systems.Agency.VesselOwnershipClient.EndSplit();
+            return __exception;
         }
     }
 }

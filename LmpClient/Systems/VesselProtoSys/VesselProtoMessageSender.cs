@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpClient.Extensions;
 using LmpClient.Network;
@@ -34,6 +34,7 @@ namespace LmpClient.Systems.VesselProtoSys
         /// </summary>
         public void SendVesselMessage(Vessel vessel, bool forceReload = false, string reason = null)
         {
+            if (LmpClient.Systems.Agency.VesselPublicationGuard.Pending) return;
             if (vessel == null || vessel.state == Vessel.State.DEAD || VesselRemoveSystem.Singleton.VesselWillBeKilled(vessel.id))
                 return;
 
@@ -50,9 +51,10 @@ namespace LmpClient.Systems.VesselProtoSys
             }
             else
             {
+                var epoch = LmpClient.Systems.Agency.VesselPublicationGuard.CaptureEpoch();
                 //Orbit driver is not ready so wait max 10 frames until it's ready
                 CoroutineUtil.StartConditionRoutine("SendVesselMessage",
-                    () => SendVesselMessage(vessel, forceReload, reason),
+                    () => { if (LmpClient.Systems.Agency.VesselPublicationGuard.IsCurrent(epoch)) SendVesselMessage(vessel, forceReload, reason); },
                     () => vessel.orbitDriver.Ready(), 10);
             }
         }
@@ -64,15 +66,17 @@ namespace LmpClient.Systems.VesselProtoSys
             if (protoVessel == null || protoVessel.vesselID == Guid.Empty) return;
             //Doing this in another thread can crash the game as during the serialization into a config node Lingoona is called...
             //TODO: Check if this works fine with the new unity version as it used to crash....
-            TaskFactory.StartNew(() => PrepareAndSendProtoVessel(protoVessel, forceReload, reason));
+            var epoch = LmpClient.Systems.Agency.VesselPublicationGuard.CaptureEpoch();
+            TaskFactory.StartNew(() => PrepareAndSendProtoVessel(protoVessel, forceReload, reason, epoch));
             //PrepareAndSendProtoVessel(protoVessel);
         }
 
         /// <summary>
         /// This method prepares the protovessel class and send the message, it's intended to be run in another thread
         /// </summary>
-        private void PrepareAndSendProtoVessel(ProtoVessel protoVessel, bool forceReload, string reason)
+        private void PrepareAndSendProtoVessel(ProtoVessel protoVessel, bool forceReload, string reason, long epoch)
         {
+            if (!LmpClient.Systems.Agency.VesselPublicationGuard.IsCurrent(epoch)) return;
             //Never send empty vessel id's (it happens with flags...)
             if (protoVessel.vesselID == Guid.Empty) return;
 
@@ -92,7 +96,7 @@ namespace LmpClient.Systems.VesselProtoSys
                         Array.Resize(ref msgData.Data, numBytes);
                     Array.Copy(VesselSerializedBytes, 0, msgData.Data, 0, numBytes);
 
-                    SendMessage(msgData);
+                    NetworkSender.QueueOutgoingMessage(MessageFactory.CreateNew<VesselCliMsg>(msgData), epoch);
                 }
                 else
                 {

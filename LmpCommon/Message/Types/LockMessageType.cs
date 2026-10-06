@@ -5,6 +5,7 @@
         ListRequest = 0,
         ListReply = 1,
         Acquire = 2,
-        Release = 3
+        Release = 3,
+        AcquireDenied = 4
     }
 }

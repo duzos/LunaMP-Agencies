@@ -9,6 +9,10 @@ using LmpCommon.Message.Data.Agency;
 using LmpCommon.Message.Data.Chat;
 using LmpCommon.Message.Data.Handshake;
 using LmpCommon.Message.Data.Kerbal;
+using LmpCommon.Message.Data.Lock;
+using LmpCommon.Message.Data.Vessel;
+using LmpCommon.Message.Data.PlayerConnection;
+using LmpCommon.Locks;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
 using System;
@@ -36,6 +40,14 @@ internal sealed record ChatSnapshot(int Generation, string From, string Text, Ch
 internal sealed record KerbalSnapshot(string Name, string ConfigNodeText);
 internal sealed record KerbalRosterSnapshot(int Generation, IReadOnlyList<KerbalSnapshot> Kerbals) : BotSnapshot(Generation);
 internal sealed record KerbalProtoSnapshot(int Generation, KerbalSnapshot Kerbal) : BotSnapshot(Generation);
+internal sealed record ControlSnapshot(int Generation, Guid VesselId, string Player, bool Granted, string Reason) : BotSnapshot(Generation);
+internal sealed record OwnershipResultSnapshot(int Generation, Guid RequestId, Guid VesselId, bool Success, string Reason) : BotSnapshot(Generation);
+internal sealed record DockStatusSnapshot(int Generation, Guid RequestId, Guid SourceVesselId, Guid TargetVesselId,
+    Guid RequesterAgencyId, DockConsentStatus Status, long ExpiresUtcTicks, string Reason, Guid OperationId, Guid GrantId) : BotSnapshot(Generation);
+internal sealed record VesselProtoSnapshot(int Generation, Guid VesselId, string Text) : BotSnapshot(Generation);
+internal sealed record VesselOwnerSnapshot(Guid VesselId, Guid OwnerAgencyId, IReadOnlyList<Guid> CoOwners, VesselDockingPolicy Policy);
+internal sealed record OwnershipMapSnapshot(int Generation, bool Ready, long Revision, IReadOnlyList<VesselOwnerSnapshot> Records) : BotSnapshot(Generation);
+internal sealed record PlayerLeftSnapshot(int Generation, string Player) : BotSnapshot(Generation);
 
 /// <summary>Real protocol client. All retained state is copied before pooled messages are recycled.</summary>
 internal sealed class BotClient : IAsyncDisposable
@@ -117,6 +129,43 @@ internal sealed class BotClient : IAsyncDisposable
         => WaitForAsync<StatusSnapshot>(s => s.Status == NetConnectionStatus.Disconnected, cancellationToken);
 
     public void RequestKerbals() => Send<KerbalCliMsg, KerbalsRequestMsgData>(_ => { });
+    public void RequestVessels() => Send<VesselCliMsg, VesselSyncMsgData>(d => { d.VesselIds = Array.Empty<Guid>(); d.VesselsCount = 0; });
+    public void AcquireControl(Guid vessel, bool force = false) => Send<LockCliMsg, LockAcquireMsgData>(d =>
+    {
+        d.Lock = new LockDefinition(LockType.Control, Name, vessel);
+        d.Force = force;
+    });
+    public void UploadVessel(Guid vessel, string text) => Send<VesselCliMsg, VesselProtoMsgData>(d =>
+    {
+        d.VesselId = vessel;
+        d.Data = Encoding.UTF8.GetBytes(text);
+        d.NumBytes = d.Data.Length;
+        d.ForceReload = false;
+        d.Reason = "Headless ownership fixture";
+    });
+    public Guid OwnershipCommand(VesselOwnershipOperation operation, Guid vessel, Guid target = default, VesselDockingPolicy policy = VesselDockingPolicy.Nobody)
+    {
+        var request = Guid.NewGuid();
+        Send<AgencyCliMsg, AgencyVesselOwnershipCommandMsgData>(d =>
+        {
+            d.RequestId = request; d.VesselId = vessel; d.TargetAgencyId = target; d.Operation = operation; d.DockingPolicy = policy;
+        });
+        return request;
+    }
+    public Guid RequestDock(Guid source, Guid target)
+    {
+        var request = Guid.NewGuid();
+        Send<AgencyCliMsg, AgencyDockRequestMsgData>(d => { d.RequestId = request; d.SourceVesselId = source; d.TargetVesselId = target; });
+        return request;
+    }
+    public void AnswerDock(Guid request, bool accept) => Send<AgencyCliMsg, AgencyDockResponseMsgData>(d => { d.RequestId = request; d.Accept = accept; });
+    public void CompleteDock(Guid operation, Guid grant, Guid dominant, uint dominantPart, Guid weak, uint weakPart, string merged)
+        => Send<VesselCliMsg, VesselCoupleMsgData>(d =>
+        {
+            d.OperationId = operation; d.GrantId = grant; d.VesselId = dominant; d.PartFlightId = dominantPart;
+            d.CoupledVesselId = weak; d.CoupledPartFlightId = weakPart; d.Trigger = (int)CoupleTrigger.DockingNode;
+            d.SubspaceId = 0; d.MergedVesselData = Encoding.UTF8.GetBytes(merged);
+        });
     public void SendAdmin(string password, AgencyAdminOp operation, Guid agency, string argument)
         => Send<AgencyCliMsg, AgencyAdminOpMsgData>(data =>
         {
@@ -270,6 +319,8 @@ internal sealed class BotClient : IAsyncDisposable
 
     private static AgencySnapshot CopyAgency(AgencyInfo agency)
         => new(agency.Id, agency.Name, agency.IsSolo, Array.AsReadOnly(agency.MemberUniqueIds.ToArray()));
+    private static VesselOwnerSnapshot CopyOwnership(VesselOwnershipRecord record)
+        => new(record.VesselId, record.OwnerAgencyId, Array.AsReadOnly(record.CoOwnerAgencyIds.ToArray()), record.DockingPolicy);
     private static KerbalSnapshot CopyKerbal(KerbalInfo kerbal)
         => new(kerbal.KerbalName, Encoding.UTF8.GetString(kerbal.KerbalData, 0, kerbal.NumBytes));
     private static IReadOnlyList<KerbalSnapshot> CopyRoster(KerbalReplyMsgData roster)
@@ -281,6 +332,15 @@ internal sealed class BotClient : IAsyncDisposable
     }
     private static BotSnapshot Snapshot(IMessageData data, int generation) => data switch
     {
+        PlayerConnectionLeaveMsgData d => new PlayerLeftSnapshot(generation, d.PlayerName),
+        LockAcquireMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, true, string.Empty),
+        LockAcquireDeniedMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, false, d.Reason),
+        LockReleaseMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, false, "released"),
+        AgencyVesselOwnershipResultMsgData d => new OwnershipResultSnapshot(generation, d.RequestId, d.VesselId, d.Success, d.Reason),
+        AgencyDockStatusMsgData d => new DockStatusSnapshot(generation, d.RequestId, d.SourceVesselId, d.TargetVesselId, d.RequesterAgencyId, d.Status, d.ExpiresUtcTicks, d.Reason, d.OperationId, d.GrantId),
+        AgencyVesselMapSyncMsgData d => new OwnershipMapSnapshot(generation, d.OwnershipSnapshotPresent, d.OwnershipRevision, Array.AsReadOnly(d.OwnershipRecords.Select(CopyOwnership).ToArray())),
+        AgencyVesselMapEntryMsgData d => new OwnershipMapSnapshot(generation, d.OwnershipSnapshotPresent, d.OwnershipRevision, Array.AsReadOnly(d.OwnershipRecord == null ? Array.Empty<VesselOwnerSnapshot>() : new[] { CopyOwnership(d.OwnershipRecord) })),
+        VesselProtoMsgData d => new VesselProtoSnapshot(generation, d.VesselId, Encoding.UTF8.GetString(d.Data, 0, d.NumBytes)),
         KerbalReplyMsgData d => new KerbalRosterSnapshot(generation, CopyRoster(d)),
         KerbalProtoMsgData d => new KerbalProtoSnapshot(generation, CopyKerbal(d.Kerbal)),
         HandshakeReplyMsgData d => new HandshakeSnapshot(generation, d.Response, d.Reason),

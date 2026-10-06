@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LmpCommon\LmpCommon.csproj" />
+    <Compile Include="..\LmpClient\Systems\Agency\VesselPublicationGuard.cs" Link="ClientLogic\VesselPublicationGuard.cs" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-using LunaConfigNode.CfgNode;
+﻿using LunaConfigNode.CfgNode;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Server.Agency;
 using Server.Context;
@@ -23,9 +23,9 @@ namespace ServerTest.Agency
                 ServerContext.DataDirectory = rootA;
                 // Evaluate every old cached path before changing only the data root.
                 var agenciesA = AgencyStore.AgenciesPath;
-                var mapA = AgencyVesselMap.MapFilePath;
+                var mapA = AgencyVesselMap.OwnershipFilePath;
                 Assert.AreEqual(Path.Combine(rootA, "Universe", "Agencies"), agenciesA);
-                Assert.AreEqual(Path.Combine(rootA, "Universe", "AgencyVesselMap.txt"), mapA);
+                Assert.AreEqual(Path.Combine(rootA, "Universe", "AgencyVesselOwnership.json"), mapA);
 
                 ServerContext.DataDirectory = rootB;
                 var agency = new Server.Agency.Agency { Id = Guid.NewGuid(), Name = "Root B Agency", Funds = 12345 };
@@ -42,8 +42,9 @@ namespace ServerTest.Agency
                 StringAssert.Contains(File.ReadAllText(Path.Combine(agencyDirectory, "meta.txt")), "Root B Agency");
                 StringAssert.Contains(File.ReadAllText(Path.Combine(agencyDirectory, "Scenarios", "Funding.txt")), "12345");
                 Assert.IsTrue(File.Exists(Path.Combine(agencyDirectory, "Kerbals", "Jebediah Kerman.txt")));
-                var mapB = Path.Combine(rootB, "Universe", "AgencyVesselMap.txt");
-                StringAssert.Contains(File.ReadAllText(mapB), vessel.ToString("N") + " = " + agency.Id.ToString("N"));
+                var mapB = Path.Combine(rootB, "Universe", "AgencyVesselOwnership.json");
+                var savedMap = Newtonsoft.Json.JsonConvert.DeserializeObject<OwnershipDocument>(File.ReadAllText(mapB));
+                Assert.AreEqual(agency.Id, savedMap.Records[vessel].OwnerAgencyId);
                 Assert.IsFalse(Directory.Exists(rootA), "Evaluating paths must not create or write to the old root.");
 
                 AgencyStore.Agencies.Clear();

@@ -1,4 +1,4 @@
-using LmpCommon.Enums;
+﻿using LmpCommon.Enums;
 using LmpCommon.Xml;
 using System;
 
@@ -100,6 +100,9 @@ namespace Server.Settings.Definition
 
         [XmlComment(Value = "Restrict launch sites to explicit exclusive agency assignments. Agencies with no sites cannot launch, including at KSC. Client-side enforcement only.")]
         public bool AgencyLaunchSitesPerAgency { get; set; } = false;
+        public bool AgencyVesselOwnership { get; set; } = false;
+        public int AgencyDockRequestTimeoutSeconds { get; set; } = 30;
+        public int AgencyDockGrantTimeoutSeconds { get; set; } = 30;
 
         [XmlComment(Value = "If true, SCANsat satellite-imaging coverage (the SCANcontroller scenario) " +
                             "is tracked per agency. Each agency scans the planets independently. If " +

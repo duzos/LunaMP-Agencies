@@ -14,23 +14,33 @@ namespace LmpClient.Harmony
     [HarmonyPatch("Couple")]
     public class Part_Couple
     {
-        [HarmonyPrefix]
-        private static bool PrefixCouple(Part __instance, Part tgtPart, ref Guid __state)
-        {
-            if (VesselCommon.IsSpectating) return false;
+        private sealed class CoupleState { public Guid Removed; public bool Entered; }
 
-            __state = __instance.vessel.id;
+        [HarmonyPrefix]
+        private static bool PrefixCouple(Part __instance, Part tgtPart, ref CoupleState __state)
+        {
+            __state = new CoupleState();
+            if (VesselCommon.IsSpectating && !LmpClient.Systems.Agency.DockingCoordinator.Replaying) return false;
+            if (!LmpClient.Systems.Agency.DockingCoordinator.BeforePartCouple(__instance, tgtPart, out __state.Entered)) return false;
+
+            __state.Removed = __instance.vessel.id;
             PartEvent.onPartCoupling.Fire(__instance, tgtPart);
 
             return true;
         }
 
         [HarmonyPostfix]
-        private static void PostfixCouple(Part __instance, Part tgtPart, ref Guid __state)
+        private static void PostfixCouple(Part __instance, Part tgtPart, ref CoupleState __state)
         {
-            if (VesselCommon.IsSpectating) return;
+            if (__state == null || __state.Removed == Guid.Empty || LmpClient.Systems.Agency.DockingCoordinator.Replaying || VesselCommon.IsSpectating) return;
 
-            PartEvent.onPartCoupled.Fire(__instance, tgtPart, __state);
+            PartEvent.onPartCoupled.Fire(__instance, tgtPart, __state.Removed);
+        }
+        [HarmonyFinalizer]
+        private static Exception Finalizer(Exception __exception, CoupleState __state)
+        {
+            LmpClient.Systems.Agency.DockingCoordinator.Exit(__state?.Entered ?? false, __exception);
+            return __exception;
         }
     }
 }

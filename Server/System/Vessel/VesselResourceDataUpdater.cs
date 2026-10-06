@@ -30,6 +30,7 @@ namespace Server.System.Vessel
         /// </summary>
         public static void WriteResourceDataToFile(VesselBaseMsgData message)
         {
+            var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
             if (!(message is VesselResourceMsgData msgData)) return;
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
@@ -39,9 +40,10 @@ namespace Server.System.Vessel
 
                 _ = Task.Run(() =>
                 {
-                    lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
+                    lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
+                lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!global::Server.Agency.AgencyVesselMap.CanApplyEpoch(msgData.VesselId,ownershipEpoch) || !VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
                         foreach (var resource in msgData.Resources)
                         {

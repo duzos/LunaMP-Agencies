@@ -1,4 +1,4 @@
-using Lidgren.Network;
+﻿using Lidgren.Network;
 using LmpCommon.Message;
 using LmpCommon.Message.Data.Settings;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -8,6 +8,23 @@ namespace LmpCommonTest
     [TestClass]
     public class AgencySettingsSerializationTest
     {
+        // Locate the first agency flag by changing only that bit. This keeps historical
+        // fixtures stable when more independent flags are appended in later features.
+        private static int AgencyTailStart(NetClient peer, SettingsReplyMsgData settings, NetOutgoingMessage original)
+        {
+            settings.AgencyExperimentsPerAgency = !settings.AgencyExperimentsPerAgency;
+            var changed = peer.CreateMessage(); settings.Serialize(changed);
+            settings.AgencyExperimentsPerAgency = !settings.AgencyExperimentsPerAgency;
+            original.Position = changed.Position = 0;
+            for (var bit = 0; bit < original.LengthBits; bit++)
+            {
+                if (original.ReadBoolean() == changed.ReadBoolean()) continue;
+                original.Position = 0;
+                return bit;
+            }
+            throw new global::System.InvalidOperationException("Agency flag was not serialized.");
+        }
+
         [DataTestMethod]
         [DataRow(0)]
         [DataRow(2)]
@@ -22,8 +39,9 @@ namespace LmpCommonTest
             settings.AgencyKerbalsPerAgency = true;
             var outgoing = peer.CreateMessage(settings.GetMessageSize());
             settings.Serialize(outgoing);
+            var agencyTailStart = AgencyTailStart(peer, settings, outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
-            incoming.LengthBits = outgoing.LengthBits - 6 + partialTailBits;
+            incoming.LengthBits = agencyTailStart + partialTailBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyExperimentsPerAgency = true;
             parsed.AgencyKerbalsPerAgency = true;
@@ -31,6 +49,7 @@ namespace LmpCommonTest
             parsed.AgencyContractsPoolPerAgency = true;
             parsed.AgencyCommNetPerAgency = true;
             parsed.AgencyLaunchSitesPerAgency = true;
+            parsed.AgencyVesselOwnership = true;
             parsed.Deserialize(incoming);
             Assert.AreEqual("Legacy server", parsed.ConsoleIdentifier);
             Assert.IsTrue(parsed.PrintMotdInChat);
@@ -40,6 +59,7 @@ namespace LmpCommonTest
             Assert.IsFalse(parsed.AgencyContractsPoolPerAgency);
             Assert.IsFalse(parsed.AgencyCommNetPerAgency);
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
+            Assert.IsFalse(parsed.AgencyVesselOwnership);
         }
 
         [TestMethod]
@@ -52,13 +72,16 @@ namespace LmpCommonTest
             source.AgencyLaunchSitesPerAgency = true;
             var outgoing = peer.CreateMessage(source.GetMessageSize());
             source.Serialize(outgoing);
+            var agencyTailStart = AgencyTailStart(peer, source, outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
-            incoming.LengthBits = outgoing.LengthBits - 1;
+            incoming.LengthBits = agencyTailStart + 5;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyLaunchSitesPerAgency = true;
+            parsed.AgencyVesselOwnership = true;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyExperimentsPerAgency && parsed.AgencyKerbalsPerAgency && parsed.AgencyScansatPerAgency && parsed.AgencyContractsPoolPerAgency && parsed.AgencyCommNetPerAgency);
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
+            Assert.IsFalse(parsed.AgencyVesselOwnership);
         }
 
         [DataTestMethod]
@@ -78,6 +101,7 @@ namespace LmpCommonTest
             settings.AgencyContractsPoolPerAgency = !enabled;
             settings.AgencyCommNetPerAgency = enabled;
             settings.AgencyLaunchSitesPerAgency = !enabled;
+            settings.AgencyVesselOwnership = enabled;
             var outgoing = peer.CreateMessage(settings.GetMessageSize());
             settings.Serialize(outgoing);
             Assert.IsTrue(settings.GetMessageSize() >= outgoing.LengthBytes);
@@ -94,6 +118,7 @@ namespace LmpCommonTest
             Assert.AreEqual(!enabled, parsed.AgencyContractsPoolPerAgency);
             Assert.AreEqual(enabled, parsed.AgencyCommNetPerAgency);
             Assert.AreEqual(!enabled, parsed.AgencyLaunchSitesPerAgency);
+            Assert.AreEqual(enabled, parsed.AgencyVesselOwnership);
         }
     }
 }

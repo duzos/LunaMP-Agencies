@@ -13,7 +13,8 @@ namespace LmpClient.Systems.VesselRemoveSys
     {
         public void SendMessage(IMessageData msg)
         {
-            TaskFactory.StartNew(() => NetworkSender.QueueOutgoingMessage(MessageFactory.CreateNew<VesselCliMsg>(msg)));
+            var epoch = LmpClient.Systems.Agency.VesselPublicationGuard.CaptureEpoch();
+            TaskFactory.StartNew(() => NetworkSender.QueueOutgoingMessage(MessageFactory.CreateNew<VesselCliMsg>(msg), epoch));
         }
 
         /// <summary>
@@ -37,6 +38,7 @@ namespace LmpClient.Systems.VesselRemoveSys
         /// </summary>
         public void SendVesselRemove(Guid vesselId, bool keepVesselInRemoveList = true, string reason = null)
         {
+            if (LmpClient.Systems.Agency.VesselPublicationGuard.Pending) return;
             LunaLog.Log($"[LMP]: Removing {vesselId} from the server ({reason ?? "Unknown reason"})");
             var msgData = NetworkMain.CliMsgFactory.CreateNewMessageData<VesselRemoveMsgData>();
             msgData.GameTime = TimeSyncSystem.UniversalTime;

@@ -31,6 +31,7 @@ namespace Server.System.Vessel
         /// </summary>
         public static void WritePositionDataToFile(VesselBaseMsgData message)
         {
+            var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
             if (!(message is VesselPositionMsgData msgData)) return;
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
@@ -42,9 +43,10 @@ namespace Server.System.Vessel
 
                 ObserveBackgroundTask(Task.Run(() =>
                 {
-                    lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
+                    lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
+                lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!global::Server.Agency.AgencyVesselMap.CanApplyEpoch(msgData.VesselId,ownershipEpoch) || !VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
                         vessel.Fields.Update("lat", msgData.LatLonAlt[0].ToString(CultureInfo.InvariantCulture));
                         vessel.Fields.Update("lon", msgData.LatLonAlt[1].ToString(CultureInfo.InvariantCulture));
@@ -95,6 +97,7 @@ namespace Server.System.Vessel
                 return;
 
             var lockObj = Semaphore.GetOrAdd(msgData.VesselId, new object());
+            lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
             lock (lockObj)
             {
                 if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))

@@ -84,6 +84,11 @@ namespace LmpClient.Systems.VesselCoupleSys
             {
                 if (protoPart.partRef && coupledProtoPart.partRef)
                 {
+                    var previousIgnore = VesselCoupleSystem.Singleton.IgnoreEvents;
+                    using (LmpClient.Systems.Agency.DockingCoordinator.Replay())
+                    {
+                    try
+                    {
                     VesselCoupleSystem.Singleton.IgnoreEvents = true;
 
                     //Remember! The weak vessel must couple with the DOMINANT vessel and not the other way around!
@@ -102,10 +107,12 @@ namespace LmpClient.Systems.VesselCoupleSys
                             }
                             break;
                         case CoupleTrigger.GrappleNode:
-                            var grappleModule = coupledProtoPart.partRef.FindModuleImplementing<ModuleGrappleNode>();
+                            var grappleModule = coupledProtoPart.partRef.FindModuleImplementing<ModuleGrappleNode>() ?? protoPart.partRef.FindModuleImplementing<ModuleGrappleNode>();
                             if (grappleModule)
                             {
-                                GrappleMethod.Invoke(grappleModule, new object[] { coupledProtoPart, protoPart });
+                                var otherPart = grappleModule.part == coupledProtoPart.partRef ? protoPart.partRef : coupledProtoPart.partRef;
+                                AccessTools.Field(typeof(ModuleGrappleNode), "otherPart").SetValue(grappleModule, otherPart);
+                                GrappleMethod.Invoke(grappleModule, new object[] { otherPart, coupledProtoPart.partRef });
                             }
                             break;
                         case CoupleTrigger.Kerbal:
@@ -123,9 +130,10 @@ namespace LmpClient.Systems.VesselCoupleSys
                             coupledProtoPart.partRef.Couple(protoPart.partRef);
                             break;
                     }
-                    VesselCoupleSystem.Singleton.IgnoreEvents = false;
-
-                    return true;
+                    return coupledProtoPart.partRef.vessel == protoPart.partRef.vessel;
+                    }
+                    finally { VesselCoupleSystem.Singleton.IgnoreEvents = previousIgnore; }
+                    }
                 }
             }
 

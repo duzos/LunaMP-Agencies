@@ -15,6 +15,7 @@ namespace LmpClient.Systems.VesselLockSys
         {
             //Safety check
             if (vessel == null) return;
+            if (LmpClient.Systems.Agency.VesselOwnershipClient.HandleVesselChange(vessel)) return;
 
             //In case we are reloading our current own vessel we DON'T want to release our locks
             //As that would mean that an spectator could get the control of our vessel while we are reloading it.
@@ -92,6 +93,7 @@ namespace LmpClient.Systems.VesselLockSys
             switch (lockDefinition.Type)
             {
                 case LockType.Control:
+                    if (LmpClient.Systems.Agency.VesselPublicationGuard.Pending) return;
                     if (lockDefinition.PlayerName == SettingsSystem.CurrentSettings.PlayerName)
                     {
                         if (VesselCommon.IsSpectating)

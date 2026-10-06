@@ -42,12 +42,13 @@ namespace Server.System.Vessel
         /// </summary>
         public static void RawConfigNodeInsertOrUpdate(Guid vesselId, string vesselDataInConfigNodeFormat)
         {
+            var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
             _ = Task.Run(() =>
             {
                 // The insert is scheduled asynchronously, so a VesselRemove for the same vessel may arrive
                 // while this task is queued. Re-check the kill list before touching the store so a delayed
                 // insert cannot resurrect a vessel that has since been removed (e.g. revert-to-editor).
-                if (VesselContext.RemovedVessels.ContainsKey(vesselId)) return;
+                if (VesselContext.RemovedVessels.ContainsKey(vesselId) || (GeneralSettings.SettingsStore.AgencyVesselOwnership && global::Server.Agency.AgencyVesselMap.IsAbsorbed(vesselId))) return;
 
                 var vessel = new Classes.Vessel(vesselDataInConfigNodeFormat);
                 if (GeneralSettings.SettingsStore.ModControl)
@@ -60,11 +61,13 @@ namespace Server.System.Vessel
                         return;
                     }
                 }
+                lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
                 lock (Semaphore.GetOrAdd(vesselId, new object()))
                 {
+                    if(!global::Server.Agency.AgencyVesselMap.CanApplyEpoch(vesselId,ownershipEpoch)) return;
                     // Re-check under the per-vessel lock to close the race against HandleVesselRemove,
                     // which now publishes to RemovedVessels before clearing the store entry.
-                    if (VesselContext.RemovedVessels.ContainsKey(vesselId)) return;
+                    if (VesselContext.RemovedVessels.ContainsKey(vesselId) || (GeneralSettings.SettingsStore.AgencyVesselOwnership && global::Server.Agency.AgencyVesselMap.IsAbsorbed(vesselId))) return;
 
                     VesselStoreSystem.CurrentVessels.AddOrUpdate(vesselId, vessel, (key, existingVal) => vessel);
                 }

@@ -29,6 +29,7 @@ namespace Server.System.Vessel
         /// </summary>
         public static void WriteFlightstateDataToFile(VesselBaseMsgData message)
         {
+            var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
             if (!(message is VesselFlightStateMsgData msgData)) return;
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
@@ -38,9 +39,10 @@ namespace Server.System.Vessel
 
                 _ = Task.Run(() =>
                 {
-                    lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
+                    lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
+                lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!global::Server.Agency.AgencyVesselMap.CanApplyEpoch(msgData.VesselId,ownershipEpoch) || !VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
                         vessel.CtrlState.UpdateValue("pitch", msgData.Pitch.ToString(CultureInfo.InvariantCulture));
                         vessel.CtrlState.UpdateValue("yaw", msgData.Yaw.ToString(CultureInfo.InvariantCulture));

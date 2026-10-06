@@ -108,6 +108,7 @@ namespace LmpClient.Systems.VesselLockSys
 
         public void StopSpectating()
         {
+            if (HighLogic.LoadedSceneIsFlight && FlightGlobals.ActiveVessel && !LmpClient.Systems.Agency.VesselOwnershipClient.HasConfirmedControl(FlightGlobals.ActiveVessel.id)) return;
             VesselCommon.IsSpectating = false;
 
             //Unlock all vessel controls

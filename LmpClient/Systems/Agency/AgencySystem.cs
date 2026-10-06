@@ -96,6 +96,7 @@ namespace LmpClient.Systems.Agency
             lock (RequestsLock) PendingIncomingRequests.Clear();
             MyAgencyId = Guid.Empty;
             ClearLaunchSites();
+            ClearOwnership();
             LatestServerReply = null;
             LmpClient.Windows.Admin.AdminWindow.ResetLaunchSitesUi();
             while (PendingServerMessages.TryDequeue(out _)) { }

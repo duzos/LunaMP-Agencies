@@ -1,4 +1,4 @@
-using Server.Diagnostics;
+﻿using Server.Diagnostics;
 using LmpCommon.Agency;
 using LmpCommon.Message.Data.Agency;
 using LmpCommon.Message.Interface;
@@ -82,6 +82,10 @@ namespace Server.Agency
             if (client == null) return;
             var snapshot = AgencyVesselMap.Snapshot;
             var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyVesselMapSyncMsgData>();
+            var ownership = AgencyVesselMap.GetOwnershipSnapshot();
+            data.OwnershipSnapshotPresent = VesselOwnershipSystem.Enabled && AgencyVesselMap.Ready;
+            data.OwnershipRevision = ownership.Revision;
+            data.OwnershipRecords = ownership.Records;
             var n = snapshot.Count;
             data.VesselIds = new global::System.Guid[n];
             data.AgencyIds = new global::System.Guid[n];
@@ -105,6 +109,9 @@ namespace Server.Agency
             var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyVesselMapEntryMsgData>();
             data.VesselId = vesselId;
             data.AgencyId = agencyId;
+            data.OwnershipSnapshotPresent = VesselOwnershipSystem.Enabled && AgencyVesselMap.Ready;
+            data.OwnershipRevision = AgencyVesselMap.GetOwnershipSnapshot().Revision;
+            data.OwnershipRecord = AgencyVesselMap.Get(vesselId);
             MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
         }
 

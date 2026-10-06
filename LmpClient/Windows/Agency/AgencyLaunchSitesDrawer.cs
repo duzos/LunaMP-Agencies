@@ -31,7 +31,7 @@ namespace LmpClient.Windows.Agency
                 {
                     GUILayout.Label(sites.Length + (sites.Length == 1 ? " assigned site" : " assigned sites"));
                     _allowedSitesScroll = GUILayout.BeginScrollView(_allowedSitesScroll, false, false, GUILayout.Height(100));
-                    foreach (var site in sites) GUILayout.Label(site, _allowedSitesText, GUILayout.Width(WindowWidth - 80));
+                    foreach (var site in sites) GUILayout.Label(site, _allowedSitesText, GUILayout.Width(Mathf.Max(200, Singleton.WindowRect.width - 80)));
                     GUILayout.EndScrollView();
                 }
             }

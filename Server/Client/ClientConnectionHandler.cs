@@ -28,6 +28,7 @@ namespace Server.Client
             if (!string.IsNullOrEmpty(reason))
                 LunaLog.Debug($"{client.PlayerName} sent Connection end message, reason: {reason}");
 
+            global::Server.Agency.VesselOwnershipSystem.Disconnect(client);
             //Remove Clients from list
             if (ServerContext.Clients.ContainsKey(client.Endpoint))
             {

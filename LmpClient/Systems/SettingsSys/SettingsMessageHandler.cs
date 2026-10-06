@@ -42,6 +42,7 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.AgencyContractsPoolPerAgency = msgData.AgencyContractsPoolPerAgency;
             SettingsSystem.ServerSettings.AgencyCommNetPerAgency = msgData.AgencyCommNetPerAgency;
             SettingsSystem.ServerSettings.AgencyLaunchSitesPerAgency = msgData.AgencyLaunchSitesPerAgency;
+            SettingsSystem.ServerSettings.AgencyVesselOwnership = msgData.AgencyVesselOwnership;
             LmpClient.Systems.Agency.LaunchSiteCatalog.RequestRefresh();
 
             SettingsSystem.ServerSettings.ServerParameters =

@@ -367,9 +367,11 @@ namespace LmpClient.Systems.VesselProtoSys
             if (QueuedVesselsToSend.Contains(vesselId)) return;
 
             QueuedVesselsToSend.Add(vesselId);
+            var publicationEpoch = LmpClient.Systems.Agency.VesselPublicationGuard.CaptureEpoch();
             CoroutineUtil.StartDelayedRoutine("QueueVesselMessageAsPartsChanged", () =>
             {
                 QueuedVesselsToSend.Remove(vesselId);
+                if (!LmpClient.Systems.Agency.VesselPublicationGuard.IsCurrent(publicationEpoch)) return;
 
                 LunaLog.Log($"[LMP]: Sending delayed proto vessel {vesselId}");
                 MessageSender.SendVesselMessage(FlightGlobals.FindVessel(vesselId), forceReload, reason);

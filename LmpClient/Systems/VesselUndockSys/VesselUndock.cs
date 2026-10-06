@@ -1,4 +1,4 @@
-﻿using LmpClient.Extensions;
+using LmpClient.Extensions;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.VesselPositionSys;
 using LmpClient.VesselUtilities;
@@ -49,6 +49,11 @@ namespace LmpClient.Systems.VesselUndockSys
                         }
                     }
 
+                    var previousIgnore = VesselUndockSystem.Singleton.IgnoreEvents;
+                    var previousVessel = VesselUndockSystem.Singleton.ManuallyUndockingVesselId;
+                    using (LmpClient.Systems.Agency.DockingCoordinator.Replay())
+                    try
+                    {
                     VesselUndockSystem.Singleton.ManuallyUndockingVesselId = protoPart.partRef.vessel.id;
                     VesselUndockSystem.Singleton.IgnoreEvents = true;
 
@@ -62,8 +67,12 @@ namespace LmpClient.Systems.VesselUndockSys
 
                     VesselPositionSystem.Singleton.ForceUpdateVesselPosition(NewVesselId);
 
-                    VesselUndockSystem.Singleton.IgnoreEvents = false;
-                    VesselUndockSystem.Singleton.ManuallyUndockingVesselId = Guid.Empty;
+                    }
+                    finally
+                    {
+                        VesselUndockSystem.Singleton.IgnoreEvents = previousIgnore;
+                        VesselUndockSystem.Singleton.ManuallyUndockingVesselId = previousVessel;
+                    }
                 }
             }
         }

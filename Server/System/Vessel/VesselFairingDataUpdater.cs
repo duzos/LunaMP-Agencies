@@ -17,15 +17,17 @@ namespace Server.System.Vessel
         /// </summary>
         public static void WriteFairingDataToFile(VesselBaseMsgData message)
         {
+            var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
             if (!(message is VesselFairingMsgData msgData)) return;
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             //Sync fairings ALWAYS and ignore the rate they arrive
             _ = Task.Run(() =>
             {
+                lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
                 lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                 {
-                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                    if (!global::Server.Agency.AgencyVesselMap.CanApplyEpoch(msgData.VesselId,ownershipEpoch) || !VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
                     var part = vessel.GetPart(msgData.PartFlightId);
                     var module = part?.GetSingleModule("ModuleProceduralFairing");

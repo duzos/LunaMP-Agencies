@@ -25,6 +25,7 @@ namespace LmpClient.Systems.VesselCoupleSys
         public void CoupleComplete(Part partFrom, Part partTo, Guid removedVesselId)
         {
             if (VesselCommon.IsSpectating || System.IgnoreEvents) return;
+            if (LmpClient.Systems.Agency.DockingCoordinator.DeferCouple(partFrom, partTo, removedVesselId)) return;
 
             //If neither the vessel 1 or vessel2 locks belong to us, ignore the coupling
             if (!LockSystem.LockQuery.UpdateLockBelongsToPlayer(partFrom.vessel.id, SettingsSystem.CurrentSettings.PlayerName) &&
@@ -34,15 +35,23 @@ namespace LmpClient.Systems.VesselCoupleSys
 
             //Yes, the couple event is called by the WEAK vessel!!
             var trigger = partTo.FindModuleImplementing<ModuleDockingNode>() != null ? CoupleTrigger.DockingNode :
-                partTo.FindModuleImplementing<ModuleGrappleNode>() != null ? CoupleTrigger.GrappleNode :
+                partTo.FindModuleImplementing<ModuleGrappleNode>() != null || partFrom.FindModuleImplementing<ModuleGrappleNode>() != null ? CoupleTrigger.GrappleNode :
                 partTo.FindModuleImplementing<KerbalEVA>() != null ? CoupleTrigger.Kerbal : CoupleTrigger.Other;
 
             System.MessageSender.SendVesselCouple(partFrom.vessel, partTo.flightID, removedVesselId, partFrom.flightID, trigger);
 
-            var ownFinalVessel = LockSystem.LockQuery.UpdateLockBelongsToPlayer(partFrom.vessel.id, SettingsSystem.CurrentSettings.PlayerName);
+            CompleteAccepted(partFrom.vessel.id, removedVesselId, trigger);
+        }
+
+        public static void CompleteAccepted(Guid survivorId, Guid removedVesselId, CoupleTrigger trigger)
+        {
+            var vessel = FlightGlobals.FindVessel(survivorId);
+            if (!vessel) return;
+
+            var ownFinalVessel = LockSystem.LockQuery.UpdateLockBelongsToPlayer(vessel.id, SettingsSystem.CurrentSettings.PlayerName);
             if (ownFinalVessel)
             {
-                foreach (var kerbal in partFrom.vessel.GetVesselCrew())
+                foreach (var kerbal in vessel.GetVesselCrew())
                 {
                     LockSystem.Singleton.AcquireKerbalLock(kerbal.name, true);
                 }
@@ -51,7 +60,7 @@ namespace LmpClient.Systems.VesselCoupleSys
             }
             else
             {
-                JumpIfVesselOwnerIsInFuture(partFrom.vessel.id);
+                JumpIfVesselOwnerIsInFuture(vessel.id);
             }
 
             VesselRemoveSystem.Singleton.MessageSender.SendVesselRemove(removedVesselId, false, $"Coupled/Docked ({trigger})");

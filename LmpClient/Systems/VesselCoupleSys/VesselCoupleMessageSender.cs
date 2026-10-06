@@ -18,7 +18,7 @@ namespace LmpClient.Systems.VesselCoupleSys
             NetworkSender.QueueOutgoingMessage(MessageFactory.CreateNew<VesselCliMsg>(msg));
         }
 
-        public void SendVesselCouple(Vessel vessel, uint partFlightId, Guid coupledVesselId, uint coupledPartFlightId, CoupleTrigger trigger)
+        public void SendVesselCouple(Vessel vessel, uint partFlightId, Guid coupledVesselId, uint coupledPartFlightId, CoupleTrigger trigger, Guid operationId = default(Guid), Guid grantId = default(Guid), byte[] mergedData = null)
         {
             if (vessel == null) return;
 
@@ -30,6 +30,9 @@ namespace LmpClient.Systems.VesselCoupleSys
             msgData.CoupledPartFlightId = coupledPartFlightId;
             msgData.SubspaceId = WarpSystem.Singleton.CurrentSubspace;
             msgData.Trigger = (int)trigger;
+            msgData.OperationId = operationId;
+            msgData.GrantId = grantId;
+            msgData.MergedVesselData = mergedData ?? new byte[0];
 
             SendMessage(msgData);
         }

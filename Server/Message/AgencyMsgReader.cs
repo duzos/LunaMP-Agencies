@@ -1,4 +1,4 @@
-using Server.Diagnostics;
+﻿using Server.Diagnostics;
 using LmpCommon.Message.Data.Agency;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
@@ -18,6 +18,9 @@ namespace Server.Message
             PlaytestDiagnostics.Write("agency.request", () => $"{PlaytestDiagnostics.Client(client)} subtype={data.AgencyMessageType}");
             switch (data.AgencyMessageType)
             {
+                case AgencyMessageType.CliVesselOwnershipCommand: VesselOwnershipSystem.Command(client,(AgencyVesselOwnershipCommandMsgData)data); break;
+                case AgencyMessageType.CliDockRequest: VesselOwnershipSystem.RequestDock(client,(AgencyDockRequestMsgData)data); break;
+                case AgencyMessageType.CliDockResponse: VesselOwnershipSystem.RespondDock(client,(AgencyDockResponseMsgData)data); break;
                 case AgencyMessageType.CliCreate:
                     HandleCreate(client, (AgencyCreateMsgData)data);
                     break;

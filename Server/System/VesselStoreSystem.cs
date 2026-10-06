@@ -18,7 +18,7 @@ namespace Server.System
 
         public static ConcurrentDictionary<Guid, Vessel.Classes.Vessel> CurrentVessels = new ConcurrentDictionary<Guid, Vessel.Classes.Vessel>();
 
-        private static readonly object BackupLock = new object();
+        private static readonly object BackupLock = global::Server.Agency.AgencyVesselMap.TransactionGate;
 
         public static bool VesselExists(Guid vesselId) => CurrentVessels.ContainsKey(vesselId);
 
@@ -92,7 +92,8 @@ namespace Server.System
         {
             lock (BackupLock)
             {
-                var vesselsInCfgNode = CurrentVessels.ToArray();
+                if (global::Server.Agency.VesselOwnershipSystem.Enabled && !global::Server.Agency.AgencyVesselMap.Ready) return;
+                var vesselsInCfgNode = CurrentVessels.ToArray().Where(p=>!global::Server.Agency.VesselOwnershipSystem.Enabled || !global::Server.Agency.AgencyVesselMap.IsAbsorbed(p.Key));
                 foreach (var vessel in vesselsInCfgNode)
                 {
                     FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vessel.Key}{VesselFileFormat}"), vessel.Value.ToString());
@@ -105,10 +106,11 @@ namespace Server.System
         /// </summary>
         public static void PersistVesselToFile(Guid vesselId)
         {
-            if (!CurrentVessels.TryGetValue(vesselId, out var vessel)) return;
-
+            global::Server.Agency.AgencyVesselMap.PersistenceCheckpoint?.Invoke("before-vessel-persist");
             lock (BackupLock)
             {
+                if (global::Server.Agency.VesselOwnershipSystem.Enabled && (!global::Server.Agency.AgencyVesselMap.Ready || global::Server.Agency.AgencyVesselMap.IsAbsorbed(vesselId))) return;
+                if (!CurrentVessels.TryGetValue(vesselId, out var vessel)) return;
                 FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vesselId}{VesselFileFormat}"), vessel.ToString());
             }
         }

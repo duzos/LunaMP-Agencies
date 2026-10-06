@@ -1,4 +1,4 @@
-using Lidgren.Network;
+﻿using Lidgren.Network;
 using LmpCommon.Enums;
 using LmpCommon.Message.Client.Base;
 using LmpCommon.Message.Data.Agency;
@@ -16,6 +16,10 @@ namespace LmpCommon.Message.Client
 
         protected override Dictionary<ushort, Type> SubTypeDictionary { get; } = new Dictionary<ushort, Type>
         {
+            [(ushort)AgencyMessageType.CliVesselOwnershipCommand] = typeof(AgencyVesselOwnershipCommandMsgData),
+            [(ushort)AgencyMessageType.CliDockRequest] = typeof(AgencyDockRequestMsgData),
+            [(ushort)AgencyMessageType.CliDockResponse] = typeof(AgencyDockResponseMsgData),
+
             [(ushort)AgencyMessageType.CliCreate] = typeof(AgencyCreateMsgData),
             [(ushort)AgencyMessageType.CliRename] = typeof(AgencyRenameMsgData),
             [(ushort)AgencyMessageType.CliJoinRequest] = typeof(AgencyJoinRequestMsgData),

@@ -19,8 +19,8 @@ namespace LmpClient.Windows.Agency
     /// </summary>
     public partial class AgencyWindow : Window<AgencyWindow>
     {
-        private const float WindowWidth = 420;
-        private const float WindowHeight = 500;
+        private const float WindowWidth = 660;
+        private const float WindowHeight = 620;
         private static readonly string Title = "LMP - Agencies";
 
         public override bool Display
@@ -54,17 +54,19 @@ namespace LmpClient.Windows.Agency
 
         public override void SetStyles()
         {
-            WindowRect = new Rect(Screen.width * 0.5f - WindowWidth * 0.5f,
-                                  Screen.height * 0.5f - WindowHeight * 0.5f,
-                                  WindowWidth, WindowHeight);
+            var width = Mathf.Min(WindowWidth, Mathf.Max(320, Screen.width - 32));
+            var height = Mathf.Min(WindowHeight, Mathf.Max(260, Screen.height - 32));
+            WindowRect = new Rect(Screen.width * 0.5f - width * 0.5f,
+                                  Screen.height * 0.5f - height * 0.5f,
+                                  width, height);
             MoveRect = new Rect(0, 0, int.MaxValue, TitleHeight);
 
             LayoutOptions = new GUILayoutOption[4]
             {
-                GUILayout.MinWidth(WindowWidth),
-                GUILayout.MaxWidth(WindowWidth),
-                GUILayout.MinHeight(WindowHeight),
-                GUILayout.MaxHeight(WindowHeight),
+                GUILayout.MinWidth(width),
+                GUILayout.MaxWidth(width),
+                GUILayout.MinHeight(height),
+                GUILayout.MaxHeight(height),
             };
         }
 

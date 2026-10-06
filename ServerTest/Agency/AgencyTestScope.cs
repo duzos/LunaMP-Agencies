@@ -1,4 +1,4 @@
-using LunaConfigNode.CfgNode;
+﻿using LunaConfigNode.CfgNode;
 using Server.Agency;
 using Server.Context;
 using Server.Log;
@@ -23,6 +23,7 @@ namespace ServerTest.Agency
         private readonly bool _previousKerbalsPerAgency;
         private readonly bool _previousZeroStartingKerbals;
         private readonly bool _previousLaunchSites;
+        private readonly bool _previousOwnership;
         private readonly List<Action> _restore = new List<Action>();
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "LMPAgencyTest_" + Guid.NewGuid().ToString("N"));
 
@@ -39,6 +40,8 @@ namespace ServerTest.Agency
             _previousScansatPerAgency = GeneralSettings.SettingsStore.AgencyScansatPerAgency;
             _previousKerbalsPerAgency = GeneralSettings.SettingsStore.AgencyKerbalsPerAgency;
             _previousZeroStartingKerbals = GeneralSettings.SettingsStore.AgencyZeroStartingKerbals;
+            _previousOwnership = GeneralSettings.SettingsStore.AgencyVesselOwnership;
+            GeneralSettings.SettingsStore.AgencyVesselOwnership = false;
             _previousLaunchSites = GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency;
             SaveAndReplacePrivateField(typeof(AgencyLaunchSiteStore), "_assignments", new Dictionary<string, Guid>(StringComparer.Ordinal));
             SaveAndReplacePrivateField(typeof(AgencyLaunchSiteStore), "_revision", 0L);
@@ -48,7 +51,8 @@ namespace ServerTest.Agency
             SaveAndClear(ScenarioStoreSystem.CurrentScenarios);
             SaveAndClear(PrivateDictionary<Guid, ConcurrentDictionary<string, ConfigNode>>(typeof(AgencyScenarioStore), "Store"));
             SaveAndClear(PrivateDictionary<string, object>(typeof(AgencyScenarioStore), "Semaphores"));
-            SaveAndClear(PrivateDictionary<Guid, Guid>(typeof(AgencyVesselMap), "_map"));
+            SaveAndReplacePrivateField(typeof(AgencyVesselMap), "_document", new OwnershipDocument());
+            SaveAndReplacePrivateField(typeof(AgencyVesselMap), "_loadError", null);
             ServerContext.DataDirectory = Root;
             ScenarioSystem.ScenariosPath = Path.Combine(ServerContext.UniverseDirectory, "Scenarios");
             Directory.CreateDirectory(ServerContext.AgenciesDirectory);
@@ -88,6 +92,7 @@ namespace ServerTest.Agency
             GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = _previousKerbalsPerAgency;
             GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = _previousZeroStartingKerbals;
             GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency = _previousLaunchSites;
+            GeneralSettings.SettingsStore.AgencyVesselOwnership = _previousOwnership;
             if (Directory.Exists(Root)) Directory.Delete(Root, true);
         }
     }

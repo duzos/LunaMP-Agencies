@@ -1,4 +1,4 @@
-using Server.Diagnostics;
+﻿using Server.Diagnostics;
 using LmpCommon.Locks;
 using Server.Client;
 using Server.Settings.Structures;
@@ -13,12 +13,32 @@ namespace Server.System
 
         public static bool AcquireLock(LockDefinition lockDef, bool force, out bool repeatedAcquire)
         {
+            var gate = global::Server.Agency.AgencyVesselMap.TransactionGate;
+            var callerHoldsGate = global::System.Threading.Monitor.IsEntered(gate);
+            bool accepted, wasHeld;
+            lock(gate)
+            {
+                wasHeld = LockQuery.LockExists(lockDef);
+                accepted = AcquireLocked(lockDef,force,out repeatedAcquire);
+            }
+            // A coordinating caller emits its own result after leaving the outer gate.
+            if (!callerHoldsGate)
+            {
+                var result = accepted ? (repeatedAcquire ? "repeated" : "accepted") : "denied";
+                var reason = accepted ? "" : wasHeld ? "held" : "permission";
+                PlaytestDiagnostics.Write("lock.acquire", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result={result} reason={reason} force={force}");
+            }
+            return accepted;
+        }
+
+        private static bool AcquireLocked(LockDefinition lockDef,bool force,out bool repeatedAcquire)
+        {
             repeatedAcquire = false;
+            if (lockDef.Type == LockType.Control && global::Server.Agency.VesselOwnershipSystem.Enabled && !global::Server.Agency.VesselOwnershipSystem.CanControl(ClientRetriever.GetClientByName(lockDef.PlayerName), lockDef.VesselId)) return false;
 
             //Player tried to acquire a lock that they already own
             if (LockQuery.LockBelongsToPlayer(lockDef.Type, lockDef.VesselId, lockDef.KerbalName, lockDef.PlayerName))
             {
-                PlaytestDiagnostics.Write("lock.acquire", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=repeated force={force}", true);
                 repeatedAcquire = true;
                 return true;
             }
@@ -44,23 +64,24 @@ namespace Server.System
                 }
 
                 LockStore.AddOrUpdateLock(lockDef);
-                PlaytestDiagnostics.Write("lock.acquire", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=accepted force={force} contractsPerAgency={contractsPerAgency}");
                 return true;
             }
-            PlaytestDiagnostics.Write("lock.acquire", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=denied reason=held force={force}");
             return false;
         }
 
         public static bool ReleaseLock(LockDefinition lockDef)
         {
+            lock(global::Server.Agency.AgencyVesselMap.TransactionGate) return ReleaseLocked(lockDef);
+        }
+
+        private static bool ReleaseLocked(LockDefinition lockDef)
+        {
             if (LockQuery.LockBelongsToPlayer(lockDef.Type, lockDef.VesselId, lockDef.KerbalName, lockDef.PlayerName))
             {
                 LockStore.RemoveLock(lockDef);
-                PlaytestDiagnostics.Write("lock.release", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=accepted");
                 return true;
             }
 
-            PlaytestDiagnostics.Write("lock.release", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=denied reason=not-owner");
             return false;
         }
 

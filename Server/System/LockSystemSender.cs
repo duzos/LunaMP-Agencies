@@ -70,7 +70,14 @@ namespace Server.System
 
         public static void SendLockAcquireMessage(ClientStructure client, LockDefinition lockDefinition, bool force)
         {
-            if (LockSystem.AcquireLock(lockDefinition, force, out var repeatedAcquire))
+            bool acquired;
+            var repeatedAcquire = false;
+            lock (AgencyVesselMap.TransactionGate)
+                acquired = (lockDefinition.Type != LockType.Control || VesselOwnershipSystem.CanControl(client, lockDefinition.VesselId))
+                           && LockSystem.AcquireLock(lockDefinition, force, out repeatedAcquire);
+            var clientSummary = global::Server.Diagnostics.PlaytestDiagnostics.Client(client);
+            global::Server.Diagnostics.PlaytestDiagnostics.Write("lock.acquire", () => $"{clientSummary} vessel={lockDefinition.VesselId} type={lockDefinition.Type} acquired={acquired} repeated={repeatedAcquire} force={force}");
+            if (acquired)
             {
                 var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<LockAcquireMsgData>();
                 msgData.Lock = lockDefinition;
@@ -97,7 +104,8 @@ namespace Server.System
             }
             else
             {
-                SendStoredLockData(client, lockDefinition);
+                if(VesselOwnershipSystem.Enabled && lockDefinition.Type == LockType.Control) { var denied = ServerContext.ServerMessageFactory.CreateNewMessageData<LockAcquireDeniedMsgData>(); denied.Lock=lockDefinition; denied.Reason="Craft control is unavailable or belongs to another agency."; MessageQueuer.SendToClient<LockSrvMsg>(client,denied); }
+                else SendStoredLockData(client, lockDefinition);
                 LunaLog.Debug($"{lockDefinition.PlayerName} failed to acquire lock {lockDefinition}");
             }
         }

@@ -19,15 +19,17 @@ namespace Server.System.Vessel
         /// </summary>
         public static void WritePartSyncUiFieldDataToFile(VesselBaseMsgData message)
         {
+            var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
             if (!(message is VesselPartSyncUiFieldMsgData msgData)) return;
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             //Sync part changes ALWAYS and ignore the rate they arrive
             _ = Task.Run(() =>
             {
+                lock (global::Server.Agency.AgencyVesselMap.TransactionGate)
                 lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                 {
-                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                    if (!global::Server.Agency.AgencyVesselMap.CanApplyEpoch(msgData.VesselId,ownershipEpoch) || !VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
                     UpdateProtoVesselFileWithNewPartSyncUiFieldData(vessel, msgData);
                 }

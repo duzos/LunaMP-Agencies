@@ -20,6 +20,7 @@ namespace LmpCommon.Message.Server
         protected override Dictionary<ushort, Type> SubTypeDictionary { get; } = new Dictionary<ushort, Type>
         {
             [(ushort)LockMessageType.ListReply] = typeof(LockListReplyMsgData),
+            [(ushort)LockMessageType.AcquireDenied] = typeof(LockAcquireDeniedMsgData),
             [(ushort)LockMessageType.Acquire] = typeof(LockAcquireMsgData),
             [(ushort)LockMessageType.Release] = typeof(LockReleaseMsgData)
         };

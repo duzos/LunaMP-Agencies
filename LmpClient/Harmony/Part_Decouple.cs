@@ -19,6 +19,7 @@ namespace LmpClient.Harmony
         [HarmonyPrefix]
         private static bool PrefixDecouple(Part __instance, float breakForce, ref Vessel __state)
         {
+            if (!LmpClient.Systems.Agency.DockingCoordinator.BeforeTopologyChange()) return false;
             if (MainSystem.NetworkState < ClientState.Connected || !__instance.vessel) return true;
 
             if (VesselDecoupleSystem.Singleton.ManuallyDecouplingVesselId == __instance.vessel.id ||
@@ -26,6 +27,7 @@ namespace LmpClient.Harmony
                 !__instance.vessel.IsImmortal())
             {
                 __state = __instance.vessel;
+                LmpClient.Systems.Agency.VesselOwnershipClient.BeginSplit();
                 PartEvent.onPartDecoupling.Fire(__instance, breakForce);
 
                 return true;
@@ -37,7 +39,14 @@ namespace LmpClient.Harmony
         [HarmonyPostfix]
         private static void PostfixDecouple(Part __instance, float breakForce, ref Vessel __state)
         {
+            if (__state == null) return;
             PartEvent.onPartDecoupled.Fire(__instance, breakForce, __state);
+        }
+        [HarmonyFinalizer]
+        private static System.Exception Finalizer(System.Exception __exception, Vessel __state)
+        {
+            if (__state != null) LmpClient.Systems.Agency.VesselOwnershipClient.EndSplit();
+            return __exception;
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpClient.Events;
 using LmpCommon.Enums;
@@ -50,6 +50,13 @@ namespace LmpClient.Systems.Lock
 
                         LockEvent.onLockRelease.Fire(data.Lock);
                     }
+                    break;
+                case LockMessageType.AcquireDenied:
+                    var denied = (LockAcquireDeniedMsgData)msgData;
+                    // A denial is not a release of the current holder. F3 never inserts speculative control locks.
+                    LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.ownership.lock-denied", () => denied.Reason);
+                    if (FlightGlobals.ActiveVessel && FlightGlobals.ActiveVessel.id == denied.Lock.VesselId)
+                        LmpClient.Systems.VesselLockSys.VesselLockSystem.Singleton.StartSpectating(denied.Lock.VesselId);
                     break;
             }
         }

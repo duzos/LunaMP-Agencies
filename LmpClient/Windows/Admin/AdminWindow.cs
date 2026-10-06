@@ -11,8 +11,8 @@ namespace LmpClient.Windows.Admin
     {
         #region Fields
 
-        private const float WindowHeight = 300;
-        private const float WindowWidth = 400;
+        private const float WindowHeight = 600;
+        private const float WindowWidth = 720;
         private const float ConfirmationWindowHeight = 50;
         private const float ConfirmationWindowWidth = 350;
 
@@ -52,14 +52,16 @@ namespace LmpClient.Windows.Admin
 
         public override void SetStyles()
         {
-            WindowRect = new Rect(Screen.width / 2f - WindowWidth / 2f, Screen.height / 2f - WindowHeight / 2f, WindowWidth, WindowHeight);
+            var width = Mathf.Min(WindowWidth, Mathf.Max(320, Screen.width - 32));
+            var height = Mathf.Min(WindowHeight, Mathf.Max(260, Screen.height - 32));
+            WindowRect = new Rect(Screen.width / 2f - width / 2f, Screen.height / 2f - height / 2f, width, height);
             MoveRect = new Rect(0, 0, 10000, 40);
 
             LayoutOptions = new GUILayoutOption[4];
-            LayoutOptions[0] = GUILayout.MinWidth(WindowWidth);
-            LayoutOptions[1] = GUILayout.MaxWidth(WindowWidth);
-            LayoutOptions[2] = GUILayout.MinHeight(WindowHeight);
-            LayoutOptions[3] = GUILayout.MaxHeight(WindowHeight);
+            LayoutOptions[0] = GUILayout.MinWidth(width);
+            LayoutOptions[1] = GUILayout.MaxWidth(width);
+            LayoutOptions[2] = GUILayout.MinHeight(height);
+            LayoutOptions[3] = GUILayout.MaxHeight(height);
 
             _confirmationLayoutOptions = new GUILayoutOption[4];
             _confirmationLayoutOptions[0] = GUILayout.MinWidth(ConfirmationWindowWidth);

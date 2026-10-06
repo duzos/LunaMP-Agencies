@@ -146,6 +146,7 @@ namespace Server
                 AgencyStore.LoadExistingAgencies();
                 AgencyScenarioStore.LoadAllExisting();
                 AgencyVesselMap.Load();
+                AgencyLaunchSiteStore.Load();
                 AgencyMigration.RunIfNeeded();
 
                 // Defensive: reconcile each agency's headline entity values
@@ -177,6 +178,7 @@ namespace Server
                 }
 
                 LunaLog.Info($"[Agency] Loaded {AgencyStore.Agencies.Count} agencies at startup.");
+                AgencyLaunchSiteStore.WarnUnassignedAgencies();
                 PlaytestDiagnostics.Snapshot("startup.agencies-loaded");
                 LmpPluginHandler.LoadPlugins();
                 WarpSystem.Reset();

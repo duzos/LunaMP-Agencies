@@ -74,6 +74,7 @@ namespace LmpClient.Systems.Agency
                 if (a != null) System.KnownAgencies[a.Id] = a;
             }
             System.MyAgencyId = data.MyAgencyId;
+            System.ApplyLaunchSites(data);
             LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.sync-applied", () => $"agency={data.MyAgencyId} count={data.Agencies.Length}");
             LunaLog.Log($"[Agency] SyncAll received: {data.Agencies.Length} agencies; mine={data.MyAgencyId}");
         }
@@ -132,6 +133,7 @@ namespace LmpClient.Systems.Agency
 
         private static void Handle(AgencyReplyMsgData data)
         {
+            System.LatestServerReply = (data.Success ? "OK: " : "Err: ") + data.Message;
             LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.reply", () => $"success={data.Success} messagePresent={!string.IsNullOrEmpty(data.Message)} agency={System.MyAgencyId}");
             if (!string.IsNullOrEmpty(data.Message))
                 System.PendingServerMessages.Enqueue((data.Success ? "OK: " : "Err: ") + data.Message);

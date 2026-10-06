@@ -1,4 +1,4 @@
-﻿using LmpCommon.Enums;
+using LmpCommon.Enums;
 using LmpCommon.Xml;
 using System;
 
@@ -97,6 +97,9 @@ namespace Server.Settings.Definition
 
         [XmlComment(Value = "New agencies start with an empty crew roster when AgencyKerbalsPerAgency is also true. Existing rosters and legacy migration are preserved.")]
         public bool AgencyZeroStartingKerbals { get; set; } = false;
+
+        [XmlComment(Value = "Restrict launch sites to explicit exclusive agency assignments. Agencies with no sites cannot launch, including at KSC. Client-side enforcement only.")]
+        public bool AgencyLaunchSitesPerAgency { get; set; } = false;
 
         [XmlComment(Value = "If true, SCANsat satellite-imaging coverage (the SCANcontroller scenario) " +
                             "is tracked per agency. Each agency scans the planets independently. If " +

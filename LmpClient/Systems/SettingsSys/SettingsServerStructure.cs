@@ -36,5 +36,6 @@ namespace LmpClient.Systems.SettingsSys
         public bool AgencyScansatPerAgency { get; set; }
         public bool AgencyContractsPoolPerAgency { get; set; }
         public bool AgencyCommNetPerAgency { get; set; }
+        public bool AgencyLaunchSitesPerAgency { get; set; }
     }
 }

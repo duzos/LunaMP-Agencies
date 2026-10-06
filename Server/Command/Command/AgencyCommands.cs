@@ -4,6 +4,8 @@ using Server.Command.Command.Base;
 using Server.Log;
 using System;
 using System.Linq;
+using System.Collections.Generic;
+using System.Text;
 
 namespace Server.Command.Command
 {
@@ -30,9 +32,84 @@ namespace Server.Command.Command
             if (agency != null) return true;
 
             // Match on short N-format ids pasted from logs.
-            agency = AgencyStore.Agencies.Values.FirstOrDefault(a =>
-                a.Id.ToString("N").StartsWith(token, StringComparison.OrdinalIgnoreCase));
+            var matches = AgencyStore.Agencies.Values.Where(a =>
+                a.Id.ToString("N").StartsWith(token, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+            agency = matches.Length == 1 ? matches[0] : null;
             return agency != null;
+        }
+    }
+
+    public static class LaunchSiteCommandArguments
+    {
+        public static bool TryParse(string text, out string[] arguments)
+        {
+            var result = new List<string>();
+            var token = new StringBuilder();
+            var quoted = false;
+            var started = false;
+            text = text ?? string.Empty;
+            for (var i = 0; i < text.Length; i++)
+            {
+                var character = text[i];
+                if (character == '\\' && i + 1 < text.Length && text[i + 1] == '"')
+                {
+                    token.Append('"'); i++; started = true;
+                }
+                else if (character == '"') { quoted = !quoted; started = true; }
+                else if (char.IsWhiteSpace(character) && !quoted)
+                {
+                    if (started) { result.Add(token.ToString()); token.Clear(); started = false; }
+                }
+                else { token.Append(character); started = true; }
+            }
+            if (started) result.Add(token.ToString());
+            arguments = result.ToArray();
+            return !quoted;
+        }
+
+        public static bool ExecuteMutation(string text, bool remove)
+        {
+            if (!TryParse(text, out var arguments) || arguments.Length != 2 || !AgencyCmdHelpers.TryResolveAgency(arguments[0], out var agency))
+            {
+                LunaLog.Error("Usage: /" + (remove ? "unassignlaunchsite" : "assignlaunchsite") + " <agency-name|id> <exact-site-id>. Quote names containing spaces; short IDs must be unique.");
+                return false;
+            }
+            var result = remove ? AgencyLaunchSiteStore.Unassign(agency.Id, arguments[1]) : AgencyLaunchSiteStore.Assign(agency.Id, arguments[1]);
+            LunaLog.Normal(result.Message);
+            return result.Success;
+        }
+    }
+
+    public class AssignLaunchSiteCommand : SimpleCommand
+    {
+        public override bool Execute(string commandArgs) => LaunchSiteCommandArguments.ExecuteMutation(commandArgs, remove: false);
+    }
+
+    public class UnassignLaunchSiteCommand : SimpleCommand
+    {
+        public override bool Execute(string commandArgs) => LaunchSiteCommandArguments.ExecuteMutation(commandArgs, remove: true);
+    }
+
+    public class ListLaunchSitesCommand : SimpleCommand
+    {
+        public override bool Execute(string commandArgs)
+        {
+            if (!LaunchSiteCommandArguments.TryParse(commandArgs, out var arguments) || arguments.Length > 1)
+            {
+                LunaLog.Error("Usage: /listlaunchsites [agency-name|id]. Quote names containing spaces.");
+                return false;
+            }
+            Agency.Agency agency = null;
+            if (arguments.Length == 1 && !AgencyCmdHelpers.TryResolveAgency(arguments[0], out agency))
+            {
+                LunaLog.Error("Agency not found or short ID is ambiguous.");
+                return false;
+            }
+            var snapshot = AgencyLaunchSiteStore.GetSnapshot();
+            var entries = snapshot.Assignments.Where(p => agency == null || p.Value == agency.Id).OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
+            LunaLog.Normal($"== Launch-site assignments ({entries.Length}, revision {snapshot.Revision}) ==");
+            foreach (var entry in entries) LunaLog.Normal($"  '{entry.Key}' -> '{AgencySystem.GetAgency(entry.Value)?.Name}' ({entry.Value})");
+            return true;
         }
     }
 

@@ -41,6 +41,8 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.AgencyScansatPerAgency = msgData.AgencyScansatPerAgency;
             SettingsSystem.ServerSettings.AgencyContractsPoolPerAgency = msgData.AgencyContractsPoolPerAgency;
             SettingsSystem.ServerSettings.AgencyCommNetPerAgency = msgData.AgencyCommNetPerAgency;
+            SettingsSystem.ServerSettings.AgencyLaunchSitesPerAgency = msgData.AgencyLaunchSitesPerAgency;
+            LmpClient.Systems.Agency.LaunchSiteCatalog.RequestRefresh();
 
             SettingsSystem.ServerSettings.ServerParameters =
                 GameParameters.GetDefaultParameters(

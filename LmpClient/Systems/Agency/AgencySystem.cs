@@ -12,7 +12,7 @@ namespace LmpClient.Systems.Agency
     /// authoritative; this system only caches what the server tells it and
     /// forwards user-driven actions via <see cref="AgencyMessageSender"/>.
     /// </summary>
-    public class AgencySystem : MessageSystem<AgencySystem, AgencyMessageSender, AgencyMessageHandler>
+    public partial class AgencySystem : MessageSystem<AgencySystem, AgencyMessageSender, AgencyMessageHandler>
     {
         public override string SystemName { get; } = nameof(AgencySystem);
 
@@ -37,7 +37,20 @@ namespace LmpClient.Systems.Agency
         /// </summary>
         public readonly ConcurrentDictionary<Guid, Guid> VesselAgencyMap = new ConcurrentDictionary<Guid, Guid>();
 
-        public Guid MyAgencyId { get; set; } = Guid.Empty;
+        private Guid myAgencyId;
+        public Guid MyAgencyId
+        {
+            get { lock (launchSitesLock) return myAgencyId; }
+            set
+            {
+                lock (launchSitesLock)
+                {
+                    if (myAgencyId == value) return;
+                    myAgencyId = value;
+                }
+                LaunchSiteCatalog.RequestRefresh();
+            }
+        }
 
         /// <summary>
         /// Convenience: returns the agency id that owns the given vessel,
@@ -82,6 +95,10 @@ namespace LmpClient.Systems.Agency
             VesselAgencyMap.Clear();
             lock (RequestsLock) PendingIncomingRequests.Clear();
             MyAgencyId = Guid.Empty;
+            ClearLaunchSites();
+            LatestServerReply = null;
+            LmpClient.Windows.Admin.AdminWindow.ResetLaunchSitesUi();
+            while (PendingServerMessages.TryDequeue(out _)) { }
             LunaLog.Log("[Agency] Client AgencySystem disabled and cleared.");
         }
     }

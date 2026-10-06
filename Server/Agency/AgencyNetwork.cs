@@ -116,6 +116,10 @@ namespace Server.Agency
             PlaytestDiagnostics.AgencySnapshot(client);
             data.MyAgencyId = client.AgencyId;
             data.Agencies = AgencyStore.Agencies.Values.Select(a => a.ToInfo()).ToArray();
+            var launchSites = AgencyLaunchSiteStore.GetSnapshot();
+            data.LaunchSitesSnapshotPresent = true;
+            data.LaunchSitesRevision = launchSites.Revision;
+            data.LaunchSites = launchSites.Assignments.Select(p => new LaunchSiteAssignment { SiteId = p.Key, AgencyId = p.Value }).ToArray();
             MessageQueuer.SendToClient<AgencySrvMsg>(client, data);
         }
 

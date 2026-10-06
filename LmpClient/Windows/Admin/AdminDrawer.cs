@@ -12,9 +12,10 @@ namespace LmpClient.Windows.Admin
 {
     public partial class AdminWindow
     {
-        // Sub-tabs: 0 = Players (existing), 1 = Agencies (new).
+        // Keep administration tasks separate so assignment controls stay easy to find.
         private static int _adminTab;
-        private static readonly string[] AdminTabLabels = { "Players", "Agencies" };
+        private static readonly string[] AdminTabLabels = { "Players", "Agencies", "Launch sites" };
+        private static Vector2 _adminDetailsScroll;
 
         // Agencies tab state.
         private static Guid _selectedAgencyId;
@@ -37,13 +38,21 @@ namespace LmpClient.Windows.Admin
             GUILayout.EndHorizontal();
             GUILayout.Space(5);
 
-            GUI.enabled = !string.IsNullOrEmpty(AdminSystem.Singleton.AdminPassword);
-
             _adminTab = GUILayout.Toolbar(_adminTab, AdminTabLabels);
             GUILayout.Space(4);
 
-            if (_adminTab == 0) DrawPlayersTab();
-            else DrawAgenciesTab();
+            if (_adminTab == 2) DrawLaunchSitesTab();
+            else
+            {
+                GUI.enabled = IsPasswordSet();
+                if (_adminTab == 0) DrawPlayersTab();
+                else
+                {
+                    _adminDetailsScroll = GUILayout.BeginScrollView(_adminDetailsScroll);
+                    DrawAgenciesTab();
+                    GUILayout.EndScrollView();
+                }
+            }
 
             GUI.enabled = true;
             GUILayout.EndVertical();

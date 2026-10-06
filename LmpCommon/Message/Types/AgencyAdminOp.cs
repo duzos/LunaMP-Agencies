@@ -24,5 +24,7 @@ namespace LmpCommon.Message.Types
         GrantAllTech = 21,
         CompleteContract = 30,
         CancelContract = 31,
+        AssignLaunchSite = 40,
+        UnassignLaunchSite = 41,
     }
 }

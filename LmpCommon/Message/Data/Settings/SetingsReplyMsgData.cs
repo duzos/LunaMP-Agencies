@@ -1,4 +1,4 @@
-﻿using Lidgren.Network;
+using Lidgren.Network;
 using LmpCommon.Enums;
 using LmpCommon.Message.Base;
 using LmpCommon.Message.Types;
@@ -78,6 +78,7 @@ namespace LmpCommon.Message.Data.Settings
         public bool AgencyScansatPerAgency;
         public bool AgencyContractsPoolPerAgency;
         public bool AgencyCommNetPerAgency;
+        public bool AgencyLaunchSitesPerAgency;
 
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
 
@@ -148,6 +149,7 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(AgencyScansatPerAgency);
             lidgrenMsg.Write(AgencyContractsPoolPerAgency);
             lidgrenMsg.Write(AgencyCommNetPerAgency);
+            lidgrenMsg.Write(AgencyLaunchSitesPerAgency);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -217,6 +219,7 @@ namespace LmpCommon.Message.Data.Settings
             // past end-of-stream throws, so we wrap in a position-check.
             try
             {
+                if (lidgrenMsg.LengthBits - lidgrenMsg.Position < 5) throw new global::System.IO.EndOfStreamException();
                 AgencyExperimentsPerAgency = lidgrenMsg.ReadBoolean();
                 AgencyKerbalsPerAgency = lidgrenMsg.ReadBoolean();
                 AgencyScansatPerAgency = lidgrenMsg.ReadBoolean();
@@ -230,13 +233,17 @@ namespace LmpCommon.Message.Data.Settings
                 AgencyScansatPerAgency = false;
                 AgencyContractsPoolPerAgency = false;
                 AgencyCommNetPerAgency = false;
+                lidgrenMsg.Position = lidgrenMsg.LengthBits;
             }
+            AgencyLaunchSitesPerAgency = false;
+            try { if (lidgrenMsg.Position < lidgrenMsg.LengthBits) AgencyLaunchSitesPerAgency = lidgrenMsg.ReadBoolean(); }
+            catch { /* Older servers omit this independent trailing flag. */ }
         }
 
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 29 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 30 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

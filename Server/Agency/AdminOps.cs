@@ -20,6 +20,11 @@ namespace Server.Agency
 
             switch (data.Op)
             {
+                case AgencyAdminOp.AssignLaunchSite:
+                    return AgencyLaunchSiteStore.Assign(data.TargetAgencyId, data.StringArg);
+                case AgencyAdminOp.UnassignLaunchSite:
+                    return AgencyLaunchSiteStore.Unassign(data.TargetAgencyId, data.StringArg);
+
                 case AgencyAdminOp.Delete:
                     return AgencySystem.DeleteAgency(data.TargetAgencyId, actor?.UniqueIdentifier ?? "console", isAdmin: true, force: true);
 

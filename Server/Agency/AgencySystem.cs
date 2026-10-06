@@ -80,6 +80,7 @@ namespace Server.Agency
                 AgencyKerbalStore.InitializeNewAgency(agency.Id);
             AgencyScenarioStore.BackupAgency(agency.Id);
 
+            AgencyLaunchSiteStore.WarnUnassignedAgencies();
             LunaLog.Info($"[Agency] Created solo agency '{agency.Name}' id={agency.Id} owner={displayName}({uniqueId})");
             AgencyNetwork.BroadcastUpsert(agency);
             return agency;
@@ -131,6 +132,7 @@ namespace Server.Agency
             ApplyClientAgencyAssignment(ownerUniqueId, agency.Id,
                 $"Created agency '{agency.Name}'. Reconnecting to load its career state.");
 
+            AgencyLaunchSiteStore.WarnUnassignedAgencies();
             LunaLog.Info($"[Agency] CreateAgency name='{agency.Name}' id={agency.Id} owner={ownerDisplayName}({ownerUniqueId})");
             AgencyNetwork.BroadcastUpsert(agency);
             return (true, $"Created agency '{agency.Name}'.", agency);
@@ -174,7 +176,8 @@ namespace Server.Agency
                     return (false, "Agency still has members. Use --force to delete anyway.");
             }
 
-            AgencyStore.Agencies.TryRemove(agencyId, out _);
+            var removal = AgencyLaunchSiteStore.RemoveAgencyAndAssignments(agencyId);
+            if (!removal.Success) return removal;
             AgencyScenarioStore.RemoveAgency(agencyId);
             AgencyStore.DeleteAgencyFiles(agencyId);
 
@@ -570,7 +573,13 @@ namespace Server.Agency
             {
                 // Solo agency lost its only member: remove it — it exists
                 // only as long as its one owner does.
-                AgencyStore.Agencies.TryRemove(agency.Id, out _);
+                var removal = AgencyLaunchSiteStore.RemoveAgencyAndAssignments(agency.Id);
+                if (!removal.Success)
+                {
+                    LunaLog.Warning($"[Agency] Empty solo agency {agency.Id} retained: {removal.Message}");
+                    AgencyStore.PersistAgency(agency);
+                    return;
+                }
                 AgencyScenarioStore.RemoveAgency(agency.Id);
                 AgencyStore.DeleteAgencyFiles(agency.Id);
                 AgencyNetwork.BroadcastDelete(agency.Id);

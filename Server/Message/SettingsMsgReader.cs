@@ -1,4 +1,4 @@
-﻿using LmpCommon.Enums;
+using LmpCommon.Enums;
 using LmpCommon.Message.Data.Settings;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Server;
@@ -45,6 +45,7 @@ namespace Server.Message
             msgData.AgencyScansatPerAgency = GeneralSettings.SettingsStore.AgencyScansatPerAgency;
             msgData.AgencyContractsPoolPerAgency = GeneralSettings.SettingsStore.AgencyContractsPoolPerAgency;
             msgData.AgencyCommNetPerAgency = GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
+            msgData.AgencyLaunchSitesPerAgency = GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency;
 
             if (GeneralSettings.SettingsStore.GameDifficulty == GameDifficulty.Custom && GameplaySettings.SettingsStore != null)
             {

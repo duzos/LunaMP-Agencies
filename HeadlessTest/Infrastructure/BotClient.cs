@@ -25,7 +25,9 @@ internal abstract record BotSnapshot(int Generation);
 internal sealed record StatusSnapshot(int Generation, NetConnectionStatus Status, string Reason) : BotSnapshot(Generation);
 internal sealed record HandshakeSnapshot(int Generation, HandshakeReply Response, string Reason) : BotSnapshot(Generation);
 internal sealed record AgencySnapshot(Guid Id, string Name, bool IsSolo, IReadOnlyList<string> Members);
-internal sealed record AgencySyncSnapshot(int Generation, Guid MyAgencyId, IReadOnlyList<AgencySnapshot> Agencies) : BotSnapshot(Generation);
+internal sealed record SiteAssignmentSnapshot(string SiteId, Guid AgencyId);
+internal sealed record AgencySyncSnapshot(int Generation, Guid MyAgencyId, IReadOnlyList<AgencySnapshot> Agencies,
+    bool LaunchSitesReady, long LaunchSitesRevision, IReadOnlyList<SiteAssignmentSnapshot> LaunchSites) : BotSnapshot(Generation);
 internal sealed record AgencyUpsertSnapshot(int Generation, AgencySnapshot Agency) : BotSnapshot(Generation);
 internal sealed record AgencyReplySnapshot(int Generation, bool Success, string Message) : BotSnapshot(Generation);
 internal sealed record JoinRequestSnapshot(int Generation, Guid AgencyId, string PlayerIdentity) : BotSnapshot(Generation);
@@ -115,6 +117,15 @@ internal sealed class BotClient : IAsyncDisposable
         => WaitForAsync<StatusSnapshot>(s => s.Status == NetConnectionStatus.Disconnected, cancellationToken);
 
     public void RequestKerbals() => Send<KerbalCliMsg, KerbalsRequestMsgData>(_ => { });
+    public void SendAdmin(string password, AgencyAdminOp operation, Guid agency, string argument)
+        => Send<AgencyCliMsg, AgencyAdminOpMsgData>(data =>
+        {
+            data.AdminPassword = password;
+            data.Op = operation;
+            data.TargetAgencyId = agency;
+            data.StringArg = argument;
+            data.NumericArg = 0;
+        });
     public void SendKerbal(string name, string configNodeText) => Send<KerbalCliMsg, KerbalProtoMsgData>(d =>
     {
         var bytes = Encoding.UTF8.GetBytes(configNodeText);
@@ -273,7 +284,9 @@ internal sealed class BotClient : IAsyncDisposable
         KerbalReplyMsgData d => new KerbalRosterSnapshot(generation, CopyRoster(d)),
         KerbalProtoMsgData d => new KerbalProtoSnapshot(generation, CopyKerbal(d.Kerbal)),
         HandshakeReplyMsgData d => new HandshakeSnapshot(generation, d.Response, d.Reason),
-        AgencySyncAllMsgData d => new AgencySyncSnapshot(generation, d.MyAgencyId, Array.AsReadOnly(d.Agencies.Select(CopyAgency).ToArray())),
+        AgencySyncAllMsgData d => new AgencySyncSnapshot(generation, d.MyAgencyId, Array.AsReadOnly(d.Agencies.Select(CopyAgency).ToArray()),
+            d.LaunchSitesSnapshotPresent, d.LaunchSitesRevision,
+            Array.AsReadOnly(d.LaunchSites.Select(site => new SiteAssignmentSnapshot(site.SiteId, site.AgencyId)).ToArray())),
         AgencyUpsertMsgData d => new AgencyUpsertSnapshot(generation, CopyAgency(d.Agency)),
         AgencyReplyMsgData d => new AgencyReplySnapshot(generation, d.Success, d.Message),
         AgencyJoinRequestPostedMsgData d => new JoinRequestSnapshot(generation, d.Request.AgencyId, d.Request.PlayerUniqueId),

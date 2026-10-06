@@ -22,6 +22,7 @@ namespace ServerTest.Agency
         private readonly bool _previousScansatPerAgency;
         private readonly bool _previousKerbalsPerAgency;
         private readonly bool _previousZeroStartingKerbals;
+        private readonly bool _previousLaunchSites;
         private readonly List<Action> _restore = new List<Action>();
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "LMPAgencyTest_" + Guid.NewGuid().ToString("N"));
 
@@ -38,6 +39,10 @@ namespace ServerTest.Agency
             _previousScansatPerAgency = GeneralSettings.SettingsStore.AgencyScansatPerAgency;
             _previousKerbalsPerAgency = GeneralSettings.SettingsStore.AgencyKerbalsPerAgency;
             _previousZeroStartingKerbals = GeneralSettings.SettingsStore.AgencyZeroStartingKerbals;
+            _previousLaunchSites = GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency;
+            SaveAndReplacePrivateField(typeof(AgencyLaunchSiteStore), "_assignments", new Dictionary<string, Guid>(StringComparer.Ordinal));
+            SaveAndReplacePrivateField(typeof(AgencyLaunchSiteStore), "_revision", 0L);
+            SaveAndReplacePrivateField(typeof(AgencyLaunchSiteStore), "_loadError", null);
             SaveAndClear(AgencyStore.Agencies);
             SaveAndClear(PrivateDictionary<string, Guid>(typeof(AgencyAchievementRegistry), "Holders"));
             SaveAndClear(ScenarioStoreSystem.CurrentScenarios);
@@ -47,6 +52,14 @@ namespace ServerTest.Agency
             ServerContext.DataDirectory = Root;
             ScenarioSystem.ScenariosPath = Path.Combine(ServerContext.UniverseDirectory, "Scenarios");
             Directory.CreateDirectory(ServerContext.AgenciesDirectory);
+        }
+
+        private void SaveAndReplacePrivateField(Type type, string name, object replacement)
+        {
+            var field = type.GetField(name, BindingFlags.NonPublic | BindingFlags.Static);
+            var saved = field.GetValue(null);
+            field.SetValue(null, replacement);
+            _restore.Add(() => field.SetValue(null, saved));
         }
 
         private static ConcurrentDictionary<TKey, TValue> PrivateDictionary<TKey, TValue>(Type type, string name)
@@ -74,6 +87,7 @@ namespace ServerTest.Agency
             GeneralSettings.SettingsStore.AgencyScansatPerAgency = _previousScansatPerAgency;
             GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = _previousKerbalsPerAgency;
             GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = _previousZeroStartingKerbals;
+            GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency = _previousLaunchSites;
             if (Directory.Exists(Root)) Directory.Delete(Root, true);
         }
     }

@@ -14,6 +14,7 @@ namespace LmpClient.Windows.Agency
         private static string _renameName = "";
         private static string _lastStatusMessage = "";
         private static Vector2 _scrollPos;
+        private static Vector2 _mineContentScroll;
 
         // Leaderboard tab state.
         private static int _leaderboardSort; // 0=firsts 1=funds 2=science 3=vessels
@@ -34,7 +35,11 @@ namespace LmpClient.Windows.Agency
 
             switch (_tab)
             {
-                case 0: DrawMineTab(); break;
+                case 0:
+                    _mineContentScroll = GUILayout.BeginScrollView(_mineContentScroll);
+                    DrawMineTab();
+                    GUILayout.EndScrollView();
+                    break;
                 case 1: DrawBrowseTab(); break;
                 case 2: DrawCreateTab(); break;
                 case 3: DrawLeaderboardTab(); break;
@@ -77,6 +82,7 @@ namespace LmpClient.Windows.Agency
             GUILayout.Label($"Reputation:{mine.Reputation:N1}");
             GUILayout.Label($"Tech unlocked: {mine.UnlockedTechCount}");
             GUILayout.Label($"Solo agency:   {(mine.IsSolo ? "yes (auto)" : "no")}");
+            DrawLaunchSitesSummary(mine.Id);
 
             GUILayout.Space(8);
             GUILayout.Label("Members:");

@@ -20,6 +20,7 @@ namespace LmpClient.Systems.SettingsSys
         {
             base.OnDisabled();
             ServerSettings = new SettingsServerStructure();
+            LmpClient.Systems.Agency.LaunchSiteCatalog.RequestRefresh();
         }
 
         public static void SaveSettings()

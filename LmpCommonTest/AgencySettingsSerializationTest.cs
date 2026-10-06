@@ -8,24 +8,29 @@ namespace LmpCommonTest
     [TestClass]
     public class AgencySettingsSerializationTest
     {
-        [TestMethod]
-        public void LegacySettingsWithoutAgencyTail_ResetReusedFlagsToFalse()
+        [DataTestMethod]
+        [DataRow(0)]
+        [DataRow(2)]
+        public void LegacySettingsWithoutAgencyTail_ResetReusedFlagsToFalse(int partialTailBits)
         {
             var factory = new ServerMessageFactory();
             var peer = new NetClient(new NetPeerConfiguration("SettingsTests"));
             var settings = factory.CreateNewMessageData<SettingsReplyMsgData>();
             settings.ConsoleIdentifier = "Legacy server";
             settings.PrintMotdInChat = true;
+            settings.AgencyExperimentsPerAgency = true;
+            settings.AgencyKerbalsPerAgency = true;
             var outgoing = peer.CreateMessage(settings.GetMessageSize());
             settings.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
-            incoming.LengthBits = outgoing.LengthBits - 5;
+            incoming.LengthBits = outgoing.LengthBits - 6 + partialTailBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyExperimentsPerAgency = true;
             parsed.AgencyKerbalsPerAgency = true;
             parsed.AgencyScansatPerAgency = true;
             parsed.AgencyContractsPoolPerAgency = true;
             parsed.AgencyCommNetPerAgency = true;
+            parsed.AgencyLaunchSitesPerAgency = true;
             parsed.Deserialize(incoming);
             Assert.AreEqual("Legacy server", parsed.ConsoleIdentifier);
             Assert.IsTrue(parsed.PrintMotdInChat);
@@ -34,6 +39,26 @@ namespace LmpCommonTest
             Assert.IsFalse(parsed.AgencyScansatPerAgency);
             Assert.IsFalse(parsed.AgencyContractsPoolPerAgency);
             Assert.IsFalse(parsed.AgencyCommNetPerAgency);
+            Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
+        }
+
+        [TestMethod]
+        public void PreviousFiveFlagTailRetainsItsValuesWhenNewFlagIsAbsent()
+        {
+            var factory = new ServerMessageFactory();
+            var peer = new NetClient(new NetPeerConfiguration("PreviousSettings"));
+            var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            source.AgencyExperimentsPerAgency = source.AgencyKerbalsPerAgency = source.AgencyScansatPerAgency = source.AgencyContractsPoolPerAgency = source.AgencyCommNetPerAgency = true;
+            source.AgencyLaunchSitesPerAgency = true;
+            var outgoing = peer.CreateMessage(source.GetMessageSize());
+            source.Serialize(outgoing);
+            var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
+            incoming.LengthBits = outgoing.LengthBits - 1;
+            var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            parsed.AgencyLaunchSitesPerAgency = true;
+            parsed.Deserialize(incoming);
+            Assert.IsTrue(parsed.AgencyExperimentsPerAgency && parsed.AgencyKerbalsPerAgency && parsed.AgencyScansatPerAgency && parsed.AgencyContractsPoolPerAgency && parsed.AgencyCommNetPerAgency);
+            Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
         }
 
         [DataTestMethod]
@@ -52,6 +77,7 @@ namespace LmpCommonTest
             settings.AgencyScansatPerAgency = enabled;
             settings.AgencyContractsPoolPerAgency = !enabled;
             settings.AgencyCommNetPerAgency = enabled;
+            settings.AgencyLaunchSitesPerAgency = !enabled;
             var outgoing = peer.CreateMessage(settings.GetMessageSize());
             settings.Serialize(outgoing);
             Assert.IsTrue(settings.GetMessageSize() >= outgoing.LengthBytes);
@@ -67,6 +93,7 @@ namespace LmpCommonTest
             Assert.AreEqual(enabled, parsed.AgencyScansatPerAgency);
             Assert.AreEqual(!enabled, parsed.AgencyContractsPoolPerAgency);
             Assert.AreEqual(enabled, parsed.AgencyCommNetPerAgency);
+            Assert.AreEqual(!enabled, parsed.AgencyLaunchSitesPerAgency);
         }
     }
 }

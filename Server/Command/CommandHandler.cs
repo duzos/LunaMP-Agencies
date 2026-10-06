@@ -1,4 +1,4 @@
-﻿using Server.Command.Command;
+using Server.Command.Command;
 using Server.Context;
 using Server.Log;
 using System;
@@ -36,6 +36,10 @@ namespace Server.Command
             RegisterCommand("say", new SayCommand().Execute, "Broadcasts a message to clients");
             RegisterCommand("vessel", new VesselCommand().Execute, "Vessel related commands. Usage: /vessel info [name/guid]");
             RegisterCommand("backup", new BackupCommand().Execute, "Backup related commands. Usage: /backup [now]");
+
+            RegisterCommand("assignlaunchsite", new AssignLaunchSiteCommand().Execute, "Assigns or moves an exclusive launch site. Usage: /assignlaunchsite <agency> <site>; quote names with spaces");
+            RegisterCommand("unassignlaunchsite", new UnassignLaunchSiteCommand().Execute, "Removes a matching assignment. Usage: /unassignlaunchsite <agency> <site>");
+            RegisterCommand("listlaunchsites", new ListLaunchSitesCommand().Execute, "Lists launch-site ownership. Usage: /listlaunchsites [agency]");
 
             // Agency commands (fork feature)
             RegisterCommand("listagencies", new ListAgenciesCommand().Execute, "Lists all agencies with summary info");

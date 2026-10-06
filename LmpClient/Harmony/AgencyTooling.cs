@@ -51,8 +51,8 @@ namespace LmpClient.Harmony
                 Patch(harmony, typeof(KSP.UI.Screens.SpaceCenter.MissionSummaryDialog.ResourceWidget), "Create", new[] { typeof(PartResourceDefinition), typeof(float), typeof(float), typeof(KSP.UI.Screens.MissionRecoveryDialog) }, nameof(ResourceCost));
                 Patch(harmony, typeof(MainSystem), "Update", Type.EmptyTypes, null, nameof(Tick));
                 Patch(harmony, typeof(KerbalEVA), "proceedAndBoard", new[] { typeof(Part) }, nameof(Board), null, nameof(BoardFinalizer));
-                GameEvents.onLevelWasLoadedGUIReady.Add(ToolingClient.SceneChanged);
                 Ready = true;
+                Diagnostics.PlaytestDiagnostics.Write("client.economy.hooks", () => "ready=True");
             }
             catch (Exception e) { Ready = false; DiagnosticReason = e.Message; LunaLog.LogError("[Tooling] Required hooks unavailable: " + e); }
         }

@@ -31,3 +31,19 @@ Coverage focuses on startup/patches, network transitions, agency actions and rep
 New diagnostics avoid raw payloads, chat text, passwords and device identifiers. They intentionally include filesystem paths and gameplay state. The full existing application logs can also contain output from KSP, mods and older logging code; inspect them before sharing publicly.
 
 Automated tests and server startup checks do not establish client UI or live gameplay correctness. Those remain unverified until a playtest is performed.
+
+## Client package prerequisites
+
+Before building the client, run `Scripts/Prepare-KspRuntime.ps1 -KspDirectory "<KSP installation>"`.
+This imports the compatible Mono runtime dependencies from that installation's launcher into ignored
+`External/KSPRuntime`. The client build requires these files and includes them in its output, including
+before the Debug deployment step. Do not substitute SDK reference assemblies for runtime implementations.
+Run `Scripts/Test-ClientRuntime.ps1 -KspDirectory "<KSP installation>" -ClientPlugins "<built plugin directory>"`
+to check the dependency set. Any reported binding differences still require verification with KSP's Mono runtime.
+
+When tooling or trading is enabled, `client.economy.snapshot` should identify a ready snapshot and a
+nonempty session. A local funds/science change produces `client.economy.command` with its delta and
+sequence, followed by the server's `economy.command` result and a newer snapshot. An
+`operation=Delta reason=no-session` refusal means the change was not sent, even if the local funds display
+changed. Investigate startup/deserialization errors before treating reconnect persistence as proof of
+server accounting. `client.economy.hooks ready=True` confirms the required tooling hooks installed.

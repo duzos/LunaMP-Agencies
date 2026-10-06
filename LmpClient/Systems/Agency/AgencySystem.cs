@@ -86,11 +86,16 @@ namespace LmpClient.Systems.Agency
         protected override void OnEnabled()
         {
             base.OnEnabled();
+            GameEvents.onLevelWasLoadedGUIReady.Add(EconomySceneChanged);
             LunaLog.Log("[Agency] Client AgencySystem enabled.");
         }
 
+        // KSP's event wrapper requires a delegate target; static handlers fail at registration.
+        private void EconomySceneChanged(GameScenes scene) => ToolingClient.SceneChanged(scene);
+
         protected override void OnDisabled()
         {
+            GameEvents.onLevelWasLoadedGUIReady.Remove(EconomySceneChanged);
             base.OnDisabled();
             KnownAgencies.Clear();
             VesselAgencyMap.Clear();

@@ -39,6 +39,17 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
+  <!-- KSP's stripped player runtime omits dependencies needed by the agency JSON wire codec.
+       Import these runtime implementations from the same installation's launcher, not a reference pack. -->
+  <ItemGroup>
+    <KspRuntime Include="System.Numerics.dll;System.Xml.Linq.dll;System.Data.dll;System.Transactions.dll;System.EnterpriseServices.dll;System.Net.Http.dll;System.Runtime.Serialization.dll;System.ServiceModel.Internals.dll" />
+  </ItemGroup>
+  <Target Name="ValidateKspRuntime" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)\..\External\KSPRuntime\%(KspRuntime.Identity)')" Text="Missing KSP runtime %(KspRuntime.Identity). Run Scripts/Prepare-KspRuntime.ps1 -KspDirectory &lt;installed KSP path&gt;." />
+  </Target>
+  <Target Name="CopyKspRuntime" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="PostBuildEvent">
+    <Copy SourceFiles="@(KspRuntime->'$(MSBuildProjectDirectory)\..\External\KSPRuntime\%(Identity)')" DestinationFolder="$(OutputPath)" />
+  </Target>
   <ItemGroup>
     <Reference Include="0Harmony">
       <HintPath>..\External\Dependencies\Harmony\000_Harmony\0Harmony.dll</HintPath>

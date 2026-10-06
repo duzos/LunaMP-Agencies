@@ -62,12 +62,18 @@ namespace LmpClient.Systems.Agency
             if (command.RequestId == Guid.Empty) command.RequestId = Guid.NewGuid();
             lock (stateLock)
             {
-                if (economySession == Guid.Empty) { LatestStatus = "Waiting for economy session."; return Guid.Empty; }
+                if (economySession == Guid.Empty)
+                {
+                    LatestStatus = "Waiting for economy session.";
+                    Diagnostics.PlaytestDiagnostics.Write("client.economy.command-refused", () => $"operation={command.Operation} reason=no-session");
+                    return Guid.Empty;
+                }
                 command.SessionId = economySession; command.Sequence = ++nextSequence;
                 var data = global::LmpClient.Network.NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyEconomyCommandMsgData>();
                 data.Command = command;
                 // Queue under the sequence lock; the general sender schedules tasks that could reorder commands.
                 global::LmpClient.Network.NetworkSender.QueueOutgoingMessage(global::LmpClient.Network.NetworkMain.CliMsgFactory.CreateNew<LmpCommon.Message.Client.AgencyCliMsg>(data));
+                Diagnostics.PlaytestDiagnostics.Write("client.economy.command", () => $"operation={command.Operation} request={command.RequestId} session={command.SessionId} sequence={command.Sequence} fundsDelta={command.FundsDelta} scienceDelta={command.ScienceDelta}");
                 return command.RequestId;
             }
         }
@@ -215,6 +221,9 @@ namespace LmpClient.Systems.Agency
         internal static Guid Recover(EconomyCommand command) => Send(command);
         internal static void Tick()
         {
+            // The server sends the initial economy snapshot during handshake, before feature
+            // settings arrive. Keep it queued until those flags can be evaluated reliably.
+            if (MainSystem.NetworkState < ClientState.SettingsSynced) return;
             TickBoarding();
             if (splitting != null && DateTime.UtcNow > splitting.Deadline) { RecoveryDisconnect("Split confirmation timed out."); return; }
             while (snapshots.TryDequeue(out var state))
@@ -227,6 +236,7 @@ namespace LmpClient.Systems.Agency
                     snapshot = state; revision = state.Revision;
                     TradeClient.Receive(state);
                 }
+                Diagnostics.PlaytestDiagnostics.Write("client.economy.snapshot", () => $"agency={state.AgencyId} ready={state.Ready} revision={state.Revision} session={state.SessionId} funds={state.Funds} science={state.Science}");
                 ApplyingBalance = true;
                 try
                 {

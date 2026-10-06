@@ -17,8 +17,7 @@ namespace LmpClient.Systems.Agency
         public static KkIntegrationState State { get; private set; }
         public static string DiagnosticReason { get; private set; }
         private static Type manager, siteType, selector;
-        private static FieldInfo siteName, selectorInstance;
-        private static PropertyInfo allSites;
+        private static FieldInfo siteName, selectorInstance, allSites;
         private static MethodInfo register, validity, selectorClose;
         private static bool baseManagerMatched, baseBossMatched, wasActive;
         private static int lastClosedGeneration = -1;
@@ -41,7 +40,10 @@ namespace LmpClient.Systems.Agency
                 siteType = RequiredType("KerbalKonstructs.Core.KKLaunchSite");
                 selector = RequiredType("KerbalKonstructs.UI.LaunchSiteSelectorGUI");
                 siteName = AccessTools.Field(siteType, "LaunchSiteName") ?? throw new MissingFieldException("LaunchSiteName");
-                allSites = AccessTools.Property(manager, "AllLaunchSites") ?? throw new MissingMemberException("AllLaunchSites");
+                // The public getter calls ToList on this array before KK initializes it.
+                allSites = AccessTools.Field(manager, "allLaunchSites") ?? throw new MissingFieldException("allLaunchSites");
+                if (!allSites.IsStatic || allSites.FieldType != siteType.MakeArrayType())
+                    throw new InvalidOperationException("KK launch catalog type differs");
                 register = Required(manager, "RegisterMHLaunchSites", typeof(EditorFacility));
                 validity = Required(manager, "CheckLaunchSiteIsValid", siteType);
                 selectorClose = Required(selector, "Close");
@@ -94,9 +96,10 @@ namespace LmpClient.Systems.Agency
         private static HarmonyMethod Hook(string name) => name == null ? null : new HarmonyMethod(typeof(KkLaunchSiteIntegration), name);
         internal static IEnumerable<object> Sites()
         {
-            var value = allSites?.GetValue(null, null) as IEnumerable;
+            var value = allSites?.GetValue(null) as IEnumerable;
             return value == null ? Enumerable.Empty<object>() : value.Cast<object>();
         }
+        internal static bool CatalogPending => allSites != null && allSites.GetValue(null) == null;
         internal static string SiteId(object site) => site == null ? null : siteName?.GetValue(site) as string;
         internal static bool IsKkSite(string id)
         {
@@ -184,6 +187,7 @@ namespace LmpClient.Systems.Agency
         internal static bool Refresh(int generation)
         {
             if (State != KkIntegrationState.Ready || (!Active && !wasActive)) return true;
+            if (CatalogPending) return false;
             // Retain restoration debt across loading/flight/disconnect until a real editor rebuild succeeds.
             if (Active) wasActive = true;
             if (generation != lastClosedGeneration)

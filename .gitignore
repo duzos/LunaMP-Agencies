@@ -15,6 +15,7 @@ Artifacts/
 
 External/KSPLibraries/*.dll
 External/Nuget/*
+External/KSPRuntime/*.dll
 TestResults/*
 Config/
 logs/

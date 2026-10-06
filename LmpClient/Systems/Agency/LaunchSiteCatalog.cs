@@ -67,6 +67,7 @@ namespace LmpClient.Systems.Agency
                 RequestRefresh();
             }
             if (DateTime.UtcNow < retryAfter || Interlocked.Exchange(ref dirty, 0) == 0) return;
+            var operation = "catalog";
             try
             {
                 if (PSystemSetup.Instance == null) { Retry(); return; }
@@ -82,18 +83,30 @@ namespace LmpClient.Systems.Agency
                     sites[id] = new LaunchSiteCatalogEntry(id, id, "Kerbal Konstructs");
                 }
                 Volatile.Write(ref snapshot, Array.AsReadOnly(sites.Values.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToArray()));
-                var refreshComplete = true;
+                var refreshComplete = !KkLaunchSiteIntegration.CatalogPending;
                 if (LaunchSiteAccess.Enabled || lastAppliedEnabled)
                 {
-                    refreshComplete = KkLaunchSiteIntegration.Refresh(Volatile.Read(ref generation));
+                    operation = "kk-registration";
+                    refreshComplete &= KkLaunchSiteIntegration.Refresh(Volatile.Read(ref generation));
                     if (HighLogic.LoadedScene == GameScenes.EDITOR)
+                    {
+                        operation = "stock-registration";
                         AccessTools.Method(typeof(EditorDriver), "setupValidLaunchSites", Type.EmptyTypes)?.Invoke(null, null);
+                    }
                     if (HighLogic.LoadedScene == GameScenes.EDITOR || HighLogic.LoadedScene == GameScenes.SPACECENTER)
                     {
                         var controller = AccessTools.TypeByName("KSP.UI.UILaunchsiteController");
                         if (controller != null)
                             foreach (var instance in Resources.FindObjectsOfTypeAll(controller))
+                            {
+                                // FindObjectsOfTypeAll includes prefab assets and objects whose Start has not run.
+                                var component = instance as Component;
+                                if (!component || !component.gameObject.scene.IsValid() ||
+                                    ReadMember(instance, "launchPadItems") == null ||
+                                    ReadMember(instance, "selectedToggleGroup") == null) continue;
+                                operation = "stock-selector-reset";
                                 AccessTools.Method(controller, "resetItems", Type.EmptyTypes)?.Invoke(instance, null);
+                            }
                     }
                 }
                 lastAppliedEnabled = LaunchSiteAccess.Enabled || (!refreshComplete && lastAppliedEnabled);
@@ -102,7 +115,8 @@ namespace LmpClient.Systems.Agency
             }
             catch (Exception e)
             {
-                Diagnostics.PlaytestDiagnostics.Write("client.launch.refresh-error", () => e.GetType().Name);
+                Diagnostics.PlaytestDiagnostics.Write("client.launch.refresh-error", () =>
+                    $"operation={operation} scene={HighLogic.LoadedScene} kk={KkLaunchSiteIntegration.State} error={e.GetBaseException()}");
                 Retry();
             }
         }

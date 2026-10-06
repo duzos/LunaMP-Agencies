@@ -24,6 +24,7 @@ namespace ServerTest.Agency
         private readonly bool _previousZeroStartingKerbals;
         private readonly bool _previousLaunchSites;
         private readonly bool _previousOwnership;
+        private readonly bool _previousCommNetOptIn, _previousCommNetPerAgency;
         private readonly List<Action> _restore = new List<Action>();
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "LMPAgencyTest_" + Guid.NewGuid().ToString("N"));
 
@@ -40,6 +41,12 @@ namespace ServerTest.Agency
             _previousScansatPerAgency = GeneralSettings.SettingsStore.AgencyScansatPerAgency;
             _previousKerbalsPerAgency = GeneralSettings.SettingsStore.AgencyKerbalsPerAgency;
             _previousZeroStartingKerbals = GeneralSettings.SettingsStore.AgencyZeroStartingKerbals;
+            _previousCommNetOptIn = GeneralSettings.SettingsStore.AgencyCommNetOptIn;
+            _previousCommNetPerAgency = GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
+            GeneralSettings.SettingsStore.AgencyCommNetOptIn = false;
+            SaveAndReplacePrivateField(typeof(AgencyCommNetStore), "_document", new CommNetPreferenceDocument());
+            SaveAndReplacePrivateField(typeof(AgencyCommNetStore), "_loadError", null);
+            SaveAndReplacePrivateField(typeof(AgencyCommNetStore), "_snapshotRevision", 0L);
             _previousOwnership = GeneralSettings.SettingsStore.AgencyVesselOwnership;
             GeneralSettings.SettingsStore.AgencyVesselOwnership = false;
             _previousLaunchSites = GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency;
@@ -93,6 +100,8 @@ namespace ServerTest.Agency
             GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = _previousZeroStartingKerbals;
             GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency = _previousLaunchSites;
             GeneralSettings.SettingsStore.AgencyVesselOwnership = _previousOwnership;
+            GeneralSettings.SettingsStore.AgencyCommNetOptIn = _previousCommNetOptIn;
+            GeneralSettings.SettingsStore.AgencyCommNetPerAgency = _previousCommNetPerAgency;
             if (Directory.Exists(Root)) Directory.Delete(Root, true);
         }
     }

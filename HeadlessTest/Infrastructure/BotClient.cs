@@ -25,6 +25,10 @@ using System.Threading.Tasks;
 
 namespace HeadlessTest.Infrastructure;
 
+internal sealed record CommNetEndpointBot(Guid VesselId, Guid OwnerAgencyId, long OwnershipRevision);
+internal sealed record CommNetPreferenceBot(CommNetEndpointBot Source, bool AcceptAll, IReadOnlyList<CommNetEndpointBot> Targets);
+internal sealed record CommNetMapSnapshot(int Generation, bool Ready, long Revision, IReadOnlyList<CommNetEndpointBot> Endpoints, IReadOnlyList<CommNetPreferenceBot> Preferences) : BotSnapshot(Generation);
+internal sealed record CommNetResultBot(int Generation, Guid RequestId, bool Success, string Reason) : BotSnapshot(Generation);
 internal abstract record BotSnapshot(int Generation);
 internal sealed record StatusSnapshot(int Generation, NetConnectionStatus Status, string Reason) : BotSnapshot(Generation);
 internal sealed record HandshakeSnapshot(int Generation, HandshakeReply Response, string Reason) : BotSnapshot(Generation);
@@ -150,6 +154,12 @@ internal sealed class BotClient : IAsyncDisposable
         {
             d.RequestId = request; d.VesselId = vessel; d.TargetAgencyId = target; d.Operation = operation; d.DockingPolicy = policy;
         });
+        return request;
+    }
+    public Guid ConfigureCommNet(CommNetOperation operation, Guid vessel, Guid target = default, bool enabled = false)
+    {
+        var request = Guid.NewGuid();
+        Send<AgencyCliMsg, AgencyCommNetCommandMsgData>(d => { d.RequestId = request; d.Operation = operation; d.VesselId = vessel; d.TargetVesselId = target; d.Enabled = enabled; });
         return request;
     }
     public Guid RequestDock(Guid source, Guid target)
@@ -332,6 +342,11 @@ internal sealed class BotClient : IAsyncDisposable
     }
     private static BotSnapshot Snapshot(IMessageData data, int generation) => data switch
     {
+        AgencyCommNetResultMsgData d => new CommNetResultBot(generation, d.RequestId, d.Success, d.Reason),
+        AgencyCommNetSnapshotMsgData d => new CommNetMapSnapshot(generation, d.Ready, d.Revision,
+            Array.AsReadOnly(d.Endpoints.Select(e => new CommNetEndpointBot(e.VesselId, e.OwnerAgencyId, e.OwnershipRevision)).ToArray()),
+            Array.AsReadOnly(d.Preferences.Select(p => new CommNetPreferenceBot(new CommNetEndpointBot(p.Source.VesselId, p.Source.OwnerAgencyId, p.Source.OwnershipRevision), p.AcceptAll,
+                Array.AsReadOnly(p.Targets.Select(e => new CommNetEndpointBot(e.VesselId, e.OwnerAgencyId, e.OwnershipRevision)).ToArray()))).ToArray())),
         PlayerConnectionLeaveMsgData d => new PlayerLeftSnapshot(generation, d.PlayerName),
         LockAcquireMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, true, string.Empty),
         LockAcquireDeniedMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, false, d.Reason),

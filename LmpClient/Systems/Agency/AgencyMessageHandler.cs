@@ -53,6 +53,12 @@ namespace LmpClient.Systems.Agency
                     var result = (AgencyVesselOwnershipResultMsgData)data;
                     System.ApplyOwnershipResult(new OwnershipResultSnapshot { RequestId = result.RequestId, VesselId = result.VesselId, Success = result.Success, Reason = result.Reason });
                     break;
+                case AgencyMessageType.SrvCommNetSnapshot:
+                    System.ApplyCommNet((AgencyCommNetSnapshotMsgData)data);
+                    break;
+                case AgencyMessageType.SrvCommNetResult:
+                    System.ApplyCommNetResult((AgencyCommNetResultMsgData)data);
+                    break;
                 default:
                     LunaLog.LogWarning($"[Agency] Unhandled Srv subtype {data.AgencyMessageType}");
                     break;
@@ -62,6 +68,7 @@ namespace LmpClient.Systems.Agency
 
         private static void Handle(AgencyVesselMapSyncMsgData data)
         {
+            System.InvalidateCommNet();
             System.ApplyOwnership(data.OwnershipSnapshotPresent, data.OwnershipRevision, data.OwnershipRecords, true);
             System.VesselAgencyMap.Clear();
             for (int i = 0; i < data.VesselIds.Length; i++)
@@ -71,6 +78,7 @@ namespace LmpClient.Systems.Agency
 
         private static void Handle(AgencyVesselMapEntryMsgData data)
         {
+            System.InvalidateCommNet();
             System.ApplyOwnershipEntry(data);
             if (data.AgencyId == global::System.Guid.Empty)
                 System.VesselAgencyMap.TryRemove(data.VesselId, out _);

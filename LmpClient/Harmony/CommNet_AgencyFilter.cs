@@ -2,153 +2,126 @@ using CommNet;
 using HarmonyLib;
 using LmpClient.Systems.Agency;
 using LmpClient.Systems.SettingsSys;
-using LmpClient.VesselUtilities;
+using LmpCommon.Enums;
 using System;
+using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 
 namespace LmpClient.Harmony
 {
-    /// <summary>
-    /// Best-effort per-agency CommNet filter. When the server has
-    /// <c>AgencyCommNetPerAgency=true</c>, prevents this client's relay
-    /// graph from forming connections through foreign-agency vessels.
-    ///
-    /// Implementation strategy: postfix on
-    /// <c>CommNet.CommNetwork.SetNodeConnection</c>. If the patch attaches
-    /// successfully and the connection it just established crosses the
-    /// agency boundary, we immediately call <c>DisconnectNodes</c> to
-    /// retract it. The graph is recomputed each tick so the disconnect
-    /// sticks until the next reachability check.
-    ///
-    /// KSP's CommNet API has shifted across versions; if the candidate
-    /// method signatures don't match this KSP version the Harmony patch
-    /// silently fails to attach and per-agency CommNet effectively reverts
-    /// to no-op (vanilla behaviour). Look for the
-    /// <c>[CommNet_AgencyFilter]: patch attached</c> log line on first
-    /// connect to confirm it's active.
-    ///
-    /// Intentionally NOT decorated with <c>[HarmonyPatch]</c>: the attribute
-    /// would make <c>HarmonyInstance.PatchAll(Assembly)</c> try to attach
-    /// this class via reflection, but the target method signature varies
-    /// across KSP versions and we have to look it up dynamically. PatchAll
-    /// would throw <c>ArgumentException: Undefined target method</c> and
-    /// abort the rest of <see cref="Base.HarmonyPatcher.Awake"/>, leaving
-    /// LMP half-initialised (no toolbar button etc.). We attach
-    /// imperatively instead via <see cref="TryAttach"/>.
-    /// </summary>
+    /// <summary>Retracts forbidden vessel edges while leaving stock range and home-station logic intact.</summary>
     public static class CommNet_AgencyFilter
     {
-        private static MethodBase _setNodeConnection;
-        private static MethodInfo _disconnectNodes;
-        private static FieldInfo _commNetVessel_Vessel;
-
+        public static bool Ready { get; private set; }
+        public static string DiagnosticReason { get; private set; }
+        private static MethodInfo disconnect;
+        private static readonly Dictionary<CommNode, Guid> vessels = new Dictionary<CommNode, Guid>(new NodeIdentityComparer());
+        private static int refreshRequested = 1, resetUiRequested;
+        private static bool lastEnabled, lastOptIn;
+        private sealed class NodeIdentityComparer : IEqualityComparer<CommNode>
+        {
+            public bool Equals(CommNode a, CommNode b) => ReferenceEquals(a, b);
+            public int GetHashCode(CommNode node) => global::System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(node);
+        }
+        private static bool Enabled => MainSystem.NetworkState >= ClientState.Handshaking && SettingsSystem.ServerSettings.AgencyCommNetPerAgency;
         public static bool TryAttach(HarmonyLib.Harmony harmony)
         {
             try
             {
-                // SetNodeConnection (instance method). Signature varies; we
-                // grab the longest overload.
-                var t = typeof(CommNetwork);
-                MethodInfo target = null;
-                foreach (var m in AccessTools.GetDeclaredMethods(t))
-                {
-                    if (m.Name == "SetNodeConnection" && m.GetParameters().Length >= 2 && !m.IsStatic)
-                    {
-                        if (target == null || m.GetParameters().Length > target.GetParameters().Length)
-                            target = m;
-                    }
-                }
-                if (target == null)
-                {
-                    LunaLog.LogWarning("[CommNet_AgencyFilter]: CommNetwork.SetNodeConnection not found — per-agency CommNet inactive.");
-                    return false;
-                }
-                _setNodeConnection = target;
-
-                _disconnectNodes = AccessTools.Method(t, "DisconnectNodes", new[] { typeof(CommNode), typeof(CommNode) });
-                if (_disconnectNodes == null)
-                {
-                    LunaLog.LogWarning("[CommNet_AgencyFilter]: CommNetwork.DisconnectNodes not found — per-agency CommNet inactive.");
-                    return false;
-                }
-
-                // Helper used to walk from a CommNode back to its owning
-                // CommNetVessel. KSP keeps a back-reference via the static
-                // CommNetVessel.GetCommNetVessel(CommNode) helper if it
-                // exists, otherwise the field on Vessel.connection.
-                _commNetVessel_Vessel = AccessTools.Field(typeof(CommNetVessel), "vessel")
-                                        ?? AccessTools.Field(typeof(CommNetVessel), "_vessel");
-
-                var postfix = new HarmonyMethod(typeof(CommNet_AgencyFilter).GetMethod(nameof(Postfix), BindingFlags.NonPublic | BindingFlags.Static));
-                harmony.Patch(target, postfix: postfix);
-                LunaLog.Log("[CommNet_AgencyFilter]: patch attached.");
+                var target = AccessTools.Method(typeof(CommNetwork), "SetNodeConnection", new[] { typeof(CommNode), typeof(CommNode) });
+                disconnect = AccessTools.Method(typeof(CommNetwork), "Disconnect", new[] { typeof(CommNode), typeof(CommNode), typeof(bool) });
+                var update = AccessTools.Method(typeof(CommNetwork), "UpdateNetwork", Type.EmptyTypes);
+                var tick = AccessTools.Method(typeof(MainSystem), "Update", Type.EmptyTypes);
+                if (target == null || target.ReturnType != typeof(bool) || disconnect == null || disconnect.ReturnType != typeof(void) || update == null || tick == null)
+                    throw new MissingMethodException("Installed CommNet API signatures do not match the verified adapter.");
+                harmony.Patch(update, prefix: new HarmonyMethod(typeof(CommNet_AgencyFilter), nameof(BuildNodeMap)));
+                harmony.Patch(target, postfix: new HarmonyMethod(typeof(CommNet_AgencyFilter), nameof(Postfix)));
+                harmony.Patch(tick, postfix: new HarmonyMethod(typeof(CommNet_AgencyFilter), nameof(Tick)));
+                Ready = true; DiagnosticReason = null;
+                LunaLog.Log("[CommNet_AgencyFilter]: exact SetNodeConnection/Disconnect adapter attached.");
                 return true;
             }
             catch (Exception e)
             {
-                LunaLog.LogError($"[CommNet_AgencyFilter]: failed to attach patch: {e.Message}");
+                Ready = false; DiagnosticReason = e.Message;
+                LunaLog.LogError("[CommNet_AgencyFilter]: adapter unavailable: " + DiagnosticReason);
                 return false;
             }
         }
-
-        private static void Postfix(CommNetwork __instance, CommNode a, CommNode b)
+        public static void RequestRefresh(bool resetUi = false)
         {
-            // Cheap early-out: only filter when the server told us to.
-            if (SettingsSystem.ServerSettings == null || !SettingsSystem.ServerSettings.AgencyCommNetPerAgency)
-                return;
-            if (a == null || b == null || _disconnectNodes == null) return;
-
+            Interlocked.Exchange(ref refreshRequested, 1);
+            if (resetUi) Interlocked.Exchange(ref resetUiRequested, 1);
+        }
+        private static void Tick()
+        {
+            if (Interlocked.Exchange(ref resetUiRequested, 0) != 0) Windows.Agency.AgencyWindow.ResetCommNetUi();
+            var enabled = Enabled;
+            var optIn = enabled && SettingsSystem.ServerSettings.AgencyCommNetOptIn;
+            if (enabled != lastEnabled || optIn != lastOptIn) RequestRefresh();
+            lastEnabled = enabled; lastOptIn = optIn;
+            if (Volatile.Read(ref refreshRequested) == 0) return;
+            // Keep a pending refresh until a scene has initialized its network.
+            var network = CommNetNetwork.Instance;
+            if (!network) return;
+            Interlocked.Exchange(ref refreshRequested, 0);
+            BuildNodeMap();
+            network.QueueRebuild();
+        }
+        private static void BuildNodeMap()
+        {
+            vessels.Clear();
+            if (!Enabled || FlightGlobals.Vessels == null) return;
+            // Unloaded vessels also expose connection.Comm. Never infer vessel identity from transforms.
             try
             {
-                var myAgency = AgencySystem.Singleton.MyAgencyId;
-                if (myAgency == Guid.Empty) return; // no agency assigned yet — leave the graph alone
-
-                var aAgency = ResolveAgency(a, myAgency);
-                var bAgency = ResolveAgency(b, myAgency);
-
-                // We only filter connections that cross OUR boundary. Two
-                // foreign relays talking to each other is fine — that's
-                // their universe. The constraint is: nothing that our
-                // probes connect to may belong to another agency.
-                bool crosses = (aAgency == myAgency && bAgency != myAgency)
-                            || (bAgency == myAgency && aAgency != myAgency);
-
-                if (crosses)
-                {
-                    _disconnectNodes.Invoke(__instance, new object[] { a, b });
-                }
+                foreach (var vessel in FlightGlobals.Vessels)
+                    if (vessel && vessel.connection != null && vessel.connection.Comm != null)
+                        vessels[vessel.connection.Comm] = vessel.id;
             }
-            catch
+            catch (Exception e)
             {
-                // Never let a Harmony postfix throw — KSP's CommNet update
-                // path is hot. Swallow and let the graph behave as vanilla.
+                vessels.Clear();
+                Diagnostics.PlaytestDiagnostics.Write("client.commnet.node-map-error", () => e.GetType().Name, traffic: true);
             }
         }
-
-        /// <summary>
-        /// Walks from a CommNode back to a vessel guid, then looks up the
-        /// owning agency in the client-cached map. Returns the local
-        /// player's agency id for ground stations / unknown nodes so they
-        /// remain visible.
-        /// </summary>
-        private static Guid ResolveAgency(CommNode node, Guid fallbackOurs)
+        private static void Postfix(CommNetwork __instance, CommNode __0, CommNode __1, ref bool __result)
         {
-            if (node == null) return fallbackOurs;
-
-            // KSP exposes the CommNetVessel via CommNode.transform's parent
-            // chain in most versions; we use a simpler heuristic: look at
-            // the CommNet system's vessel registry. This isn't 100% but it's
-            // resilient — if we can't resolve, treat as ours and let the
-            // connection through.
-            var commVessel = node?.transform?.GetComponentInParent<CommNetVessel>();
-            if (commVessel == null) return fallbackOurs;
-
-            var vessel = _commNetVessel_Vessel?.GetValue(commVessel) as Vessel;
-            if (vessel == null) vessel = commVessel.Vessel;
-            if (vessel == null) return fallbackOurs;
-
-            var owning = AgencySystem.Singleton.GetVesselAgency(vessel.id);
-            return owning == Guid.Empty ? fallbackOurs : owning;
+            if (!Enabled || __0 == null || __1 == null || __0.isHome || __1.isHome || disconnect == null) return;
+            var allowed = false;
+            try
+            {
+                if (vessels.TryGetValue(__0, out var a) && vessels.TryGetValue(__1, out var b))
+                {
+                    if (SettingsSystem.ServerSettings.AgencyCommNetOptIn)
+                        allowed = AgencySystem.Singleton.CanLinkCommNet(a, b);
+                    else
+                    {
+                        var mine = AgencySystem.Singleton.MyAgencyId;
+                        var ownerA = AgencySystem.Singleton.GetVesselAgency(a);
+                        var ownerB = AgencySystem.Singleton.GetVesselAgency(b);
+                        allowed = mine != Guid.Empty && ownerA != Guid.Empty && ownerB != Guid.Empty &&
+                                  !((ownerA == mine && ownerB != mine) || (ownerB == mine && ownerA != mine));
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Diagnostics.PlaytestDiagnostics.Write("client.commnet.policy-error", () => e.GetType().Name, traffic: true);
+            }
+            if (allowed) return;
+            try
+            {
+                disconnect.Invoke(__instance, new object[] { __0, __1, true });
+                __result = false;
+                Diagnostics.PlaytestDiagnostics.Write("client.commnet.denied", () => "optIn=" + SettingsSystem.ServerSettings.AgencyCommNetOptIn, traffic: true);
+            }
+            catch (Exception e)
+            {
+                Ready = false; DiagnosticReason = "CommNet disconnect failed: " + e.GetType().Name;
+                Diagnostics.PlaytestDiagnostics.Write("client.commnet.disconnect-error", () => DiagnosticReason, traffic: true);
+            }
         }
     }
 }

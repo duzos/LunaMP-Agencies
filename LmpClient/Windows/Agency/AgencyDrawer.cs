@@ -9,7 +9,7 @@ namespace LmpClient.Windows.Agency
     public partial class AgencyWindow
     {
         private static int _tab;
-        private static readonly string[] TabLabels = { "Mine", "Browse", "Create", "Leaderboard", "Vessels" };
+        private static readonly string[] TabLabels = { "Mine", "Browse", "Create", "Leaderboard", "Vessels", "CommNet" };
         private static string _createName = "";
         private static string _renameName = "";
         private static string _lastStatusMessage = "";
@@ -30,7 +30,7 @@ namespace LmpClient.Windows.Agency
             DrainStatusQueue();
             DrawStatusBanner();
 
-            _tab = GUILayout.Toolbar(_tab, TabLabels);
+            _tab = GUILayout.SelectionGrid(_tab, TabLabels, Screen.width < 620 ? 3 : 6);
             GUILayout.Space(6);
 
             switch (_tab)
@@ -44,6 +44,7 @@ namespace LmpClient.Windows.Agency
                 case 2: DrawCreateTab(); break;
                 case 3: DrawLeaderboardTab(); break;
                 case 4: DrawVesselsTab(); break;
+                case 5: DrawCommNetTab(); break;
             }
 
             GUILayout.EndVertical();

@@ -50,6 +50,7 @@ namespace LmpCommonTest
             parsed.AgencyCommNetPerAgency = true;
             parsed.AgencyLaunchSitesPerAgency = true;
             parsed.AgencyVesselOwnership = true;
+            parsed.AgencyCommNetOptIn = true;
             parsed.Deserialize(incoming);
             Assert.AreEqual("Legacy server", parsed.ConsoleIdentifier);
             Assert.IsTrue(parsed.PrintMotdInChat);
@@ -60,6 +61,7 @@ namespace LmpCommonTest
             Assert.IsFalse(parsed.AgencyCommNetPerAgency);
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
             Assert.IsFalse(parsed.AgencyVesselOwnership);
+            Assert.IsFalse(parsed.AgencyCommNetOptIn);
         }
 
         [TestMethod]
@@ -78,10 +80,12 @@ namespace LmpCommonTest
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyLaunchSitesPerAgency = true;
             parsed.AgencyVesselOwnership = true;
+            parsed.AgencyCommNetOptIn = true;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyExperimentsPerAgency && parsed.AgencyKerbalsPerAgency && parsed.AgencyScansatPerAgency && parsed.AgencyContractsPoolPerAgency && parsed.AgencyCommNetPerAgency);
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
             Assert.IsFalse(parsed.AgencyVesselOwnership);
+            Assert.IsFalse(parsed.AgencyCommNetOptIn);
         }
 
         [DataTestMethod]
@@ -102,6 +106,7 @@ namespace LmpCommonTest
             settings.AgencyCommNetPerAgency = enabled;
             settings.AgencyLaunchSitesPerAgency = !enabled;
             settings.AgencyVesselOwnership = enabled;
+            settings.AgencyCommNetOptIn = !enabled;
             var outgoing = peer.CreateMessage(settings.GetMessageSize());
             settings.Serialize(outgoing);
             Assert.IsTrue(settings.GetMessageSize() >= outgoing.LengthBytes);
@@ -119,6 +124,7 @@ namespace LmpCommonTest
             Assert.AreEqual(enabled, parsed.AgencyCommNetPerAgency);
             Assert.AreEqual(!enabled, parsed.AgencyLaunchSitesPerAgency);
             Assert.AreEqual(enabled, parsed.AgencyVesselOwnership);
+            Assert.AreEqual(!enabled, parsed.AgencyCommNetOptIn);
         }
     }
 }

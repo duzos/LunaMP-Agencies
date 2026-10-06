@@ -52,7 +52,7 @@ namespace Server.Diagnostics
             {
                 var assembly = typeof(PlaytestDiagnostics).Assembly;
                 var settings = GeneralSettings.SettingsStore;
-                return $"version={assembly.GetName().Version} mvid={assembly.ManifestModule.ModuleVersionId} data={ServerContext.DataDirectory} universe={ServerContext.UniverseDirectory} agenciesPath={AgencyStore.AgenciesPath} agencies={AgencyStore.Agencies.Count} clients={ServerContext.Clients.Count} gameMode={settings.GameMode} experiments={settings.AgencyExperimentsPerAgency} kerbals={settings.AgencyKerbalsPerAgency} zeroStartingKerbals={settings.AgencyZeroStartingKerbals} scansat={settings.AgencyScansatPerAgency} contracts={settings.AgencyContractsPoolPerAgency} commnet={settings.AgencyCommNetPerAgency} launchSites={settings.AgencyLaunchSitesPerAgency} vesselOwnership={settings.AgencyVesselOwnership}";
+                return $"version={assembly.GetName().Version} mvid={assembly.ManifestModule.ModuleVersionId} data={ServerContext.DataDirectory} universe={ServerContext.UniverseDirectory} agenciesPath={AgencyStore.AgenciesPath} agencies={AgencyStore.Agencies.Count} clients={ServerContext.Clients.Count} gameMode={settings.GameMode} experiments={settings.AgencyExperimentsPerAgency} kerbals={settings.AgencyKerbalsPerAgency} zeroStartingKerbals={settings.AgencyZeroStartingKerbals} scansat={settings.AgencyScansatPerAgency} contracts={settings.AgencyContractsPoolPerAgency} commnet={settings.AgencyCommNetPerAgency} launchSites={settings.AgencyLaunchSitesPerAgency} vesselOwnership={settings.AgencyVesselOwnership} commnetOptIn={settings.AgencyCommNetOptIn}";
             });
         }
     }

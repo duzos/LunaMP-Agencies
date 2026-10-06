@@ -146,6 +146,7 @@ namespace Server
                 AgencyStore.LoadExistingAgencies();
                 AgencyScenarioStore.LoadAllExisting();
                 AgencyVesselMap.Load();
+                AgencyCommNetStore.Load();
                 if (GeneralSettings.SettingsStore.AgencyVesselOwnership) { AgencyVesselMap.RecoverJournal(); if (!AgencyVesselMap.Ready) throw new global::System.IO.InvalidDataException("Ownership data unavailable."); }
                 AgencyLaunchSiteStore.Load();
                 AgencyMigration.RunIfNeeded();

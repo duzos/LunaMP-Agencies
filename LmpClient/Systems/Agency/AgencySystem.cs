@@ -97,6 +97,7 @@ namespace LmpClient.Systems.Agency
             MyAgencyId = Guid.Empty;
             ClearLaunchSites();
             ClearOwnership();
+            ClearCommNet();
             LatestServerReply = null;
             LmpClient.Windows.Admin.AdminWindow.ResetLaunchSitesUi();
             while (PendingServerMessages.TryDequeue(out _)) { }

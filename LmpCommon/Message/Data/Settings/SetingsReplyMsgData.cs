@@ -80,6 +80,7 @@ namespace LmpCommon.Message.Data.Settings
         public bool AgencyCommNetPerAgency;
         public bool AgencyLaunchSitesPerAgency;
         public bool AgencyVesselOwnership;
+        public bool AgencyCommNetOptIn;
 
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
 
@@ -152,6 +153,7 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(AgencyCommNetPerAgency);
             lidgrenMsg.Write(AgencyLaunchSitesPerAgency);
             lidgrenMsg.Write(AgencyVesselOwnership);
+            lidgrenMsg.Write(AgencyCommNetOptIn);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -241,12 +243,13 @@ namespace LmpCommon.Message.Data.Settings
             try { if (lidgrenMsg.Position < lidgrenMsg.LengthBits) AgencyLaunchSitesPerAgency = lidgrenMsg.ReadBoolean(); }
             catch { /* Older servers omit this independent trailing flag. */ }
             AgencyVesselOwnership = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
+            AgencyCommNetOptIn = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
         }
 
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 31 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 32 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

@@ -41,6 +41,8 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.AgencyScansatPerAgency = msgData.AgencyScansatPerAgency;
             SettingsSystem.ServerSettings.AgencyContractsPoolPerAgency = msgData.AgencyContractsPoolPerAgency;
             SettingsSystem.ServerSettings.AgencyCommNetPerAgency = msgData.AgencyCommNetPerAgency;
+            SettingsSystem.ServerSettings.AgencyCommNetOptIn = msgData.AgencyCommNetOptIn;
+            LmpClient.Harmony.CommNet_AgencyFilter.RequestRefresh();
             SettingsSystem.ServerSettings.AgencyLaunchSitesPerAgency = msgData.AgencyLaunchSitesPerAgency;
             SettingsSystem.ServerSettings.AgencyVesselOwnership = msgData.AgencyVesselOwnership;
             LmpClient.Systems.Agency.LaunchSiteCatalog.RequestRefresh();

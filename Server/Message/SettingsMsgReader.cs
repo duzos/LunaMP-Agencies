@@ -47,6 +47,7 @@ namespace Server.Message
             msgData.AgencyCommNetPerAgency = GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
             msgData.AgencyLaunchSitesPerAgency = GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency;
             msgData.AgencyVesselOwnership = GeneralSettings.SettingsStore.AgencyVesselOwnership;
+            msgData.AgencyCommNetOptIn = GeneralSettings.SettingsStore.AgencyCommNetOptIn && GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
 
             if (GeneralSettings.SettingsStore.GameDifficulty == GameDifficulty.Custom && GameplaySettings.SettingsStore != null)
             {

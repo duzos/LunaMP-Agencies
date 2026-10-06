@@ -1,4 +1,4 @@
-using Server.Agency;
+﻿using Server.Agency;
 using LmpCommon.Agency;
 using Server.Diagnostics;
 using ByteSizeLib;
@@ -132,6 +132,7 @@ namespace Server.Message
 
             //Relay the message.
             MessageQueuer.RelayMessage<VesselSrvMsg>(client, data);
+            AgencyCommNetStore.Broadcast();
         }
 
         private static void HandleVesselProto(ClientStructure client, VesselBaseMsgData message)
@@ -152,7 +153,7 @@ namespace Server.Message
             }
 
             var vesselText = Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes);
-            if(VesselOwnershipSystem.Enabled)
+            if(VesselOwnershipSystem.Enabled || AgencyCommNetStore.Enabled)
             {
                 lock(AgencyVesselMap.TransactionGate)
                 {
@@ -301,6 +302,7 @@ namespace Server.Message
             removeMsgData.Reason = "Coupled/Docked";
 
             MessageQueuer.SendToAllClients<VesselSrvMsg>(removeMsgData);
+            AgencyCommNetStore.Broadcast();
         }
     }
 }

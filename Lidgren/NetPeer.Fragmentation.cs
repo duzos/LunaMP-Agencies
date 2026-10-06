@@ -55,7 +55,8 @@ namespace Lidgren.Network
 				chunk.m_bitLength = (bitsLeft > bitsPerChunk ? bitsPerChunk : bitsLeft);
 				chunk.m_data = msg.m_data;
 				chunk.m_fragmentGroup = group;
-				chunk.m_fragmentGroupTotalBits = totalBytes * 8;
+				// Preserve the logical end of unaligned messages; padding is not payload.
+				chunk.m_fragmentGroupTotalBits = msg.LengthBits;
 				chunk.m_fragmentChunkByteSize = bytesPerChunk;
 				chunk.m_fragmentChunkNumber = i;
 

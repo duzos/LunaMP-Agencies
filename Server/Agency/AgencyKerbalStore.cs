@@ -30,7 +30,11 @@ namespace Server.Agency
         /// <summary>Initialize a newly created agency according to the configured starting-crew policy.</summary>
         public static void InitializeNewAgency(Guid agencyId) => InitializeRoster(agencyId, isNewAgency: true);
 
-        /// <summary>Legacy fallback for an absent roster. Existing directories, even empty, are authoritative.</summary>
+        /// <summary>
+        /// Legacy fallback for an absent roster. Existing directories, even empty, are authoritative.
+        /// Once the one-time global migration has completed, an absent roster is no longer legacy:
+        /// it is initialized exactly like a newly created agency.
+        /// </summary>
         public static void EnsureDefaultRoster(Guid agencyId) => InitializeRoster(agencyId, isNewAgency: false);
 
         private static void InitializeRoster(Guid agencyId, bool isNewAgency)
@@ -44,6 +48,7 @@ namespace Server.Agency
             lock (RosterInitializationLock)
             {
                 var exists = FileHandler.FolderExists(dir);
+                if (!exists && !isNewAgency && GlobalMigrationCompleted) isNewAgency = true;
                 var seedDefaults = AgencyKerbalPolicy.ShouldSeedDefaults(exists, isNewAgency, perAgency, zeroStarting);
                 if (!exists) FileHandler.FolderCreate(dir);
                 if (seedDefaults)
@@ -60,13 +65,61 @@ namespace Server.Agency
         }
 
         /// <summary>
+        /// Marker written under <c>Universe/Agencies/</c> once the global-to-agency kerbal
+        /// migration has run, so it only ever happens once per universe.
+        /// </summary>
+        public const string MigrationMarkerFileName = ".kerbals-migrated";
+
+        public static string MigrationMarkerPath => Path.Combine(AgencyStore.AgenciesPath, MigrationMarkerFileName);
+
+        /// <summary>True once the one-time global-to-agency kerbal migration has completed for this universe.</summary>
+        public static bool GlobalMigrationCompleted => FileHandler.FileExists(MigrationMarkerPath);
+
+        /// <summary>
         /// First-time migration: seed every existing agency with the current
         /// contents of the global <c>Universe/Kerbals/</c> folder. Runs once
-        /// when <c>AgencyKerbalsPerAgency</c> flips on for a server that was
-        /// previously running with global kerbals. Idempotent — an agency
-        /// that already has a Kerbals folder is left alone.
+        /// per universe, when <c>AgencyKerbalsPerAgency</c> is first on for a
+        /// server that was previously running with global kerbals; the
+        /// <see cref="MigrationMarkerFileName"/> marker records that it has
+        /// run, including when there was nothing to copy. An agency that
+        /// already has a Kerbals folder is left alone.
+        /// After the marker exists, an agency without a Kerbals folder (for
+        /// example one created while per-agency kerbals were off) is
+        /// initialized as a new agency, honouring
+        /// <c>AgencyZeroStartingKerbals</c>, instead of inheriting the global roster.
         /// </summary>
         public static void MigrateGlobalKerbalsIfNeeded()
+        {
+            if (GlobalMigrationCompleted)
+            {
+                foreach (var agency in AgencyStore.Agencies.Values)
+                {
+                    if (!FileHandler.FolderExists(KerbalsPath(agency.Id)))
+                        InitializeNewAgency(agency.Id);
+                }
+                return;
+            }
+
+            CopyGlobalRosterToAgencies();
+            WriteMigrationMarker();
+        }
+
+        private static void WriteMigrationMarker()
+        {
+            try
+            {
+                var path = MigrationMarkerPath;
+                var dir = Path.GetDirectoryName(path);
+                if (!FileHandler.FolderExists(dir)) FileHandler.FolderCreate(dir);
+                FileHandler.WriteToFile(path, $"migrated-utc-ticks={DateTime.UtcNow.Ticks}\n");
+            }
+            catch (Exception e)
+            {
+                LunaLog.Warning($"[Agency] Could not write the kerbal migration marker; the migration will be re-checked on the next start: {e.Message}");
+            }
+        }
+
+        private static void CopyGlobalRosterToAgencies()
         {
             if (!FileHandler.FolderExists(KerbalSystem.KerbalsPath))
             {

@@ -275,7 +275,7 @@ namespace ServerTest.Agency
         }
 
         [TestMethod]
-        public void PromotedAgency_ReconnectingKeepsTheSameAgency()
+        public void PromotedAgency_MembershipLookupKeepsTheSameAgency()
         {
             var solo = AgencySystem.EnsureSoloAgency("uid-solo", "Alex");
             Assert.IsTrue(AgencySystem.RenameAgency(solo.Id, "console", "Southport", isAdmin: true).Success);

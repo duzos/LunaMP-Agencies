@@ -159,9 +159,9 @@ namespace Server
                 // (funds/sci/rep/techCount) with what the per-agency scenario
                 // ConfigNodes actually contain. This corrects any drift from
                 // earlier migrations or third-party edits to Universe files.
-                // When kerbals are per-agency, make sure agencies that were
-                // created before the flag flipped get seeded with the current
-                // global kerbal roster so nobody loses their astronauts.
+                // When kerbals are per-agency, the first boot copies the global
+                // roster into folderless legacy agencies once (marker file);
+                // later folderless agencies are initialised as new.
                 if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency)
                 {
                     AgencyKerbalStore.MigrateGlobalKerbalsIfNeeded();

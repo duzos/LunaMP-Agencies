@@ -58,8 +58,10 @@ namespace Server.System
 
             if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty)
             {
-                // Only absent legacy rosters receive defaults. New agencies already
-                // have an initialized roster, which may intentionally be empty.
+                // Only absent legacy rosters receive defaults, and only before the
+                // migration marker exists; afterwards an absent roster is initialised
+                // as a new agency. New agencies already have an initialized roster,
+                // which may intentionally be empty.
                 AgencyKerbalStore.EnsureDefaultRoster(client.AgencyId);
                 kerbalFiles = FileHandler.GetFilesInPath(AgencyKerbalStore.KerbalsPath(client.AgencyId));
                 LunaLog.Debug($"[Agency] Sending {client.PlayerName} {kerbalFiles.Length} kerbals from agency {client.AgencyId}");

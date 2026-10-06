@@ -27,6 +27,7 @@ namespace LmpCommon.Message.Data.Vessel
         public string EconomyEvaCrew;
         public ToolingCargo[] EconomyCargo;
         public Guid EconomySplitOperationId;
+        public Guid TradeEntitlementId;
         public byte[] EconomySplitParentData = Array.Empty<byte>();
         public int[] EconomyManifestIndices = Array.Empty<int>();
 
@@ -47,7 +48,7 @@ namespace LmpCommon.Message.Data.Vessel
             // Backwards-compatible field: must be written LAST so older peers that don't know
             // about it simply stop reading before this byte range.
             lidgrenMsg.Write(Reason ?? string.Empty);
-            if (EconomyLaunchId != Guid.Empty || EconomyParentVesselId != Guid.Empty || EconomyCargo != null || EconomySplitParentData.Length > 0)
+            if (EconomyLaunchId != Guid.Empty || EconomyParentVesselId != Guid.Empty || EconomyCargo != null || EconomySplitParentData.Length > 0 || TradeEntitlementId != Guid.Empty)
             {
                 if (EconomyManifestIndices.Length > ToolingPolicy.MaxParts) throw new System.IO.InvalidDataException();
                 GuidUtil.Serialize(EconomyLaunchId, lidgrenMsg);
@@ -61,6 +62,7 @@ namespace LmpCommon.Message.Data.Vessel
                 lidgrenMsg.Write(EconomySplitParentData.Length);
                 lidgrenMsg.Write(EconomySplitParentData);
                 GuidUtil.Serialize(EconomySplitOperationId, lidgrenMsg);
+                GuidUtil.Serialize(TradeEntitlementId, lidgrenMsg);
             }
         }
 
@@ -84,7 +86,7 @@ namespace LmpCommon.Message.Data.Vessel
             EconomyEvaCrew = null;
             EconomyCargo = null;
             EconomySplitParentData = Array.Empty<byte>();
-            EconomySplitOperationId = Guid.Empty;
+            EconomySplitOperationId = TradeEntitlementId = Guid.Empty;
             EconomyManifestIndices = Array.Empty<int>();
             if (lidgrenMsg.Position < lidgrenMsg.LengthBits)
             {
@@ -111,6 +113,7 @@ namespace LmpCommon.Message.Data.Vessel
                         VesselOwnershipWire.Require(lidgrenMsg, checked(parentSize * 8));
                         EconomySplitParentData = lidgrenMsg.ReadBytes(parentSize);
                         if (lidgrenMsg.Position < lidgrenMsg.LengthBits) { VesselOwnershipWire.Require(lidgrenMsg, 128); EconomySplitOperationId = GuidUtil.Deserialize(lidgrenMsg); }
+                        if (lidgrenMsg.Position < lidgrenMsg.LengthBits) { VesselOwnershipWire.Require(lidgrenMsg, 128); TradeEntitlementId = GuidUtil.Deserialize(lidgrenMsg); }
                     }
                 }
             }
@@ -118,7 +121,7 @@ namespace LmpCommon.Message.Data.Vessel
 
         internal override int InternalGetMessageSize()
         {
-            return base.InternalGetMessageSize() + sizeof(bool) + sizeof(int) + sizeof(byte) * NumBytes + Reason.GetByteCount() + (EconomyLaunchId == Guid.Empty && EconomyParentVesselId == Guid.Empty && EconomyCargo == null && EconomySplitParentData.Length == 0 ? 0 : 52 + EconomyManifestIndices.Length * 4 + EconomyEvaCrew.GetByteCount() + AgencyEconomyWire.Size(EconomyCargo ?? Array.Empty<ToolingCargo>()) + 20 + EconomySplitParentData.Length);
+            return base.InternalGetMessageSize() + sizeof(bool) + sizeof(int) + sizeof(byte) * NumBytes + Reason.GetByteCount() + (EconomyLaunchId == Guid.Empty && EconomyParentVesselId == Guid.Empty && EconomyCargo == null && EconomySplitParentData.Length == 0 && TradeEntitlementId == Guid.Empty ? 0 : 52 + EconomyManifestIndices.Length * 4 + EconomyEvaCrew.GetByteCount() + AgencyEconomyWire.Size(EconomyCargo ?? Array.Empty<ToolingCargo>()) + 36 + EconomySplitParentData.Length);
         }
     }
 }

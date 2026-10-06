@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using LmpClient.Events;
 
 // ReSharper disable All
@@ -34,6 +34,7 @@ namespace LmpClient.Harmony
             if (fromShipAssembly && __result && ship != null)
             {
                 LmpClient.Systems.Agency.ToolingClient.BindLaunch(__result, ship);
+                LmpClient.Systems.Agency.TradeClient.BindLaunch(__result, ship);
                 VesselAssemblyEvent.onAssembledVessel.Fire(__result, ship);
             }
         }

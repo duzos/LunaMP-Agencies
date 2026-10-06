@@ -21,6 +21,32 @@ namespace LmpCommonTest
         }
 
         [TestMethod]
+        public void TradeOfferAndImmutableDeliveryRoundtrip()
+        {
+            var peer = new NetClient(new NetPeerConfiguration("trade-wire"));
+            var factory = new ServerMessageFactory();
+            var source = factory.CreateNewMessageData<AgencyEconomySnapshotMsgData>();
+            var id = Guid.NewGuid();
+            source.Snapshot = new EconomySnapshot { Ready = true,
+                Offers = new[] { new TradeOffer { OfferId = id, Revision = 17, Status = TradeOfferStatus.Open,
+                    SellerFunds = 12, BuyerScience = 3, BlueprintName = "Lander" } },
+                Entitlements = new[] { new TradeEntitlement { EntitlementId = Guid.NewGuid(), Fingerprint = "fingerprint",
+                    BlueprintData = new byte[] { 1, 2, 3 }, BlueprintHash = "hash", Delivered = true } } };
+            var output = peer.CreateMessage(); source.Serialize(output);
+            Assert.IsTrue(source.GetMessageSize() >= output.LengthBytes);
+            var target = factory.CreateNewMessageData<AgencyEconomySnapshotMsgData>(); target.Deserialize(Incoming(peer, output));
+            Assert.AreEqual(id, target.Snapshot.Offers[0].OfferId);
+            Assert.AreEqual(17L, target.Snapshot.Offers[0].Revision);
+            Assert.AreEqual(3d, target.Snapshot.Offers[0].BuyerScience);
+            Assert.IsTrue(target.Snapshot.Entitlements[0].Delivered);
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, target.Snapshot.Entitlements[0].BlueprintData);
+            Assert.ThrowsException<EndOfStreamException>(() => target.Deserialize(Incoming(peer, output, output.LengthBits - 1)));
+            Assert.IsFalse(target.Snapshot.Ready);
+            Assert.AreEqual(0, target.Snapshot.Offers.Length);
+            Assert.AreEqual(0, target.Snapshot.Entitlements.Length);
+        }
+
+        [TestMethod]
         public void BoardingCommandPreservesCorrelationFinalProtoAndCargoBindings()
         {
             var peer = new NetClient(new NetPeerConfiguration("economy-command"));
@@ -72,12 +98,14 @@ namespace LmpCommonTest
             source.EconomyLaunchId = Guid.NewGuid(); source.EconomyLaunchToken = Guid.NewGuid();
             source.EconomyManifestIndices = new[] { 1, 0 };
             source.EconomySplitOperationId = Guid.NewGuid();
+            source.TradeEntitlementId = Guid.NewGuid();
             source.EconomySplitParentData = new byte[] { 4, 5, 6 };
             source.EconomyCargo = new[] { new ToolingCargo { Name = "probe", Count = 1, ContainerFlightId = 77 } };
             var output = peer.CreateMessage(); source.Serialize(output);
             var target = factory.CreateNewMessageData<VesselProtoMsgData>(); target.Deserialize(Incoming(peer, output));
             Assert.AreEqual(source.EconomyLaunchToken, target.EconomyLaunchToken);
             Assert.AreEqual(source.EconomySplitOperationId, target.EconomySplitOperationId);
+            Assert.AreEqual(source.TradeEntitlementId, target.TradeEntitlementId);
             CollectionAssert.AreEqual(source.EconomySplitParentData, target.EconomySplitParentData);
             CollectionAssert.AreEqual(new[] { 1, 0 }, target.EconomyManifestIndices);
             Assert.AreEqual(77u, target.EconomyCargo[0].ContainerFlightId);
@@ -87,6 +115,7 @@ namespace LmpCommonTest
             Assert.AreEqual(Guid.Empty, target.EconomyLaunchId);
             Assert.AreEqual(Guid.Empty, target.EconomyLaunchToken);
             Assert.AreEqual(Guid.Empty, target.EconomySplitOperationId);
+            Assert.AreEqual(Guid.Empty, target.TradeEntitlementId);
             Assert.AreEqual(0, target.EconomySplitParentData.Length);
             Assert.AreEqual(0, target.EconomyManifestIndices.Length);
             Assert.IsNull(target.EconomyCargo);

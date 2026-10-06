@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 
 namespace LmpClient.Systems.ShareScience
 {
@@ -6,7 +6,7 @@ namespace LmpClient.Systems.ShareScience
     {
         public void ScienceChanged(float science, TransactionReasons reason)
         {
-            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return;
+            if (LmpClient.Systems.Agency.ToolingClient.BalanceAuthorityEnabled) return;
             if (System.IgnoreEvents) return;
 
             System.MessageSender.SendScienceMessage(science, reason.ToString());

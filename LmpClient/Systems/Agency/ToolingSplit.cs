@@ -77,6 +77,7 @@ namespace LmpClient.Systems.Agency
             proto.VesselId = current.Child; proto.GameTime = TimeSyncSystem.UniversalTime; proto.ForceReload = true; proto.Reason = "Confirmed local split";
             proto.Data = current.ChildData; proto.NumBytes = current.ChildData.Length;
             proto.EconomyLaunchId = proto.EconomyLaunchToken = proto.EconomyParentVesselId = Guid.Empty;
+            proto.TradeEntitlementId = Guid.Empty;
             proto.EconomyEvaCrew = null; proto.EconomyManifestIndices = Array.Empty<int>();
             proto.EconomyCargo = current.Cargo; proto.EconomySplitOperationId = current.Operation; proto.EconomySplitParentData = current.ParentData;
             NetworkSender.QueueOutgoingMessage(NetworkMain.CliMsgFactory.CreateNew<VesselCliMsg>(proto));

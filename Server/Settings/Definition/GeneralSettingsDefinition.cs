@@ -1,4 +1,4 @@
-﻿using LmpCommon.Enums;
+using LmpCommon.Enums;
 using LmpCommon.Xml;
 using System;
 
@@ -103,6 +103,7 @@ namespace Server.Settings.Definition
         public bool AgencyVesselOwnership { get; set; } = false;
         public bool AgencyCommNetOptIn { get; set; } = false;
         public bool AgencyTooling { get; set; } = false;
+        public bool AgencyTrade { get; set; } = false;
         public double ToolingCostMultiplier { get; set; } = 10;
         public double TooledLaunchMultiplier { get; set; } = 0.1;
         public double ToolingCombineMultiplier { get; set; } = 0.1;

@@ -57,6 +57,8 @@ namespace Server.Agency
 
     public sealed class EconomyDocument
     {
+        public Dictionary<Guid, StoredTradeOffer> TradeOffers = new Dictionary<Guid, StoredTradeOffer>();
+        public Dictionary<Guid, List<TradeEntitlement>> Entitlements = new Dictionary<Guid, List<TradeEntitlement>>();
         public int Version = 1;
         public long Revision;
         public Dictionary<Guid, EconomyAgency> Agencies = new Dictionary<Guid, EconomyAgency>();
@@ -68,14 +70,16 @@ namespace Server.Agency
     }
 
     /// <summary>Durable balance and tooling authority; all projections are replayable.</summary>
-    public static class AgencyEconomyStore
+    public static partial class AgencyEconomyStore
     {
         internal static bool Initialized;
         private static EconomyDocument _document = new EconomyDocument();
         private static string _error;
         public static Func<DateTime> UtcNow = () => DateTime.UtcNow;
         public static Action<string> PersistenceCheckpoint;
-        public static bool Enabled => GeneralSettings.SettingsStore.AgencyTooling;
+        public static bool ToolingEnabled => GeneralSettings.SettingsStore.AgencyTooling;
+        public static bool TradeEnabled => GeneralSettings.SettingsStore.AgencyTrade;
+        public static bool Enabled => ToolingEnabled || TradeEnabled;
         public static string FilePath => Path.Combine(ServerContext.UniverseDirectory, "AgencyEconomy.json");
         public static bool Ready { get { lock (AgencyVesselMap.TransactionGate) return _error == null && _document.Journal == null; } }
         private const int MaxOperations = 512;
@@ -129,14 +133,28 @@ namespace Server.Agency
                     _document.SessionSequences.Clear();
                     _document.Operations.Clear();
                     RecoverProjection();
+                    var migrated = false;
+                    if (ToolingEnabled)
+                    {
+                        // Trade-only universes admit ordinary launches. When tooling is later
+                        // enabled those already-existing craft receive legacy full-price value.
+                        foreach (var vessel in VesselStoreSystem.CurrentVessels)
+                        {
+                            var ids = AgencyVesselMap.PartIds(vessel.Value);
+                            if (_document.Vessels.TryGetValue(vessel.Key, out var known) && (!known.Parts.All(p => p.Legacy) || ids.All(id => known.Parts.Any(p => p.FlightId == id)))) continue;
+                            _document.Vessels[vessel.Key] = new PaidVesselRecord { VesselId = vessel.Key, Parts = vessel.Value.Parts.GetAll().Select(p => new PaidPart { FlightId = p.Key, Name = p.Value.Fields.GetSingle("name")?.Value, Legacy = true, Multiplier = 1, MaximumRefund = ToolingPolicy.MaxCost }).ToArray() };
+                            migrated = true;
+                        }
+                    }
                     var candidate = Copy(_document);
-                    var changed = false;
+                    var changed = migrated;
                     foreach (var launch in candidate.Launches.Values.Where(l => l.State == LaunchState.Prepared))
                     {
                         RefundPrepared(candidate, launch);
                         changed = true;
                     }
                     RetireTerminalLaunches(candidate);
+                    if (TradeNeedsMaintenance(candidate)) { PruneTrade(candidate); changed = true; }
                     if (changed) Commit(candidate);
                     Initialized = true;
                 }
@@ -155,6 +173,7 @@ namespace Server.Agency
                 foreach (var design in agency.Designs)
                     if (ToolingPolicy.Fingerprint(design.Manifest) != design.Fingerprint || !ToolingPolicy.FiniteNonNegative(design.ToolingBasis)) throw new InvalidDataException("Invalid saved tooling.");
             }
+            ValidateTrade(document);
             foreach (var launch in document.Launches.Values)
             {
                 if (launch.LaunchId == Guid.Empty || !Enum.IsDefined(typeof(LaunchState), launch.State) || !ToolingPolicy.FiniteNonNegative(launch.Charge)) throw new InvalidDataException("Invalid launch receipt.");
@@ -172,6 +191,13 @@ namespace Server.Agency
         private static void Persist(EconomyDocument document)
         {
             Validate(document);
+            // The wire payload has a stricter bound than the ledger. Validate the actual
+            // aggregate projection before committing money or assets, including shared vessels.
+            foreach (var agencyId in document.Agencies.Keys.Concat(AgencyStore.Agencies.Keys).Distinct())
+            {
+                if (AgencyEconomyWire.Size(BuildSnapshot(document, agencyId)) > AgencyEconomyWire.MaximumPayloadBytes - 4096)
+                    throw new InvalidDataException("Agency economy snapshot storage limit reached; close offers or remove unused assets before retrying.");
+            }
             var json = JsonConvert.SerializeObject(document);
             if (Encoding.UTF8.GetByteCount(json) > MaxFileBytes) throw new InvalidDataException("Economy capacity reached.");
             PersistenceCheckpoint?.Invoke("before-document");
@@ -257,15 +283,19 @@ namespace Server.Agency
                 foreach (var id in removedIds) next.Vessels.Remove(id);
                 RetireTerminalLaunches(next);
                 var journal = new EconomyVesselJournal { OwnershipAfter = ownership, Removals = removedIds };
+                InvalidateChangedOffers(next, ownership);
                 if (ownership.Journal != null)
                 {
                     var coupling = ownership.Journal;
                     var receipt = coupling.Receipt;
-                    if (!next.Vessels.TryGetValue(receipt.DominantId, out var dominant) || !next.Vessels.TryGetValue(receipt.WeakId, out var weak))
-                        throw new InvalidOperationException("Missing paid vessel provenance.");
-                    dominant.Parts = dominant.Parts.Concat(weak.Parts).ToArray();
-                    dominant.Cargo = dominant.Cargo.Concat(weak.Cargo).ToArray();
-                    next.Vessels.Remove(receipt.WeakId);
+                    if (ToolingEnabled)
+                    {
+                        if (!next.Vessels.TryGetValue(receipt.DominantId, out var dominant) || !next.Vessels.TryGetValue(receipt.WeakId, out var weak))
+                            throw new InvalidOperationException("Missing paid vessel provenance.");
+                        dominant.Parts = dominant.Parts.Concat(weak.Parts).ToArray();
+                        dominant.Cargo = dominant.Cargo.Concat(weak.Cargo).ToArray();
+                        next.Vessels.Remove(receipt.WeakId);
+                    }
                     journal.Upserts[receipt.DominantId] = coupling.MergedProto;
                     journal.Removals = new[] { receipt.WeakId };
                     journal.PermanentRemovals = false;
@@ -356,9 +386,10 @@ namespace Server.Agency
                     if (!Enabled) throw new InvalidOperationException("Tooling is disabled.");
                     RequireActor(client);
                     if (command == null || command.RequestId == Guid.Empty || !Enum.IsDefined(typeof(EconomyOperation), command.Operation)) throw new ArgumentException("Invalid economy request.");
+                    if (!ToolingEnabled && command.Operation != EconomyOperation.Delta && !IsTradeOperation(command.Operation)) throw new InvalidOperationException("Tooling gameplay is disabled.");
                     var sessionId = Session(client);
                     if (command.SessionId != sessionId || command.Sequence < 1) throw new InvalidOperationException("Economy session changed; refresh before retrying.");
-                    var hash = JsonConvert.SerializeObject(command);
+                    var hash = Hash(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(command)));
                     if (_document.Operations.TryGetValue(command.RequestId, out var previous))
                     {
                         if (previous.AgencyId != client.AgencyId || previous.ActorId != client.UniqueIdentifier || previous.RequestHash != hash) throw new InvalidOperationException("Operation ID was already used.");
@@ -377,6 +408,13 @@ namespace Server.Agency
                     RetireTerminalLaunches(candidate);
                     switch (command.Operation)
                     {
+                        case EconomyOperation.TradeCreate:
+                        case EconomyOperation.TradeAccept:
+                        case EconomyOperation.TradeDecline:
+                        case EconomyOperation.TradeCancel:
+                        case EconomyOperation.TradeDelivered:
+                            ApplyTrade(candidate, client, command, result);
+                            break;
                         case EconomyOperation.Tool:
                             result.Quote = Quote(agency, command.Manifest, command.ManifestHash);
                             if (!result.Quote.AlreadyTooled)
@@ -463,13 +501,14 @@ namespace Server.Agency
                 var closedSession = Guid.Empty;
                 if (client != null) PublicationBlocked.Remove(client);
                 if (client != null && Sessions.TryGetValue(client, out closedSession)) Sessions.Remove(client);
-                if (pending.Length == 0 && closedSession == Guid.Empty) return;
+                if (pending.Length == 0 && closedSession == Guid.Empty && !TradeNeedsMaintenance(candidate)) return;
                 if (closedSession != Guid.Empty)
                 {
                     candidate.SessionSequences.Remove(closedSession);
                     foreach (var operation in candidate.Operations.Where(p => p.Value.SessionId == closedSession).Select(p => p.Key).ToArray()) candidate.Operations.Remove(operation);
                 }
                 foreach (var launch in pending) RefundPrepared(candidate, launch);
+                PruneTrade(candidate);
                 RetireTerminalLaunches(candidate);
                 Commit(candidate);
             }
@@ -787,15 +826,24 @@ namespace Server.Agency
             return (true, "Transfer committed.");
         }
 
+        private static EconomySnapshot BuildSnapshot(EconomyDocument document, Guid agencyId)
+        {
+            var snapshot = new EconomySnapshot { Ready = true, AgencyId = agencyId, Revision = document.Revision };
+            if (document.Agencies.TryGetValue(agencyId, out var agency)) { snapshot.Funds = agency.Funds; snapshot.Science = agency.Science; snapshot.Designs = Copy(agency.Designs.ToArray()); }
+            else if (AgencyStore.Agencies.TryGetValue(agencyId, out var source)) { snapshot.Funds = source.Funds; snapshot.Science = source.Science; }
+            snapshot.Offers = TradeOffersFor(document, agencyId);
+            snapshot.Entitlements = document.Entitlements.TryGetValue(agencyId, out var entitlements) ? Copy(entitlements.ToArray()) : Array.Empty<TradeEntitlement>();
+            snapshot.Vessels = Copy(document.Vessels.Values.ToArray());
+            snapshot.Launches = document.Launches.Values.Where(l => l.AgencyId == agencyId).Select(l => new LaunchReceiptSummary { LaunchId = l.LaunchId, VesselId = l.VesselId, Charge = l.Charge, State = l.State, ExpiresUtcTicks = l.ExpiresUtcTicks }).ToArray();
+            return snapshot;
+        }
+
         public static EconomySnapshot Snapshot(Guid agencyId)
         {
             lock (AgencyVesselMap.TransactionGate)
             {
-                var snapshot = new EconomySnapshot { Ready = Ready, AgencyId = agencyId, Revision = _document.Revision };
-                if (_document.Agencies.TryGetValue(agencyId, out var agency)) { snapshot.Funds = agency.Funds; snapshot.Science = agency.Science; snapshot.Designs = Copy(agency.Designs.ToArray()); }
-                else if (AgencyStore.Agencies.TryGetValue(agencyId, out var source)) { snapshot.Funds = source.Funds; snapshot.Science = source.Science; }
-                snapshot.Vessels = Copy(_document.Vessels.Values.ToArray());
-                snapshot.Launches = _document.Launches.Values.Where(l => l.AgencyId == agencyId).Select(l => new LaunchReceiptSummary { LaunchId = l.LaunchId, VesselId = l.VesselId, Charge = l.Charge, State = l.State, ExpiresUtcTicks = l.ExpiresUtcTicks }).ToArray();
+                var snapshot = BuildSnapshot(_document, agencyId);
+                snapshot.Ready = Ready;
                 return snapshot;
             }
         }
@@ -881,6 +929,11 @@ namespace Server.Agency
                     proto.EconomyManifestIndices = Array.Empty<int>();
                     MessageQueuer.SendToAllClients<VesselSrvMsg>(proto);
                 }
+            }
+            if (result.Success && IsTradeOperation(command.Operation))
+            {
+                VesselOwnershipSystem.Changed();
+                foreach (var recipient in ClientRetriever.GetAuthenticatedClients()) AgencyNetwork.SendVesselMapSyncTo(recipient);
             }
             Broadcast();
             SendResult(client, result);

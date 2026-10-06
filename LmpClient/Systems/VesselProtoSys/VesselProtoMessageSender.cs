@@ -95,6 +95,7 @@ namespace LmpClient.Systems.VesselProtoSys
                     msgData.Reason = reason;
                     msgData.EconomyCargo = cargo;
                     LmpClient.Systems.Agency.ToolingClient.FillLaunchTail(protoVessel, msgData);
+                    LmpClient.Systems.Agency.TradeClient.FillLaunchTail(protoVessel.vesselID, msgData);
                     if (msgData.Data.Length < numBytes)
                         Array.Resize(ref msgData.Data, numBytes);
                     Array.Copy(VesselSerializedBytes, 0, msgData.Data, 0, numBytes);

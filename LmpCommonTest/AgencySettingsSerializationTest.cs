@@ -50,7 +50,7 @@ namespace LmpCommonTest
             parsed.AgencyCommNetPerAgency = true;
             parsed.AgencyLaunchSitesPerAgency = true;
             parsed.AgencyVesselOwnership = true;
-            parsed.AgencyCommNetOptIn = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
+            parsed.AgencyCommNetOptIn = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
             parsed.Deserialize(incoming);
             Assert.AreEqual("Legacy server", parsed.ConsoleIdentifier);
             Assert.IsTrue(parsed.PrintMotdInChat);
@@ -62,7 +62,7 @@ namespace LmpCommonTest
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
             Assert.IsFalse(parsed.AgencyVesselOwnership);
             Assert.IsFalse(parsed.AgencyCommNetOptIn);
-            Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(10d, parsed.ToolingCostMultiplier); Assert.AreEqual(.1, parsed.TooledLaunchMultiplier); Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
+            Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(10d, parsed.ToolingCostMultiplier); Assert.AreEqual(.1, parsed.TooledLaunchMultiplier); Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
         }
 
         [TestMethod]
@@ -81,13 +81,13 @@ namespace LmpCommonTest
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyLaunchSitesPerAgency = true;
             parsed.AgencyVesselOwnership = true;
-            parsed.AgencyCommNetOptIn = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
+            parsed.AgencyCommNetOptIn = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyExperimentsPerAgency && parsed.AgencyKerbalsPerAgency && parsed.AgencyScansatPerAgency && parsed.AgencyContractsPoolPerAgency && parsed.AgencyCommNetPerAgency);
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
             Assert.IsFalse(parsed.AgencyVesselOwnership);
             Assert.IsFalse(parsed.AgencyCommNetOptIn);
-            Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(10d, parsed.ToolingCostMultiplier); Assert.AreEqual(.1, parsed.TooledLaunchMultiplier); Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
+            Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(10d, parsed.ToolingCostMultiplier); Assert.AreEqual(.1, parsed.TooledLaunchMultiplier); Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
         }
 
         [DataTestMethod]
@@ -105,13 +105,30 @@ namespace LmpCommonTest
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
             incoming.LengthBits = start + 8 + toolingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
-            parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
+            parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyCommNetOptIn);
-            Assert.IsFalse(parsed.AgencyTooling);
+            Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling);
             Assert.AreEqual(10d, parsed.ToolingCostMultiplier);
             Assert.AreEqual(.1, parsed.TooledLaunchMultiplier);
             Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
+        }
+
+        [TestMethod]
+        public void PreviousToolingSettingsDoNotEnableTradeOnPooledRead()
+        {
+            var factory = new ServerMessageFactory();
+            var peer = new NetClient(new NetPeerConfiguration("PreviousToolingSettings"));
+            var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            source.AgencyTooling = true; source.AgencyTrade = true;
+            var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
+            var start = AgencyTailStart(peer, source, outgoing);
+            var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
+            incoming.LengthBits = start + 8 + 193;
+            var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>(); parsed.AgencyTrade = true;
+            parsed.Deserialize(incoming);
+            Assert.IsTrue(parsed.AgencyTooling);
+            Assert.IsFalse(parsed.AgencyTrade);
         }
 
         [DataTestMethod]
@@ -133,7 +150,7 @@ namespace LmpCommonTest
             settings.AgencyLaunchSitesPerAgency = !enabled;
             settings.AgencyVesselOwnership = enabled;
             settings.AgencyCommNetOptIn = !enabled;
-            settings.AgencyTooling = enabled; settings.ToolingCostMultiplier = 7; settings.TooledLaunchMultiplier = .2; settings.ToolingCombineMultiplier = .3;
+            settings.AgencyTrade = !enabled; settings.AgencyTooling = enabled; settings.ToolingCostMultiplier = 7; settings.TooledLaunchMultiplier = .2; settings.ToolingCombineMultiplier = .3;
             var outgoing = peer.CreateMessage(settings.GetMessageSize());
             settings.Serialize(outgoing);
             Assert.IsTrue(settings.GetMessageSize() >= outgoing.LengthBytes);
@@ -152,7 +169,7 @@ namespace LmpCommonTest
             Assert.AreEqual(!enabled, parsed.AgencyLaunchSitesPerAgency);
             Assert.AreEqual(enabled, parsed.AgencyVesselOwnership);
             Assert.AreEqual(!enabled, parsed.AgencyCommNetOptIn);
-            Assert.AreEqual(enabled, parsed.AgencyTooling); Assert.AreEqual(7d, parsed.ToolingCostMultiplier); Assert.AreEqual(.2, parsed.TooledLaunchMultiplier); Assert.AreEqual(.3, parsed.ToolingCombineMultiplier);
+            Assert.AreEqual(!enabled, parsed.AgencyTrade); Assert.AreEqual(enabled, parsed.AgencyTooling); Assert.AreEqual(7d, parsed.ToolingCostMultiplier); Assert.AreEqual(.2, parsed.TooledLaunchMultiplier); Assert.AreEqual(.3, parsed.ToolingCombineMultiplier);
         }
     }
 }

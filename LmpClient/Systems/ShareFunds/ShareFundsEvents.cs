@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using System;
 
 namespace LmpClient.Systems.ShareFunds
@@ -21,7 +21,7 @@ namespace LmpClient.Systems.ShareFunds
             System.LastKnownFunds = funds;
             LunaLog.Log($"Funds changed to: {funds} reason: {reason}");
             
-            if (System.IgnoreEvents) return;
+            if (System.IgnoreEvents || LmpClient.Systems.Agency.ToolingClient.BalanceAuthorityEnabled) return;
             System.MessageSender.SendFundsMessage(funds, reason.ToString());
         }
 

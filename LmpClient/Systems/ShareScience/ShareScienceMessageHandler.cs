@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpCommon.Message.Data.ShareProgress;
@@ -13,7 +13,7 @@ namespace LmpClient.Systems.ShareScience
 
         public void HandleMessage(IServerMessageBase msg)
         {
-            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return;
+            if (LmpClient.Systems.Agency.ToolingClient.BalanceAuthorityEnabled) return;
             if (!(msg.Data is ShareProgressBaseMsgData msgData)) return;
             if (msgData.ShareProgressMessageType != ShareProgressMessageType.ScienceUpdate) return;
 

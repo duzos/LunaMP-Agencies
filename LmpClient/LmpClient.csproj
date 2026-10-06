@@ -481,6 +481,9 @@
     <Compile Include="Harmony\CommNet_AgencyFilter.cs" />
     <Compile Include="Systems\Agency\CommNetState.cs" />
     <Compile Include="Systems\Agency\ToolingClient.cs" />
+    <Compile Include="Systems\Agency\TradeClient.cs" />
+    <Compile Include="Harmony\AgencyTradeResearch.cs" />
+    <Compile Include="Windows\Agency\TradeDrawer.cs" />
     <Compile Include="Systems\Agency\ToolingBoarding.cs" />
     <Compile Include="Systems\Agency\ToolingSplit.cs" />
     <Compile Include="Systems\Agency\ToolingManifestBuilder.cs" />

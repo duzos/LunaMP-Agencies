@@ -1,0 +1,182 @@
+using System;
+using System.Globalization;
+using System.Linq;
+using LmpClient.Systems.Agency;
+using LmpCommon.Agency;
+using UnityEngine;
+
+namespace LmpClient.Windows.Agency
+{
+    public partial class AgencyWindow
+    {
+        private static int tradeTab;
+        private static Guid tradeBuyer, tradeVessel, tradeConfirm, tradeLoadConfirm, tradeAgency;
+        private static long tradeConfirmRevision;
+        private static string tradeSearch = "", tradeError, tradeDraftVesselName;
+        private static string giveFunds = "0", giveScience = "0", receiveFunds = "0", receiveScience = "0";
+        private static bool includeEditorDesign;
+        private static Vector2 tradeScroll, tradeBuyerScroll, tradeVesselScroll;
+        private static TradeCommand tradeDraft;
+        private static GUIStyle tradeText, tradeHeading, tradeButton;
+
+        private static void DrawTradeTab()
+        {
+            if (tradeText == null)
+            {
+                tradeText = new GUIStyle(GUI.skin.label) { wordWrap = true, richText = false };
+                tradeHeading = new GUIStyle(tradeText) { fontStyle = FontStyle.Bold };
+                tradeButton = new GUIStyle(GUI.skin.button) { wordWrap = true, richText = false };
+            }
+            if (!TradeClient.Enabled) { GUILayout.Label("Trading is disabled on this server.", tradeText); return; }
+            if (tradeAgency != AgencySystem.Singleton.MyAgencyId)
+            {
+                tradeAgency = AgencySystem.Singleton.MyAgencyId;
+                tradeBuyer = tradeVessel = tradeConfirm = tradeLoadConfirm = Guid.Empty;
+                tradeDraft = null; tradeError = null;
+            }
+            if (!TradeClient.Ready) { GUILayout.Label("Syncing your agency's offers and purchased designs...", tradeText); return; }
+            tradeTab = GUILayout.Toolbar(tradeTab, new[] { "Offers", "New offer", "Received designs" });
+            if (!string.IsNullOrEmpty(TradeClient.LatestStatus)) GUILayout.Label(TradeClient.LatestStatus, tradeText);
+            if (!string.IsNullOrEmpty(tradeError)) GUILayout.Label(tradeError, tradeText);
+            tradeScroll = GUILayout.BeginScrollView(tradeScroll);
+            if (tradeTab == 0) DrawTradeOffers();
+            else if (tradeTab == 1) DrawNewTrade();
+            else DrawReceivedTrades();
+            GUILayout.EndScrollView();
+        }
+
+        private static string TradeAgencyName(Guid id) => AgencySystem.Singleton.KnownAgencies.TryGetValue(id, out var agency) ? agency.Name : id.ToString("N").Substring(0, 8);
+        private static void DrawTradeTerms(double funds, double science) => GUILayout.Label("Funds " + funds.ToString("R", CultureInfo.CurrentCulture) + "  |  Science " + science.ToString("R", CultureInfo.CurrentCulture), tradeText);
+
+        private static void DrawTradeOffers()
+        {
+            var offers = TradeClient.GetOffersSnapshot().OrderByDescending(o => o.Status == TradeOfferStatus.Open).ThenByDescending(o => o.Revision).ToArray();
+            if (offers.Length == 0) GUILayout.Label("No offers yet. Create an offer for another agency to exchange craft, designs, funds or science.", tradeText);
+            foreach (var offer in offers)
+            {
+                var incoming = offer.BuyerAgencyId == tradeAgency;
+                GUILayout.BeginVertical(GUI.skin.box);
+                GUILayout.Label((incoming ? "From " : "To ") + TradeAgencyName(incoming ? offer.SellerAgencyId : offer.BuyerAgencyId) + " · " + offer.Status, tradeHeading);
+                if (offer.VesselId != Guid.Empty) GUILayout.Label("Craft: " + offer.VesselName, tradeText);
+                if (!string.IsNullOrEmpty(offer.DesignFingerprint)) GUILayout.Label("Tooled design: " + offer.BlueprintName + " (" + offer.Editor + ")", tradeText);
+                GUILayout.Label("Your agency gives", tradeHeading);
+                DrawTradeTerms(incoming ? offer.BuyerFunds : offer.SellerFunds, incoming ? offer.BuyerScience : offer.SellerScience);
+                GUILayout.Label("Your agency receives" + (incoming && (offer.VesselId != Guid.Empty || !string.IsNullOrEmpty(offer.DesignFingerprint)) ? " the items above, plus" : ""), tradeHeading);
+                DrawTradeTerms(incoming ? offer.SellerFunds : offer.BuyerFunds, incoming ? offer.SellerScience : offer.BuyerScience);
+                if (offer.Status == TradeOfferStatus.Open)
+                {
+                    GUILayout.Label("Expires " + new DateTime(offer.ExpiresUtcTicks, DateTimeKind.Utc).ToLocalTime().ToString("g"), tradeText);
+                    if (AgencySystem.Singleton.AmIOwnerOfMine())
+                    {
+                        if (incoming)
+                        {
+                            var confirming = tradeConfirm == offer.OfferId && tradeConfirmRevision == offer.Revision;
+                            if (confirming) GUILayout.Label("Confirm this exchange? The server will transfer both sides together.", tradeText);
+                            GUILayout.BeginHorizontal();
+                            if (GUILayout.Button(confirming ? "Confirm exchange" : "Review and accept", tradeButton))
+                            {
+                                if (confirming) { TradeClient.RespondOffer(offer.OfferId, offer.Revision, true); tradeConfirm = Guid.Empty; }
+                                else { tradeConfirm = offer.OfferId; tradeConfirmRevision = offer.Revision; }
+                            }
+                            if (GUILayout.Button(confirming ? "Back" : "Decline", tradeButton))
+                            {
+                                if (confirming) tradeConfirm = Guid.Empty;
+                                else TradeClient.RespondOffer(offer.OfferId, offer.Revision, false);
+                            }
+                            GUILayout.EndHorizontal();
+                        }
+                        else if (GUILayout.Button("Withdraw offer", tradeButton)) TradeClient.CancelOffer(offer.OfferId, offer.Revision);
+                    }
+                    else GUILayout.Label("Your agency owner manages offers.", tradeText);
+                }
+                GUILayout.EndVertical();
+            }
+        }
+
+        private static void DrawNewTrade()
+        {
+            if (!AgencySystem.Singleton.AmIOwnerOfMine()) { GUILayout.Label("Only your agency owner can create an offer.", tradeText); return; }
+            if (tradeDraft != null)
+            {
+                GUILayout.Label("Review offer to " + TradeAgencyName(tradeDraft.BuyerAgencyId), tradeHeading);
+                if (tradeDraft.VesselId != Guid.Empty) GUILayout.Label("Transfers ownership of " + tradeDraftVesselName + ".", tradeText);
+                if (tradeDraft.BlueprintData.Length > 0) GUILayout.Label("Includes tooling and a copy of " + tradeDraft.BlueprintName + ".", tradeText);
+                GUILayout.Label("Your agency gives", tradeHeading); DrawTradeTerms(tradeDraft.SellerFunds, tradeDraft.SellerScience);
+                GUILayout.Label("Your agency receives", tradeHeading); DrawTradeTerms(tradeDraft.BuyerFunds, tradeDraft.BuyerScience);
+                GUILayout.Label("Nothing transfers until the other agency's owner accepts. Balances and ownership are checked again then.", tradeText);
+                if (GUILayout.Button("Send offer", tradeButton)) { TradeClient.CreateOffer(tradeDraft); tradeDraft = null; tradeTab = 0; }
+                if (GUILayout.Button("Back to edit", tradeButton)) tradeDraft = null;
+                return;
+            }
+            GUILayout.Label("1. Choose the receiving agency", tradeHeading);
+            tradeSearch = GUILayout.TextField(tradeSearch, 80);
+            tradeBuyerScroll = GUILayout.BeginScrollView(tradeBuyerScroll, GUILayout.Height(90));
+            foreach (var agency in AgencySystem.Singleton.KnownAgencies.Values.Where(a => a.Id != tradeAgency && (a.Name ?? "").IndexOf(tradeSearch, StringComparison.OrdinalIgnoreCase) >= 0).OrderBy(a => a.Name))
+                if (GUILayout.Toggle(tradeBuyer == agency.Id, agency.Name, tradeButton)) tradeBuyer = agency.Id;
+            GUILayout.EndScrollView();
+            GUILayout.Label("2. Choose items to give (optional)", tradeHeading);
+            if (GUILayout.Toggle(tradeVessel == Guid.Empty, "No craft transfer", tradeButton)) tradeVessel = Guid.Empty;
+            tradeVesselScroll = GUILayout.BeginScrollView(tradeVesselScroll, GUILayout.Height(80));
+            if (FlightGlobals.Vessels != null)
+                foreach (var vessel in FlightGlobals.Vessels.Where(v => v != null && AgencySystem.Singleton.GetVesselAgency(v.id) == tradeAgency).OrderBy(v => v.vesselName))
+                    if (GUILayout.Toggle(tradeVessel == vessel.id, vessel.vesselName, tradeButton)) tradeVessel = vessel.id;
+            GUILayout.EndScrollView();
+            if (HighLogic.LoadedSceneIsEditor) includeEditorDesign = GUILayout.Toggle(includeEditorDesign, "Include the current editor craft and its tooling");
+            else { includeEditorDesign = false; GUILayout.Label("Open a tooled craft in the editor to include its design.", tradeText); }
+            GUILayout.Label("3. Set both sides of the exchange", tradeHeading);
+            GUILayout.Label("Your agency gives", tradeText); AmountInputs(ref giveFunds, ref giveScience);
+            GUILayout.Label("The other agency gives", tradeText); AmountInputs(ref receiveFunds, ref receiveScience);
+            var enabled = GUI.enabled; GUI.enabled = enabled && tradeBuyer != Guid.Empty;
+            if (GUILayout.Button("Review offer", tradeButton))
+            {
+                try
+                {
+                    var draft = includeEditorDesign ? TradeClient.CaptureCurrentDesign() : new TradeCommand();
+                    draft.BuyerAgencyId = tradeBuyer; draft.VesselId = tradeVessel;
+                    draft.SellerFunds = ParseTradeAmount(giveFunds); draft.SellerScience = ParseTradeAmount(giveScience);
+                    draft.BuyerFunds = ParseTradeAmount(receiveFunds); draft.BuyerScience = ParseTradeAmount(receiveScience);
+                    tradeDraftVesselName = FlightGlobals.Vessels?.FirstOrDefault(v => v != null && v.id == tradeVessel)?.vesselName ?? tradeVessel.ToString();
+                    tradeDraft = draft; tradeError = null;
+                }
+                catch (Exception e) { tradeError = e.Message; }
+            }
+            GUI.enabled = enabled;
+        }
+
+        private static void AmountInputs(ref string funds, ref string science)
+        {
+            GUILayout.BeginHorizontal(); GUILayout.Label("Funds", GUILayout.Width(48)); funds = GUILayout.TextField(funds, 20);
+            GUILayout.Label("Science", GUILayout.Width(58)); science = GUILayout.TextField(science, 20); GUILayout.EndHorizontal();
+        }
+        private static double ParseTradeAmount(string text)
+        {
+            if (!double.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) || !ToolingPolicy.FiniteNonNegative(value))
+                throw new ArgumentException("Enter nonnegative funds and science using a decimal point, for example 100 or 12.5.");
+            return value;
+        }
+        private static void DrawReceivedTrades()
+        {
+            var designs = TradeClient.GetReceivedDesignsSnapshot();
+            if (designs.Count == 0) GUILayout.Label("Purchased designs will appear here. Their research allowance covers the exact physical part list; adding or removing parts changes the design.", tradeText);
+            foreach (var design in designs)
+            {
+                GUILayout.BeginVertical(GUI.skin.box);
+                GUILayout.Label(design.Name, tradeHeading);
+                GUILayout.Label("From " + TradeAgencyName(design.SellerAgencyId) + " · " + design.Editor, tradeText);
+                GUILayout.Label(design.DeliveryStatus, tradeText);
+                if (!string.IsNullOrEmpty(design.LocalPath))
+                {
+                    var confirming = tradeLoadConfirm == design.Id;
+                    if (confirming) GUILayout.Label("Loading replaces the current editor craft. Save any changes you want to keep first.", tradeText);
+                    if (GUILayout.Button(confirming ? "Replace and load design" : "Load in editor", tradeButton))
+                    {
+                        if (confirming) { TradeClient.LoadDesign(design.Id, true); tradeLoadConfirm = Guid.Empty; }
+                        else tradeLoadConfirm = design.Id;
+                    }
+                    if (confirming && GUILayout.Button("Cancel", tradeButton)) tradeLoadConfirm = Guid.Empty;
+                }
+                GUILayout.EndVertical();
+            }
+        }
+    }
+}

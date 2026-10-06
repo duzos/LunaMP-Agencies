@@ -99,6 +99,7 @@ namespace LmpClient.Systems.Agency
             ClearOwnership();
             ClearCommNet();
             ToolingClient.Clear();
+            TradeClient.Clear();
             LatestServerReply = null;
             LmpClient.Windows.Admin.AdminWindow.ResetLaunchSitesUi();
             while (PendingServerMessages.TryDequeue(out _)) { }

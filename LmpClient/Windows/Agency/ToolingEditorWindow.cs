@@ -17,7 +17,7 @@ namespace LmpClient.Windows.Agency
         private Vector2 scroll;
         public override bool Display
         {
-            get => HighLogic.LoadedSceneIsEditor && ToolingClient.Enabled && MainSystem.NetworkState >= ClientState.Running && MainSystem.ToolbarShowGui && SettingsSystem.CurrentSettings.DisclaimerAccepted;
+            get => HighLogic.LoadedSceneIsEditor && (ToolingClient.Enabled || TradeClient.Enabled) && MainSystem.NetworkState >= ClientState.Running && MainSystem.ToolbarShowGui && SettingsSystem.CurrentSettings.DisclaimerAccepted;
             set { compact = !value; }
         }
         public override void SetStyles()
@@ -35,13 +35,15 @@ namespace LmpClient.Windows.Agency
             }
             WindowRect.width = Mathf.Min(340, Screen.width - 16);
             WindowRect.height = Mathf.Min(compact ? 112 : 380, Screen.height - 32);
-            WindowRect = FixWindowPos(GUILayout.Window(6812 + MainSystem.WindowOffset, WindowRect, DrawContent, "Agency tooling",
+            WindowRect = FixWindowPos(GUILayout.Window(6812 + MainSystem.WindowOffset, WindowRect, DrawContent, "Agency design",
                 GUILayout.Width(WindowRect.width), GUILayout.Height(WindowRect.height)));
         }
         protected override void OnCloseButton() { compact = true; confirmFingerprint = null; }
         protected override void DrawWindowContent(int id)
         {
             GUI.DragWindow(MoveRect);
+            if (TradeClient.Enabled) GUILayout.Label(TradeClient.EditorAllowanceStatus ?? "Checking purchased-design allowance...", text);
+            if (!ToolingClient.Enabled) return;
             var quote = ToolingClient.EditorQuote;
             if (!LmpClient.Harmony.AgencyTooling.Ready)
                 GUILayout.Label("Launch hooks unavailable: " + LmpClient.Harmony.AgencyTooling.DiagnosticReason, text);

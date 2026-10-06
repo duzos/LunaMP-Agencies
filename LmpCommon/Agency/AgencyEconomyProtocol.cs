@@ -3,7 +3,7 @@ namespace LmpCommon.Agency
 {
     public enum EconomyOperation : byte
     {
-        Quote, Tool, PrepareLaunch, CancelLaunch, Delta, Recover, Revert, RevertLaunch, RegisterLaunch, BoardEva, Split
+        Quote, Tool, PrepareLaunch, CancelLaunch, Delta, Recover, Revert, RevertLaunch, RegisterLaunch, BoardEva, Split, TradeCreate, TradeAccept, TradeDecline, TradeCancel, TradeDelivered
     }
 
     public enum LaunchState : byte { Prepared, Registered, Cancelled, Recovered, Reverted }
@@ -20,6 +20,7 @@ namespace LmpCommon.Agency
         public Guid ParentVesselId;
         public string CrewName;
         public byte[] VesselData = Array.Empty<byte>();
+        public TradeCommand Trade;
         public long Sequence;
         public EconomyOperation Operation;
         public ToolingManifest Manifest;
@@ -32,7 +33,7 @@ namespace LmpCommon.Agency
 
     public sealed class EconomyResult
     {
-        public Guid RequestId, LaunchId, LaunchToken, VesselId;
+        public Guid RequestId, LaunchId, LaunchToken, VesselId, TradeOfferId;
         public EconomyOperation Operation;
         public bool Success, RecoveryRequired;
         public string Reason;
@@ -66,6 +67,8 @@ namespace LmpCommon.Agency
 
     public sealed class EconomySnapshot
     {
+        public TradeOffer[] Offers = Array.Empty<TradeOffer>();
+        public TradeEntitlement[] Entitlements = Array.Empty<TradeEntitlement>();
         public bool Ready;
         public Guid AgencyId, SessionId;
         public long Revision, LastSequence;

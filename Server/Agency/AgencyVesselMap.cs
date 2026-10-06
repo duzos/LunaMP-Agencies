@@ -302,7 +302,7 @@ namespace Server.Agency
             {
                 if(!_document.PendingSplits.TryGetValue(child,out var pending)) return true;
                 if(actualParts.Length==0 || !actualParts.Contains(pending.Boundary) || actualParts.Distinct().Count()!=actualParts.Length || actualParts.Any(p=>!pending.AllowedParts.Contains(p))) return false;
-                if (AgencyEconomyStore.Enabled && childProto != null)
+                if (AgencyEconomyStore.ToolingEnabled && childProto != null)
                 {
                     if (string.IsNullOrEmpty(parentProto)) return false;
                     var parentVessel = new global::Server.System.Vessel.Classes.Vessel(parentProto);
@@ -325,7 +325,7 @@ namespace Server.Agency
                     if(childParts.Count>0) next.Constituents[child]=childParts;
                 }
                 owner.VesselId=child; owner.Revision=next.Revision+1; next.Records[child]=owner; next.PendingSplits.Remove(child); next.Absorbed.Remove(child);
-                if (AgencyEconomyStore.Enabled) { next.Revision = checked(_document.Revision + 1); AgencyEconomyStore.CommitSplit(next, pending.ParentId, child, actualParts, childProto, parentProto); }
+                if (AgencyEconomyStore.ToolingEnabled) { next.Revision = checked(_document.Revision + 1); AgencyEconomyStore.CommitSplit(next, pending.ParentId, child, actualParts, childProto, parentProto); }
                 else Commit(next);
                 return true;
             }

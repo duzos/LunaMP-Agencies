@@ -1,4 +1,4 @@
-﻿using CommNet;
+using CommNet;
 using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpCommon.Enums;
@@ -43,6 +43,7 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.AgencyCommNetPerAgency = msgData.AgencyCommNetPerAgency;
             SettingsSystem.ServerSettings.AgencyCommNetOptIn = msgData.AgencyCommNetOptIn;
             SettingsSystem.ServerSettings.AgencyTooling = msgData.AgencyTooling;
+            SettingsSystem.ServerSettings.AgencyTrade = msgData.AgencyTrade;
             SettingsSystem.ServerSettings.ToolingCostMultiplier = msgData.ToolingCostMultiplier;
             SettingsSystem.ServerSettings.TooledLaunchMultiplier = msgData.TooledLaunchMultiplier;
             SettingsSystem.ServerSettings.ToolingCombineMultiplier = msgData.ToolingCombineMultiplier;

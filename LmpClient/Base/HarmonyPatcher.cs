@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using LmpClient.Diagnostics;
 using System.Reflection;
 using LmpClient.Harmony;
@@ -59,6 +59,7 @@ namespace LmpClient.Base
             AgencyLaunchSites.Install(HarmonyInstance);
             AgencyVesselDocking.Install(HarmonyInstance);
             AgencyTooling.Install(HarmonyInstance);
+            AgencyTradeResearch.Install(HarmonyInstance);
             SuppressClickThroughBlockerPopup();
             PatchContractPreLoader();
         }

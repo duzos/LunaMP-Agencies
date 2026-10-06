@@ -25,7 +25,7 @@ namespace Server.Message
         {
             var messageData = message.Data as VesselBaseMsgData;
             if (!AgencyEconomyStore.MayPublish(client)) return;
-            if ((VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled) && (VesselOwnershipSystem.IsRejected(client) || !AgencyVesselMap.Ready || (messageData != null && AgencyVesselMap.IsAbsorbed(messageData.VesselId) && messageData.VesselMessageType != VesselMessageType.Couple))) return;
+            if ((VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled) && (VesselOwnershipSystem.IsRejected(client) || !AgencyVesselMap.Ready || (messageData != null && AgencyVesselMap.IsAbsorbed(messageData.VesselId) && messageData.VesselMessageType != VesselMessageType.Couple))) return;
             switch (messageData?.VesselMessageType)
             {
                 case VesselMessageType.Sync:
@@ -75,15 +75,15 @@ namespace Server.Message
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Decouple:
-                    if (VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled) { var split=(VesselDecoupleMsgData)messageData; lock(AgencyVesselMap.TransactionGate) if(!VesselOwnershipSystem.CanControl(client,split.VesselId) || !AgencyVesselMap.RestoreSplit(split.VesselId,split.NewVesselId,0,split.PartFlightId,null,client.UniqueIdentifier,client.ConnectionTime.Ticks)) return; VesselOwnershipSystem.Changed(); }
-                    if (!AgencyEconomyStore.Enabled) MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
+                    if (VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled) { var split=(VesselDecoupleMsgData)messageData; lock(AgencyVesselMap.TransactionGate) if(!VesselOwnershipSystem.CanControl(client,split.VesselId) || !AgencyVesselMap.RestoreSplit(split.VesselId,split.NewVesselId,0,split.PartFlightId,null,client.UniqueIdentifier,client.ConnectionTime.Ticks)) return; VesselOwnershipSystem.Changed(); }
+                    if (!AgencyEconomyStore.ToolingEnabled) MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Couple:
                     HandleVesselCouple(client, messageData);
                     break;
                 case VesselMessageType.Undock:
-                    if (VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled) { var split=(VesselUndockMsgData)messageData; lock(AgencyVesselMap.TransactionGate) if(!VesselOwnershipSystem.CanControl(client,split.VesselId) || !AgencyVesselMap.RestoreSplit(split.VesselId,split.NewVesselId,split.DockedInfoRootPartUId,split.PartFlightId,null,client.UniqueIdentifier,client.ConnectionTime.Ticks)) return; VesselOwnershipSystem.Changed(); }
-                    if (!AgencyEconomyStore.Enabled) MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
+                    if (VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled) { var split=(VesselUndockMsgData)messageData; lock(AgencyVesselMap.TransactionGate) if(!VesselOwnershipSystem.CanControl(client,split.VesselId) || !AgencyVesselMap.RestoreSplit(split.VesselId,split.NewVesselId,split.DockedInfoRootPartUId,split.PartFlightId,null,client.UniqueIdentifier,client.ConnectionTime.Ticks)) return; VesselOwnershipSystem.Changed(); }
+                    if (!AgencyEconomyStore.ToolingEnabled) MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 default:
                     throw new NotImplementedException("Vessel message type not implemented");
@@ -107,7 +107,9 @@ namespace Server.Message
                     VesselStoreSystem.RemoveVessel(data.VesselId);
                 }
                 if (existed) CraftCreationAndRemovalLog.LogRemoved(data.VesselId, removedName, client.PlayerName, data.Reason);
-                VesselOwnershipSystem.Changed();MessageQueuer.RelayMessage<VesselSrvMsg>(client,data);return;
+                VesselOwnershipSystem.Changed();
+                if (AgencyEconomyStore.TradeEnabled) AgencyEconomyStore.Broadcast();
+                MessageQueuer.RelayMessage<VesselSrvMsg>(client,data);return;
             }
 
             if (LockSystem.LockQuery.ControlLockExists(data.VesselId) && !LockSystem.LockQuery.ControlLockBelongsToPlayer(data.VesselId, client.PlayerName))
@@ -159,34 +161,35 @@ namespace Server.Message
             {
                 lock(AgencyVesselMap.TransactionGate)
                 {
-                    if(!AgencyVesselMap.Ready || AgencyEconomyStore.Enabled && !AgencyEconomyStore.Ready || AgencyVesselMap.IsAbsorbed(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
+                    if(!AgencyVesselMap.Ready || AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.Ready || AgencyVesselMap.IsAbsorbed(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
                     global::Server.System.Vessel.Classes.Vessel parsed;
                     try { parsed=new global::Server.System.Vessel.Classes.Vessel(vesselText); } catch { return; }
                     if(!Guid.TryParse(parsed.Fields.GetSingle("pid")?.Value,out var parsedId) || parsedId!=msgData.VesselId) return;
+                    if (!VesselStoreSystem.VesselExists(msgData.VesselId) && !AgencyEconomyStore.ValidateTradeEntitlement(client.AgencyId, msgData.TradeEntitlementId, parsed)) return;
                     if(global::Server.Settings.Structures.GeneralSettings.SettingsStore.ModControl && parsed.Parts.GetAllValues().Select(p=>p.Fields.GetSingle("name").Value).Except(ModFileSystem.ModControl.AllowedParts).Any()) return;
-                    if (AgencyEconomyStore.Enabled && AgencyVesselMap.IsSplitParent(msgData.VesselId)) return;
+                    if (AgencyEconomyStore.ToolingEnabled && AgencyVesselMap.IsSplitParent(msgData.VesselId)) return;
                     var topologyChild=AgencyVesselMap.IsPendingSplit(msgData.VesselId) || AgencyVesselMap.Get(msgData.VesselId)!=null;
-                    if (AgencyEconomyStore.Enabled && (VesselStoreSystem.VesselExists(msgData.VesselId) || AgencyVesselMap.IsPendingSplit(msgData.VesselId)) && !AgencyEconomyStore.UpdateCargoBindings(msgData.VesselId, AgencyVesselMap.PartIds(parsed), msgData.EconomyCargo)) return;
+                    if (AgencyEconomyStore.ToolingEnabled && (VesselStoreSystem.VesselExists(msgData.VesselId) || AgencyVesselMap.IsPendingSplit(msgData.VesselId)) && !AgencyEconomyStore.UpdateCargoBindings(msgData.VesselId, AgencyVesselMap.PartIds(parsed), msgData.EconomyCargo)) return;
                     var splitParent = AgencyVesselMap.PendingSplitParent(msgData.VesselId);
                     if (splitParent != Guid.Empty && !AgencyVesselMap.SplitBelongsTo(msgData.VesselId, client.UniqueIdentifier, client.ConnectionTime.Ticks)) return;
                     if (splitParent != Guid.Empty && !VesselOwnershipSystem.CanControl(client, splitParent)) return;
-                    if (AgencyEconomyStore.Enabled && splitParent != Guid.Empty && msgData.EconomySplitOperationId == Guid.Empty) return;
+                    if (AgencyEconomyStore.ToolingEnabled && splitParent != Guid.Empty && msgData.EconomySplitOperationId == Guid.Empty) return;
                     if(!AgencyVesselMap.ResolveSplit(msgData.VesselId,AgencyVesselMap.PartIds(parsed),vesselText,msgData.EconomySplitParentData.Length == 0 ? null : Encoding.UTF8.GetString(msgData.EconomySplitParentData)))
                     {
                         AgencyVesselMap.CancelPendingSplits(client.UniqueIdentifier, client.ConnectionTime.Ticks, msgData.VesselId);
-                        if (AgencyEconomyStore.Enabled && msgData.EconomySplitOperationId != Guid.Empty) AgencyEconomyStore.SendResult(client, new EconomyResult { Operation = EconomyOperation.Split, RequestId = msgData.EconomySplitOperationId, VesselId = msgData.VesselId, Reason = "Split topology does not match authoritative participants." });
+                        if (AgencyEconomyStore.ToolingEnabled && msgData.EconomySplitOperationId != Guid.Empty) AgencyEconomyStore.SendResult(client, new EconomyResult { Operation = EconomyOperation.Split, RequestId = msgData.EconomySplitOperationId, VesselId = msgData.VesselId, Reason = "Split topology does not match authoritative participants." });
                         return;
                     }
-                    if (AgencyEconomyStore.Enabled && splitParent != Guid.Empty) completedSplitParent = splitParent;
+                    if (AgencyEconomyStore.ToolingEnabled && splitParent != Guid.Empty) completedSplitParent = splitParent;
                     var existing=VesselStoreSystem.VesselExists(msgData.VesselId);
-                    if (AgencyEconomyStore.Enabled && !existing && !topologyChild)
+                    if (AgencyEconomyStore.ToolingEnabled && !existing && !topologyChild)
                     {
                         var registration = msgData.EconomyParentVesselId != Guid.Empty ? AgencyEconomyStore.RegisterEva(client, msgData, vesselText, parsed) : AgencyEconomyStore.Register(client, msgData, vesselText, parsed);
                         AgencyEconomyStore.SendResult(client, registration);
                         if (!registration.Success) return;
                     }
                     if(!existing) AgencyVesselMap.RegisterNew(msgData.VesselId,client.AgencyId);
-                    if (AgencyEconomyStore.Enabled && !AgencyEconomyStore.ValidatePublishedParts(msgData.VesselId, AgencyVesselMap.PartIds(parsed))) return;
+                    if (AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.ValidatePublishedParts(msgData.VesselId, AgencyVesselMap.PartIds(parsed))) return;
                     VesselStoreSystem.CurrentVessels[msgData.VesselId]=parsed;
                     if(!existing && !topologyChild)
                     {
@@ -213,7 +216,7 @@ namespace Server.Message
                     msgData.ForceReload = true;
                 }
                 MessageQueuer.RelayMessage<VesselSrvMsg>(client,msgData);
-                if (AgencyEconomyStore.Enabled)
+                if (AgencyEconomyStore.ToolingEnabled)
                 {
                     AgencyEconomyStore.Broadcast();
                     if (msgData.EconomySplitOperationId != Guid.Empty) AgencyEconomyStore.SendResult(client, new EconomyResult { Operation = EconomyOperation.Split, RequestId = msgData.EconomySplitOperationId, VesselId = msgData.VesselId, Success = true });
@@ -313,7 +316,7 @@ namespace Server.Message
         {
             var msgData = (VesselCoupleMsgData)message;
 
-            if(VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled)
+            if(VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled)
             {
                 var removedName = TryGetVesselName(msgData.CoupledVesselId);
                 if(!VesselOwnershipSystem.Couple(client,msgData,out var newlyApplied) || !newlyApplied) return;

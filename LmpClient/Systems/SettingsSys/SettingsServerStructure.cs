@@ -1,4 +1,4 @@
-﻿using CommNet;
+using CommNet;
 using LmpCommon.Enums;
 
 namespace LmpClient.Systems.SettingsSys
@@ -36,6 +36,7 @@ namespace LmpClient.Systems.SettingsSys
         public bool AgencyScansatPerAgency { get; set; }
         public bool AgencyContractsPoolPerAgency { get; set; }
         public bool AgencyTooling;
+        public bool AgencyTrade;
         public double ToolingCostMultiplier = 10;
         public double TooledLaunchMultiplier = 0.1;
         public double ToolingCombineMultiplier = 0.1;

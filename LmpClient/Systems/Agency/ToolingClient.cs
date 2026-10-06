@@ -37,6 +37,8 @@ namespace LmpClient.Systems.Agency
         private const string LaunchLock = "LMP_ToolingLaunch";
         internal static bool ApplyingBalance;
         public static bool Enabled => MainSystem.NetworkState >= ClientState.Handshaking && SettingsSystem.ServerSettings.AgencyTooling;
+        public static bool BalanceAuthorityEnabled => MainSystem.NetworkState >= ClientState.Handshaking && (SettingsSystem.ServerSettings.AgencyTooling || SettingsSystem.ServerSettings.AgencyTrade);
+        public static bool BalanceReady { get { lock (stateLock) return BalanceAuthorityEnabled && snapshot != null && snapshot.Ready && snapshot.AgencyId == AgencySystem.Singleton.MyAgencyId; } }
         public static bool Ready { get { lock (stateLock) return Enabled && snapshot != null && snapshot.Ready && snapshot.AgencyId == AgencySystem.Singleton.MyAgencyId; } }
         public static string LatestStatus { get; private set; }
         public static ToolingQuote EditorQuote { get; private set; }
@@ -55,7 +57,7 @@ namespace LmpClient.Systems.Agency
         internal static void Receive(EconomySnapshot value) { if (value != null) snapshots.Enqueue(value); }
         internal static void Receive(EconomyResult value) { if (value != null) results.Enqueue(value); }
         public static void RequestQuoteRefresh() { nextQuote = DateTime.MinValue; }
-        private static Guid Send(EconomyCommand command)
+        internal static Guid Send(EconomyCommand command)
         {
             if (command.RequestId == Guid.Empty) command.RequestId = Guid.NewGuid();
             lock (stateLock)
@@ -130,7 +132,7 @@ namespace LmpClient.Systems.Agency
         internal static void ApplyCachedBalance()
         {
             EconomySnapshot state; lock (stateLock) state = snapshot;
-            if (!Enabled || state == null || !state.Ready) return;
+            if (!BalanceAuthorityEnabled || state == null || !state.Ready) return;
             ApplyingBalance = true;
             try
             {
@@ -190,7 +192,7 @@ namespace LmpClient.Systems.Agency
         }
         internal static void SendDelta(double funds, double science)
         {
-            if (!Enabled || ApplyingBalance || funds == 0 && science == 0) return;
+            if (!BalanceAuthorityEnabled || ApplyingBalance || funds == 0 && science == 0) return;
             Send(new EconomyCommand { Operation = EconomyOperation.Delta, FundsDelta = funds, ScienceDelta = science });
         }
         internal static PaidVesselRecord PaidVessel(Guid id)
@@ -217,12 +219,13 @@ namespace LmpClient.Systems.Agency
             if (splitting != null && DateTime.UtcNow > splitting.Deadline) { RecoveryDisconnect("Split confirmation timed out."); return; }
             while (snapshots.TryDequeue(out var state))
             {
-                if (!Enabled || state.AgencyId != AgencySystem.Singleton.MyAgencyId || state.Revision < revision) continue;
+                if (!BalanceAuthorityEnabled || state.AgencyId != AgencySystem.Singleton.MyAgencyId || state.Revision < revision) continue;
                 lock (stateLock)
                 {
                     if (economySession != state.SessionId) { economySession = state.SessionId; nextSequence = state.LastSequence; }
                     else nextSequence = Math.Max(nextSequence, state.LastSequence);
                     snapshot = state; revision = state.Revision;
+                    TradeClient.Receive(state);
                 }
                 ApplyingBalance = true;
                 try
@@ -233,7 +236,8 @@ namespace LmpClient.Systems.Agency
                 finally { ApplyingBalance = false; }
                 RequestQuoteRefresh();
             }
-            while (results.TryDequeue(out var result)) Handle(result);
+            while (results.TryDequeue(out var result)) { TradeClient.HandleResult(result); Handle(result); }
+            TradeClient.Tick();
             if (settlementDeadline != default(DateTime) && DateTime.UtcNow > settlementDeadline)
             {
                 settlementDeadline = default(DateTime);
@@ -253,6 +257,7 @@ namespace LmpClient.Systems.Agency
         }
         private static void Handle(EconomyResult result)
         {
+            if (BalanceAuthorityEnabled && result.RecoveryRequired) { RecoveryDisconnect(result.Reason); return; }
             if (!Enabled) return;
             LatestStatus = result.Reason;
             if (HandleBoarding(result) || HandleSplit(result)) return;

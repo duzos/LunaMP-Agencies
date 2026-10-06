@@ -79,6 +79,7 @@ namespace LmpClient.Systems.Agency
             System.VesselAgencyMap.Clear();
             for (int i = 0; i < data.VesselIds.Length; i++)
                 System.VesselAgencyMap[data.VesselIds[i]] = data.AgencyIds[i];
+            foreach (var vessel in data.VesselIds) TradeClient.Registered(vessel);
             LunaLog.Log($"[Agency] VesselMapSync received: {data.VesselIds.Length} vessels.");
         }
 
@@ -86,6 +87,7 @@ namespace LmpClient.Systems.Agency
         {
             System.InvalidateCommNet();
             System.ApplyOwnershipEntry(data);
+            if (data.AgencyId != global::System.Guid.Empty) TradeClient.Registered(data.VesselId);
             if (data.AgencyId == global::System.Guid.Empty)
                 System.VesselAgencyMap.TryRemove(data.VesselId, out _);
             else

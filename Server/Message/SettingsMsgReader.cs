@@ -1,4 +1,4 @@
-﻿using LmpCommon.Enums;
+using LmpCommon.Enums;
 using LmpCommon.Message.Data.Settings;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Server;
@@ -49,6 +49,7 @@ namespace Server.Message
             msgData.AgencyVesselOwnership = GeneralSettings.SettingsStore.AgencyVesselOwnership;
             msgData.AgencyCommNetOptIn = GeneralSettings.SettingsStore.AgencyCommNetOptIn && GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
             msgData.AgencyTooling = GeneralSettings.SettingsStore.AgencyTooling;
+            msgData.AgencyTrade = GeneralSettings.SettingsStore.AgencyTrade;
             msgData.ToolingCostMultiplier = GeneralSettings.SettingsStore.ToolingCostMultiplier;
             msgData.TooledLaunchMultiplier = GeneralSettings.SettingsStore.TooledLaunchMultiplier;
             msgData.ToolingCombineMultiplier = GeneralSettings.SettingsStore.ToolingCombineMultiplier;

@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpClient.Systems.ShareCareer;
 using LmpCommon.Message.Data.ShareProgress;
@@ -14,7 +14,7 @@ namespace LmpClient.Systems.ShareFunds
 
         public void HandleMessage(IServerMessageBase msg)
         {
-            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return;
+            if (LmpClient.Systems.Agency.ToolingClient.BalanceAuthorityEnabled) return;
             if (!(msg.Data is ShareProgressBaseMsgData msgData)) return;
             if (msgData.ShareProgressMessageType != ShareProgressMessageType.FundsUpdate) return;
 

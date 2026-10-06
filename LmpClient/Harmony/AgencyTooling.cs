@@ -82,14 +82,14 @@ namespace LmpClient.Harmony
         private static bool Funds(out CurrencyChange __state)
         {
             __state = null;
-            if (!ToolingClient.Enabled) return true;
+            if (!ToolingClient.BalanceAuthorityEnabled) return true;
             if (recovery != null) return false; // Recovery is paid once by the durable server settlement.
             __state = BeginCurrency(false, Funding.Instance.Funds, ShareFundsSystem.Singleton.IgnoreEvents);
             return true;
         }
         private static void Science(out CurrencyChange __state)
         {
-            __state = ToolingClient.Enabled ? BeginCurrency(true, ResearchAndDevelopment.Instance.Science, ShareScienceSystem.Singleton.IgnoreEvents) : null;
+            __state = ToolingClient.BalanceAuthorityEnabled ? BeginCurrency(true, ResearchAndDevelopment.Instance.Science, ShareScienceSystem.Singleton.IgnoreEvents) : null;
         }
         private static CurrencyChange BeginCurrency(bool science, double before, bool ignore)
         {

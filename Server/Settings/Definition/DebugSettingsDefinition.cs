@@ -1,4 +1,4 @@
-﻿using LmpCommon.Xml;
+using LmpCommon.Xml;
 using System;
 
 namespace Server.Settings.Definition
@@ -6,6 +6,9 @@ namespace Server.Settings.Definition
     [Serializable]
     public class DebugSettingsDefinition
     {
+        [XmlComment(Value = "Opt-in bounded playtest diagnostics. Logs structural decisions, build identity and data paths; no packet payloads.")]
+        public bool VerboseDiagnostics { get; set; } = false;
+
         [XmlComment(Value = "A percentage value to simulate the probability of a packet loss. From 0.0% to 100.0%")]
         public float SimulatedLossChance { get; set; } = 0;
 

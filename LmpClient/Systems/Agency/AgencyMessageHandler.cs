@@ -16,6 +16,7 @@ namespace LmpClient.Systems.Agency
         {
             if (!(msg.Data is AgencyBaseMsgData data)) return;
 
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.receive", () => $"subtype={data.AgencyMessageType} agency={System.MyAgencyId}", traffic: true);
             switch (data.AgencyMessageType)
             {
                 case AgencyMessageType.SrvSyncAll:
@@ -46,6 +47,7 @@ namespace LmpClient.Systems.Agency
                     LunaLog.LogWarning($"[Agency] Unhandled Srv subtype {data.AgencyMessageType}");
                     break;
             }
+            LmpClient.Diagnostics.PlaytestDiagnostics.RequestSnapshot();
         }
 
         private static void Handle(AgencyVesselMapSyncMsgData data)
@@ -72,6 +74,7 @@ namespace LmpClient.Systems.Agency
                 if (a != null) System.KnownAgencies[a.Id] = a;
             }
             System.MyAgencyId = data.MyAgencyId;
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.sync-applied", () => $"agency={data.MyAgencyId} count={data.Agencies.Length}");
             LunaLog.Log($"[Agency] SyncAll received: {data.Agencies.Length} agencies; mine={data.MyAgencyId}");
         }
 
@@ -79,6 +82,7 @@ namespace LmpClient.Systems.Agency
         {
             if (data.Agency == null) return;
             System.KnownAgencies[data.Agency.Id] = data.Agency;
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.upsert-applied", () => $"agency={data.Agency.Id} members={data.Agency.MemberUniqueIds?.Length ?? 0} funds={data.Agency.Funds} science={data.Agency.Science} reputation={data.Agency.Reputation}");
 
             // If the local player is now a member of this agency and was
             // previously in another, update MyAgencyId so the UI reflects it.
@@ -110,6 +114,7 @@ namespace LmpClient.Systems.Agency
 
         private static void Handle(AgencyJoinRequestResolvedMsgData data)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.join-resolved", () => $"agency={data.AgencyId} approved={data.Approved} localPlayer={data.PlayerUniqueId == MainSystem.UniqueIdentifier}");
             lock (System.RequestsLock)
             {
                 System.PendingIncomingRequests.RemoveAll(r => r.AgencyId == data.AgencyId && r.PlayerUniqueId == data.PlayerUniqueId);
@@ -127,6 +132,7 @@ namespace LmpClient.Systems.Agency
 
         private static void Handle(AgencyReplyMsgData data)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.reply", () => $"success={data.Success} messagePresent={!string.IsNullOrEmpty(data.Message)} agency={System.MyAgencyId}");
             if (!string.IsNullOrEmpty(data.Message))
                 System.PendingServerMessages.Enqueue((data.Success ? "OK: " : "Err: ") + data.Message);
             LunaLog.Log($"[Agency] Reply success={data.Success} msg={data.Message}");

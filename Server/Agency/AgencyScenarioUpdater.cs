@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LunaConfigNode.CfgNode;
 using Server.Log;
 using Server.System.Scenario;
@@ -33,9 +34,11 @@ namespace Server.Agency
                     {
                         AgencyScenarioStore.AddOrUpdate(agencyId, moduleName, node);
                     }
+                    PlaytestDiagnostics.Write("scenario.apply", () => $"agency={agencyId} module={moduleName} route=agency result=applied-in-memory");
                 }
                 catch (Exception e)
                 {
+                    PlaytestDiagnostics.Write("scenario.apply", () => $"agency={agencyId} module={moduleName} route=agency result=failed errorType={e.GetType().Name}");
                     LunaLog.Warning($"[Agency] Failed to upsert agency scenario {moduleName} for {agencyId}: {e.Message}");
                 }
             });

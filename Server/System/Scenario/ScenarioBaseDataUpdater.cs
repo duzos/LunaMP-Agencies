@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LunaConfigNode.CfgNode;
 using Server.Log;
 using System;
@@ -47,10 +48,19 @@ namespace Server.System.Scenario
         {
             _ = Task.Run(() =>
             {
-                var scenario = ParseClientConfigNode(scenarioAsConfigNode, scenarioModule);
-                lock (Semaphore.GetOrAdd(scenarioModule, new object()))
+                try
                 {
-                    ScenarioStoreSystem.CurrentScenarios.AddOrUpdate(scenarioModule, scenario, (key, existingVal) => scenario);
+                    var scenario = ParseClientConfigNode(scenarioAsConfigNode, scenarioModule);
+                    lock (Semaphore.GetOrAdd(scenarioModule, new object()))
+                    {
+                        ScenarioStoreSystem.CurrentScenarios.AddOrUpdate(scenarioModule, scenario, (key, existingVal) => scenario);
+                    }
+                    PlaytestDiagnostics.Write("scenario.apply", () => $"module={scenarioModule} route=global result=applied-in-memory");
+                }
+                catch (Exception e)
+                {
+                    PlaytestDiagnostics.Write("scenario.apply", () => $"module={scenarioModule} route=global result=failed errorType={e.GetType().Name}");
+                    LunaLog.Warning($"Failed to upsert global scenario {scenarioModule}: {e.GetType().Name}");
                 }
             });
         }

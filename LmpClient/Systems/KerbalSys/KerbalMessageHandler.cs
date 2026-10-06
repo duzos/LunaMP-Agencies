@@ -62,6 +62,7 @@ namespace LmpClient.Systems.KerbalSys
         /// <param name="messageData"></param>
         private static void HandleKerbalReply(KerbalReplyMsgData messageData)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.kerbal.roster-received", () => $"count={messageData.KerbalsCount}");
             for (var i = 0; i < messageData.KerbalsCount; i++)
             {
                 ProcessKerbal(messageData.Kerbals[i].KerbalData, messageData.Kerbals[i].NumBytes);

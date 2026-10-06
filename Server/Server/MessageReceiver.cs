@@ -1,4 +1,5 @@
-﻿using Lidgren.Network;
+using Server.Diagnostics;
+using Lidgren.Network;
 using LmpCommon;
 using LmpCommon.Enums;
 using LmpCommon.Message.Interface;
@@ -57,10 +58,16 @@ namespace Server.Server
 
             LmpPluginHandler.FireOnMessageReceived(client, message);
             //A plugin has handled this message and requested suppression of the default behavior
-            if (message.Handled) return;
+            if (message.Handled)
+            {
+                PlaytestDiagnostics.Write("receive.suppressed", () => $"{PlaytestDiagnostics.Client(client)} type={message.MessageType} reason=plugin", true);
+                return;
+            }
+            PlaytestDiagnostics.Write("receive.route", () => $"{PlaytestDiagnostics.Client(client)} type={message.MessageType} dataType={message.Data?.GetType().Name}", true);
 
             if (message.VersionMismatch)
             {
+                PlaytestDiagnostics.Write("receive.reject", () => $"{PlaytestDiagnostics.Client(client)} type={message.MessageType} reason=version-mismatch");
                 MessageQueuer.SendConnectionEnd(client, $"Version mismatch: Your version ({message.Data.MajorVersion}.{message.Data.MinorVersion}.{message.Data.BuildVersion}) " +
                                                         $"does not match the server version: {LmpVersioning.CurrentVersion}.");
                 return;
@@ -69,6 +76,7 @@ namespace Server.Server
             //Clients can only send HANDSHAKE until they are Authenticated.
             if (!client.Authenticated && message.MessageType != ClientMessageType.Handshake)
             {
+                PlaytestDiagnostics.Write("receive.reject", () => $"{PlaytestDiagnostics.Client(client)} type={message.MessageType} reason=unauthenticated");
                 MessageQueuer.SendConnectionEnd(client, $"You must authenticate before sending a {message.MessageType} message");
                 return;
             }
@@ -80,6 +88,7 @@ namespace Server.Server
             }
             catch (Exception e)
             {
+                PlaytestDiagnostics.Write("receive.error", () => $"{PlaytestDiagnostics.Client(client)} type={message.MessageType} errorType={e.GetType().Name}");
                 LunaLog.Error($"Error handling a message from {client.PlayerName}! {e}");
             }
         }

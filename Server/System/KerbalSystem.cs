@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LmpCommon.Message.Data.Kerbal;
 using LmpCommon.Message.Server;
 using Server.Agency;
@@ -26,6 +27,7 @@ namespace Server.System
 
         public static void HandleKerbalProto(ClientStructure client, KerbalProtoMsgData data)
         {
+            PlaytestDiagnostics.Write("kerbal.proto", () => $"{PlaytestDiagnostics.Client(client)} route={(GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty ? "agency" : "global")}");
             if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty)
             {
                 // Write into the agency's private kerbal folder and only relay
@@ -82,12 +84,14 @@ namespace Server.System
             var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<KerbalReplyMsgData>();
             msgData.Kerbals = kerbalsData.ToArray();
             msgData.KerbalsCount = msgData.Kerbals.Length;
+            PlaytestDiagnostics.Write("kerbal.roster", () => $"{PlaytestDiagnostics.Client(client)} route={(GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty ? "agency" : "global")} count={msgData.KerbalsCount}");
 
             MessageQueuer.SendToClient<KerbalSrvMsg>(client, msgData);
         }
 
         public static void HandleKerbalRemove(ClientStructure client, KerbalRemoveMsgData message)
         {
+            PlaytestDiagnostics.Write("kerbal.remove", () => $"{PlaytestDiagnostics.Client(client)} route={(GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty ? "agency" : "global")}");
             var kerbalToRemove = message.KerbalName;
 
             if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty)

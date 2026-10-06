@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LmpCommon.Enums;
 using LunaConfigNode.CfgNode;
 using Server.Log;
@@ -25,6 +26,7 @@ namespace Server.Agency
         {
             if (AgencyStore.Agencies.Any())
             {
+                PlaytestDiagnostics.Write("agency.migration", () => "result=skipped reason=existing-agencies");
                 LunaLog.Debug("[Agency] Migration skipped: agencies already exist.");
                 return;
             }
@@ -32,6 +34,7 @@ namespace Server.Agency
             // Only migrate career-mode state. Sandbox/Science stay global.
             if (GeneralSettings.SettingsStore.GameMode == GameMode.Sandbox)
             {
+                PlaytestDiagnostics.Write("agency.migration", () => "result=skipped reason=sandbox");
                 LunaLog.Debug("[Agency] Migration skipped: sandbox game mode.");
                 return;
             }
@@ -71,6 +74,7 @@ namespace Server.Agency
             AgencyScenarioStore.BackupAgency(agency.Id);
             AgencyStore.PersistAgency(agency);
 
+            PlaytestDiagnostics.Write("agency.migration", () => $"result=created agency={agency.Id} root={AgencyStore.AgenciesPath} funds={agency.Funds} science={agency.Science} reputation={agency.Reputation}");
             LunaLog.Info($"[Agency] Migration complete: Default Agency id={agency.Id} funds={agency.Funds} sci={agency.Science} rep={agency.Reputation}. Existing players will be auto-enrolled into solo agencies on first connect; use the admin console to move them into the Default Agency if desired.");
         }
 

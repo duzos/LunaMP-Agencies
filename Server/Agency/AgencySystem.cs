@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LmpCommon.Agency;
 using Server.Client;
 using Server.Context;
@@ -395,22 +396,28 @@ namespace Server.Agency
             Guid fromAgencyId, Guid toAgencyId, ResourceKind kind, double amount,
             string actorUniqueId, bool isAdmin)
         {
-            if (amount <= 0) return (false, "Amount must be positive.");
-            if (fromAgencyId == toAgencyId) return (false, "Source and destination are the same.");
+            (bool Success, string Message) Result(bool success, string reason)
+            {
+                PlaytestDiagnostics.Write("agency.transfer.result", () => $"source={fromAgencyId} target={toAgencyId} kind={kind} amount={amount} success={success} reason={reason}");
+                return (success, reason);
+            }
+
+            if (amount <= 0) return Result(false, "Amount must be positive.");
+            if (fromAgencyId == toAgencyId) return Result(false, "Source and destination are the same.");
 
             var src = GetAgency(fromAgencyId);
             var dst = GetAgency(toAgencyId);
-            if (src == null) return (false, "Source agency not found.");
-            if (dst == null) return (false, "Destination agency not found.");
+            if (src == null) return Result(false, "Source agency not found.");
+            if (dst == null) return Result(false, "Destination agency not found.");
 
             if (!isAdmin && !src.HasMember(actorUniqueId))
-                return (false, "You must be a member of the source agency.");
+                return Result(false, "You must be a member of the source agency.");
 
             switch (kind)
             {
                 case ResourceKind.Funds:
                     {
-                        if (src.Funds < amount) return (false, "Insufficient funds.");
+                        if (src.Funds < amount) return Result(false, "Insufficient funds.");
                         var srcBefore = src.Funds;
                         var dstBefore = dst.Funds;
                         SetAgencyFunds(src, srcBefore - amount, $"transfer->{dst.Name}");
@@ -420,12 +427,12 @@ namespace Server.Agency
                         AgencyScenarioUpdater.WriteFunds(dst.Id, dst.Funds);
                         AgencyFanout.PushFundsToMembers(dst, dst.Funds, $"transfer from {src.Name}");
                         LunaLog.Info($"[Agency] Transfer Funds amount={amount} from='{src.Name}' to='{dst.Name}' actor={actorUniqueId}");
-                        return (true, $"Sent {amount:N0} funds to '{dst.Name}'.");
+                        return Result(true, $"Sent {amount:N0} funds to '{dst.Name}'.");
                     }
                 case ResourceKind.Science:
                     {
                         var fAmount = (float)amount;
-                        if (src.Science < fAmount) return (false, "Insufficient science.");
+                        if (src.Science < fAmount) return Result(false, "Insufficient science.");
                         var srcBefore = src.Science;
                         var dstBefore = dst.Science;
                         SetAgencyScience(src, srcBefore - fAmount, $"transfer->{dst.Name}");
@@ -435,10 +442,10 @@ namespace Server.Agency
                         AgencyScenarioUpdater.WriteScience(dst.Id, dst.Science);
                         AgencyFanout.PushScienceToMembers(dst, dst.Science);
                         LunaLog.Info($"[Agency] Transfer Science amount={fAmount} from='{src.Name}' to='{dst.Name}' actor={actorUniqueId}");
-                        return (true, $"Sent {fAmount:N1} science to '{dst.Name}'.");
+                        return Result(true, $"Sent {fAmount:N1} science to '{dst.Name}'.");
                     }
                 default:
-                    return (false, $"Transfer of {kind} is not supported.");
+                    return Result(false, $"Transfer of {kind} is not supported.");
             }
         }
 
@@ -486,6 +493,7 @@ namespace Server.Agency
                 agency.Funds = value;
             }
             AgencyStore.PersistAgency(agency);
+            PlaytestDiagnostics.Write("agency.resource.funds", () => $"agency={agency.Id} before={before} after={value}");
             LunaLog.Info($"[Agency] SetFunds agency='{agency.Name}' before={before} after={value} reason={reason}");
             AgencyNetwork.BroadcastUpsert(agency);
         }
@@ -500,6 +508,7 @@ namespace Server.Agency
                 agency.Science = value;
             }
             AgencyStore.PersistAgency(agency);
+            PlaytestDiagnostics.Write("agency.resource.science", () => $"agency={agency.Id} before={before} after={value}");
             LunaLog.Info($"[Agency] SetScience agency='{agency.Name}' before={before} after={value} reason={reason}");
             AgencyNetwork.BroadcastUpsert(agency);
         }
@@ -514,6 +523,7 @@ namespace Server.Agency
                 agency.Reputation = value;
             }
             AgencyStore.PersistAgency(agency);
+            PlaytestDiagnostics.Write("agency.resource.reputation", () => $"agency={agency.Id} before={before} after={value}");
             LunaLog.Info($"[Agency] SetReputation agency='{agency.Name}' before={before} after={value} reason={reason}");
             AgencyNetwork.BroadcastUpsert(agency);
         }

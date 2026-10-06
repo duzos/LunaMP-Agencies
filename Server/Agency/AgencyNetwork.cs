@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LmpCommon.Agency;
 using LmpCommon.Message.Data.Agency;
 using LmpCommon.Message.Interface;
@@ -28,11 +29,14 @@ namespace Server.Agency
         {
             if (data == null || agencyId == Guid.Empty) return;
 
+            var recipients = 0;
             foreach (var client in GetOnlineAgencyMembers(agencyId))
             {
                 if (exceptClient != null && Equals(client, exceptClient)) continue;
                 MessageQueuer.SendToClient<T>(client, data);
+                recipients++;
             }
+            PlaytestDiagnostics.Write("agency.fanout", () => $"agency={agencyId} type={typeof(T).Name} dataType={data.GetType().Name} recipients={recipients}", true);
         }
 
         public static IEnumerable<ClientStructure> GetOnlineAgencyMembers(Guid agencyId)
@@ -108,6 +112,8 @@ namespace Server.Agency
         {
             if (client == null) return;
             var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencySyncAllMsgData>();
+            PlaytestDiagnostics.Write("agency.sync", () => $"{PlaytestDiagnostics.Client(client)} agencies={AgencyStore.Agencies.Count}");
+            PlaytestDiagnostics.AgencySnapshot(client);
             data.MyAgencyId = client.AgencyId;
             data.Agencies = AgencyStore.Agencies.Values.Select(a => a.ToInfo()).ToArray();
             MessageQueuer.SendToClient<AgencySrvMsg>(client, data);
@@ -117,6 +123,7 @@ namespace Server.Agency
         {
             if (client == null) return;
             var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyReplyMsgData>();
+            PlaytestDiagnostics.Write("agency.reply", () => $"{PlaytestDiagnostics.Client(client)} success={success}");
             data.Success = success;
             data.Message = message ?? string.Empty;
             MessageQueuer.SendToClient<AgencySrvMsg>(client, data);

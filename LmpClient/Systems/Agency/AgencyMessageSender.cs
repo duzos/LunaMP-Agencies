@@ -14,6 +14,7 @@ namespace LmpClient.Systems.Agency
     {
         public void SendMessage(IMessageData msg)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.send", () => $"subtype={(msg as AgencyBaseMsgData)?.AgencyMessageType} agency={System.MyAgencyId}", traffic: true);
             TaskFactory.StartNew(() => NetworkSender.QueueOutgoingMessage(MessageFactory.CreateNew<AgencyCliMsg>(msg)));
         }
 
@@ -26,6 +27,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendRename(Guid agencyId, string newName)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.action", () => $"action=SendRename target={agencyId}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyRenameMsgData>();
             d.AgencyId = agencyId;
             d.NewName = newName ?? string.Empty;
@@ -34,6 +36,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendJoinRequest(Guid agencyId)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.action", () => $"action=SendJoinRequest target={agencyId}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyJoinRequestMsgData>();
             d.AgencyId = agencyId;
             SendMessage(d);
@@ -47,6 +50,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendApproveJoin(Guid agencyId, string playerUniqueId)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.action", () => $"action=SendApproveJoin target={agencyId}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyApproveJoinMsgData>();
             d.AgencyId = agencyId;
             d.PlayerUniqueId = playerUniqueId ?? string.Empty;
@@ -55,6 +59,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendRejectJoin(Guid agencyId, string playerUniqueId)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.action", () => $"action=SendRejectJoin target={agencyId}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyRejectJoinMsgData>();
             d.AgencyId = agencyId;
             d.PlayerUniqueId = playerUniqueId ?? string.Empty;
@@ -63,6 +68,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendKick(Guid agencyId, string playerUniqueId)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.action", () => $"action=SendKick target={agencyId}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyKickMemberMsgData>();
             d.AgencyId = agencyId;
             d.PlayerUniqueId = playerUniqueId ?? string.Empty;
@@ -71,6 +77,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendTransferOwner(Guid agencyId, string newOwnerUniqueId)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.action", () => $"action=SendTransferOwner target={agencyId}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyTransferOwnerMsgData>();
             d.AgencyId = agencyId;
             d.NewOwnerUniqueId = newOwnerUniqueId ?? string.Empty;
@@ -79,6 +86,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendCancelJoinRequest(Guid agencyId)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.action", () => $"action=SendCancelJoinRequest target={agencyId}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyCancelJoinRequestMsgData>();
             d.AgencyId = agencyId;
             SendMessage(d);
@@ -86,6 +94,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendTransferResources(Guid fromAgencyId, Guid toAgencyId, ResourceKind kind, double amount)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.transfer-request", () => $"from={fromAgencyId} to={toAgencyId} kind={kind} amount={amount}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyTransferResourcesMsgData>();
             d.FromAgencyId = fromAgencyId;
             d.ToAgencyId = toAgencyId;
@@ -96,6 +105,7 @@ namespace LmpClient.Systems.Agency
 
         public void SendAdminOp(string adminPassword, AgencyAdminOp op, Guid targetAgency, string stringArg, double numericArg)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.admin-request", () => $"op={op} target={targetAgency}");
             var d = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencyAdminOpMsgData>();
             d.AdminPassword = adminPassword ?? string.Empty;
             d.Op = op;

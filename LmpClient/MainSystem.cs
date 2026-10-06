@@ -51,7 +51,13 @@ namespace LmpClient
                 {
                     NetworkMain.ResetNetworkSystem();
                 }
+                var previousState = _networkState;
                 _networkState = value;
+                if (previousState != value)
+                {
+                    PlaytestDiagnostics.Write("client.network.transition", () => $"from={previousState} to={value}");
+                    PlaytestDiagnostics.RequestSnapshot();
+                }
                 NetworkSystem.NetworkStatus = value;
             }
         }
@@ -133,6 +139,7 @@ namespace LmpClient
         public void Update()
         {
             LunaLog.ProcessLogMessages();
+            PlaytestDiagnostics.PumpUnitySnapshot();
             LunaScreenMsg.ProcessScreenMessages();
 
             //Heartbeat runs BEFORE the Enabled gate so it still emits when LMP
@@ -295,6 +302,7 @@ namespace LmpClient
 
             FieldModuleStore.ReadCustomizationXml();
             LmpBaseEvent.Awake();
+            PlaytestDiagnostics.Configure(SettingsSystem.CurrentSettings.VerboseDiagnostics);
             HarmonyPatcher.Awake();
             PartModuleRunner.Awake();
             SetupDirectoriesIfNeeded();

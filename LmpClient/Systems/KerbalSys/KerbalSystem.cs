@@ -206,6 +206,7 @@ namespace LmpClient.Systems.KerbalSys
                     // FormatException) cannot abort the whole queue and strand the player at connect
                     // inside MainSystem.StartGameNow. The full node is logged so the offending value
                     // can be identified from the log without a debugger.
+                    LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.kerbal.apply-error", () => $"exception={e.GetType().Name} remaining={KerbalsToProcess.Count}");
                     var kerbalName = kerbalNode?.GetValue("name") ?? "<unknown>";
                     LunaLog.LogError($"[LMP]: Failed to load kerbal '{kerbalName}' from server data; skipping it. " +
                                      $"Exception: {e}{Environment.NewLine}Kerbal node:{Environment.NewLine}{kerbalNode}");
@@ -272,6 +273,7 @@ namespace LmpClient.Systems.KerbalSys
             var protoCrew = new ProtoCrewMember(HighLogic.CurrentGame.Mode, crewNode);
             if (string.IsNullOrEmpty(protoCrew.name))
             {
+                LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.kerbal.skip", () => "reason=blank-name");
                 LunaLog.LogError("[LMP]: protoName is blank!");
                 return;
             }
@@ -281,10 +283,12 @@ namespace LmpClient.Systems.KerbalSys
             if (existingKerbal == null)
             {
                 HighLogic.CurrentGame.CrewRoster.AddCrewMember(protoCrew);
+                LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.kerbal.applied", () => $"branch=insert roster={HighLogic.CurrentGame.CrewRoster.Crew.Count()} remaining={KerbalsToProcess.Count}");
             }
             else
             {
                 UpdateKerbalData(crewNode, existingKerbal);
+                LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.kerbal.applied", () => $"branch=update roster={HighLogic.CurrentGame.CrewRoster.Crew.Count()} remaining={KerbalsToProcess.Count}");
             }
         }
 

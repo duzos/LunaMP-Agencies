@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LmpCommon.Message.Data.Agency;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
@@ -14,6 +15,7 @@ namespace Server.Message
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
             var data = (AgencyBaseMsgData)message.Data;
+            PlaytestDiagnostics.Write("agency.request", () => $"{PlaytestDiagnostics.Client(client)} subtype={data.AgencyMessageType}");
             switch (data.AgencyMessageType)
             {
                 case AgencyMessageType.CliCreate:
@@ -117,6 +119,7 @@ namespace Server.Message
             var source = data.FromAgencyId != global::System.Guid.Empty ? data.FromAgencyId : client.AgencyId;
             if (source != client.AgencyId)
             {
+                PlaytestDiagnostics.Write("agency.transfer.reject", () => $"{PlaytestDiagnostics.Client(client)} source={source} target={data.ToAgencyId} reason=source-membership");
                 AgencyNetwork.SendReply(client, false, "You can only send resources from your own agency.");
                 return;
             }
@@ -129,6 +132,7 @@ namespace Server.Message
         {
             if (!IsAuthenticatedAdmin(client, data.AdminPassword))
             {
+                PlaytestDiagnostics.Write("agency.admin.reject", () => $"{PlaytestDiagnostics.Client(client)} operation={data.Op} reason=admin-authentication");
                 LunaLog.Warning($"[Agency] Rejected admin op {data.Op} from {client.PlayerName}: bad password");
                 AgencyNetwork.SendReply(client, false, "Admin password rejected.");
                 return;

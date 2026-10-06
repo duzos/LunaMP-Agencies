@@ -1,4 +1,5 @@
-﻿using LmpCommon.Message.Interface;
+using Server.Diagnostics;
+using LmpCommon.Message.Interface;
 using Server.Client;
 using Server.Context;
 using System;
@@ -60,8 +61,13 @@ namespace Server.Server
         {
             if (data == null || agencyId == Guid.Empty) return;
 
+            var recipients = 0;
             foreach (var otherClient in ServerContext.Clients.Values.Where(c => c.AgencyId == agencyId && !Equals(c, exceptClient)))
+            {
                 SendToClient(otherClient, GenerateMessage<T>(data));
+                recipients++;
+            }
+            PlaytestDiagnostics.Write("send.fanout", () => $"agency={agencyId} route=agency type={typeof(T).Name} dataType={data.GetType().Name} recipients={recipients}", true);
         }
 
         /// <summary>
@@ -71,8 +77,13 @@ namespace Server.Server
         {
             if (data == null || agencyId == Guid.Empty) return;
 
+            var recipients = 0;
             foreach (var otherClient in ServerContext.Clients.Values.Where(c => c.AgencyId == agencyId))
+            {
                 SendToClient(otherClient, GenerateMessage<T>(data));
+                recipients++;
+            }
+            PlaytestDiagnostics.Write("send.fanout", () => $"agency={agencyId} route=agency type={typeof(T).Name} dataType={data.GetType().Name} recipients={recipients}", true);
         }
 
         /// <summary>

@@ -9,6 +9,8 @@ namespace LmpClient.Systems.SettingsSys
     [Serializable]
     public class SettingStructure
     {
+        public bool VerboseDiagnostics { get; set; } = false;
+
         public string Language { get; set; } = "English";
         public string PlayerName { get; set; } = "Player";
         public int ConnectionTries { get; set; } = 3;

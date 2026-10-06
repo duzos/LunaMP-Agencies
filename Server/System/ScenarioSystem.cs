@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using LmpCommon.Enums;
 using LmpCommon.Message.Data.Scenario;
 using LmpCommon.Message.Server;
@@ -107,10 +108,12 @@ namespace Server.System
                     && agencyDict.TryGetValue(moduleName, out var agencyNode) && agencyNode != null)
                 {
                     text = agencyNode.ToString();
+                    PlaytestDiagnostics.Write("scenario.send", () => $"{PlaytestDiagnostics.Client(client)} module={moduleName} route=agency root={AgencyScenarioStore.AgencyScenariosPath(client.AgencyId)}", true);
                 }
                 else
                 {
                     text = ScenarioStoreSystem.GetScenarioInConfigNodeFormat(moduleName);
+                    PlaytestDiagnostics.Write("scenario.send", () => $"{PlaytestDiagnostics.Client(client)} module={moduleName} route=global root={ScenariosPath}", true);
                 }
 
                 if (string.IsNullOrEmpty(text)) continue;
@@ -172,6 +175,7 @@ namespace Server.System
                 // messages. Drop the client's snapshot.
                 if (DeltaManagedModules.Contains(moduleName))
                 {
+                    PlaytestDiagnostics.Write("scenario.upload", () => $"{PlaytestDiagnostics.Client(client)} module={moduleName} result=ignored reason=delta-managed");
                     LunaLog.Debug($"[Agency] Ignoring scenario upload for delta-managed module '{moduleName}' from {client.PlayerName}");
                     continue;
                 }
@@ -186,10 +190,12 @@ namespace Server.System
                 {
                     LunaLog.Debug($"[Agency] Storing scenario upload '{moduleName}' from {client.PlayerName} into agency {client.AgencyId}");
                     AgencyScenarioUpdater.RawConfigNodeInsertOrUpdate(client.AgencyId, moduleName, scenarioAsConfigNode);
+                    PlaytestDiagnostics.Write("scenario.upload", () => $"{PlaytestDiagnostics.Client(client)} module={moduleName} result=queued route=agency root={AgencyScenarioStore.AgencyScenariosPath(client.AgencyId)}");
                     continue;
                 }
 
                 ScenarioDataUpdater.RawConfigNodeInsertOrUpdate(moduleName, scenarioAsConfigNode);
+                PlaytestDiagnostics.Write("scenario.upload", () => $"{PlaytestDiagnostics.Client(client)} module={moduleName} result=queued route=global root={ScenariosPath}");
             }
         }
     }

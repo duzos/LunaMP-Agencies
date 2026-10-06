@@ -19,6 +19,7 @@ namespace LmpClient.Systems.ShareFunds
 
             if (msgData is ShareProgressFundsMsgData data)
             {
+                LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.funds.queued", () => $"funds={data.Funds}", traffic: true);
                 var funds = data.Funds; //create a copy of the funds value so it will not change in the future.
                 LunaLog.Log($"Queue FundsUpdate with: {funds}");
                 ShareCareerSystem.Singleton.QueueAction(() =>

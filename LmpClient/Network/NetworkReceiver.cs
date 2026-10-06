@@ -146,6 +146,7 @@ namespace LmpClient.Network
         /// </summary>
         private static void QueueMessageToSystem(IServerMessageBase msg)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.network.receive", () => $"type={msg?.MessageType} data={msg?.Data?.GetType().Name} state={MainSystem.NetworkState}", traffic: true);
             switch (msg.MessageType)
             {
                 case ServerMessageType.Admin:

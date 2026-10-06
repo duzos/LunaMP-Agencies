@@ -1,4 +1,5 @@
-﻿using LmpCommon;
+using Server.Diagnostics;
+using LmpCommon;
 using LmpCommon.Time;
 using Server.Agency;
 using Server.Client;
@@ -42,6 +43,7 @@ namespace Server
 
         private static bool IsRestart = false;
         private static bool MemoryDiagnosticsEnabled;
+        private static bool VerboseDiagnosticsEnabled;
 
         public static Task Main(string[] args)
         {
@@ -66,14 +68,21 @@ namespace Server
 
             dataDirectoryOption.AcceptExistingOnly();
 
+            Option<bool> verboseDiagnosticsOption = new("--verbose-diagnostics")
+            {
+                Description = "Enable bounded multiplayer playtest diagnostics for this run"
+            };
+
             RootCommand rootCommand = new("Luna Multiplayer Server");
             rootCommand.Options.Add(dataDirectoryOption);
             rootCommand.Options.Add(memoryDiagnosticsOption);
+            rootCommand.Options.Add(verboseDiagnosticsOption);
 
             rootCommand.SetAction((parseResult, cancellationToken) =>
             {
                 ServerContext.DataDirectory = parseResult.GetValue(dataDirectoryOption).FullName;
                 MemoryDiagnosticsEnabled = parseResult.GetValue(memoryDiagnosticsOption);
+                VerboseDiagnosticsEnabled = parseResult.GetValue(verboseDiagnosticsOption);
                 return RunServerAsync(cancellationToken);
             });
 
@@ -130,6 +139,7 @@ namespace Server
 
                 Universe.CheckUniverse();
                 LoadSettingsAndGroups();
+                PlaytestDiagnostics.Configure(VerboseDiagnosticsEnabled);
                 VesselStoreSystem.LoadExistingVessels();
                 var scenariosCreated = ScenarioSystem.GenerateDefaultScenarios();
                 ScenarioStoreSystem.LoadExistingScenarios(scenariosCreated);
@@ -167,6 +177,7 @@ namespace Server
                 }
 
                 LunaLog.Info($"[Agency] Loaded {AgencyStore.Agencies.Count} agencies at startup.");
+                PlaytestDiagnostics.Snapshot("startup.agencies-loaded");
                 LmpPluginHandler.LoadPlugins();
                 WarpSystem.Reset();
                 TimeSystem.Reset();

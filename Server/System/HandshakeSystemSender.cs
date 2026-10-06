@@ -1,4 +1,5 @@
-﻿using LmpCommon.Enums;
+using Server.Diagnostics;
+using LmpCommon.Enums;
 using LmpCommon.Message.Data.Handshake;
 using LmpCommon.Message.Server;
 using Server.Client;
@@ -12,6 +13,7 @@ namespace Server.System
     {
         public static void SendHandshakeReply(ClientStructure client, HandshakeReply enumResponse, string reason)
         {
+            PlaytestDiagnostics.Write("handshake.reply", () => $"{PlaytestDiagnostics.Client(client)} outcome={enumResponse}");
             var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<HandshakeReplyMsgData>();
             msgData.Response = enumResponse;
             msgData.Reason = reason;

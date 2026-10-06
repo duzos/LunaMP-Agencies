@@ -83,6 +83,14 @@ namespace LmpClient.Windows.Options
 
             DrawGeneralSettings();
             DrawNetworkSettings();
+            var verboseDiagnostics = GUILayout.Toggle(SettingsSystem.CurrentSettings.VerboseDiagnostics, "Verbose diagnostics");
+            if (verboseDiagnostics != SettingsSystem.CurrentSettings.VerboseDiagnostics)
+            {
+                SettingsSystem.CurrentSettings.VerboseDiagnostics = verboseDiagnostics;
+                SettingsSystem.SaveSettings();
+                LmpClient.Diagnostics.PlaytestDiagnostics.Configure(verboseDiagnostics);
+            }
+            GUILayout.Label("Writes detailed playtest logs to KSP.log. Restart KSP to include startup.");
 #if DEBUG
             DrawAdvancedDebugOptions();
 #endif

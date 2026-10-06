@@ -212,6 +212,7 @@ namespace LmpClient.Systems.Scenario
             {
                 if (scenarioEntry == null)
                 {
+                    LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.skip", () => "reason=null-entry");
                     LunaLog.LogError("[LMP]: Skipping null scenario queue entry.");
                     WriteNullScenarioDebugLog(null);
                     continue;
@@ -221,6 +222,7 @@ namespace LmpClient.Systems.Scenario
                 {
                     LunaLog.LogError(
                         $"[LMP]: Skipping scenario '{scenarioEntry.ScenarioModule}' with null ConfigNode. See NullScenario.log in your KSP install folder.");
+                    LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.skip", () => $"reason=null-node module={scenarioEntry.ScenarioModule}");
                     WriteNullScenarioDebugLog(scenarioEntry);
                     continue;
                 }
@@ -286,6 +288,7 @@ namespace LmpClient.Systems.Scenario
                 }
                 catch (Exception e)
                 {
+                    LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.apply-error", () => $"module={scenarioEntry.ScenarioModule} exception={e.GetType().Name}");
                     LunaLog.LogError(
                         $"[LMP]: Failed to apply scenario '{scenarioEntry.ScenarioModule}' (ConfigNode could not be copied into ProtoScenarioModule). {e}");
                     continue;
@@ -295,9 +298,11 @@ namespace LmpClient.Systems.Scenario
                 {
                     LunaLog.Log($"[LMP]: Loading {psm.moduleName} scenario data");
                     HighLogic.CurrentGame.scenarios.Add(psm);
+                    LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.applied", () => $"module={psm.moduleName} count={HighLogic.CurrentGame.scenarios.Count}");
                 }
                 else
                 {
+                    LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.skip", () => $"module={psm.moduleName} reason=not-allowed-or-ignored mode={SettingsSystem.ServerSettings.GameMode}");
                     LunaLog.Log($"[LMP]: Skipping {psm.moduleName} scenario data in {SettingsSystem.ServerSettings.GameMode} mode");
                 }
             }

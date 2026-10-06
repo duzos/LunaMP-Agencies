@@ -1,4 +1,5 @@
-﻿using LmpCommon.Locks;
+using Server.Diagnostics;
+using LmpCommon.Locks;
 using Server.Client;
 using Server.Settings.Structures;
 using System.Linq;
@@ -17,6 +18,7 @@ namespace Server.System
             //Player tried to acquire a lock that they already own
             if (LockQuery.LockBelongsToPlayer(lockDef.Type, lockDef.VesselId, lockDef.KerbalName, lockDef.PlayerName))
             {
+                PlaytestDiagnostics.Write("lock.acquire", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=repeated force={force}", true);
                 repeatedAcquire = true;
                 return true;
             }
@@ -42,8 +44,10 @@ namespace Server.System
                 }
 
                 LockStore.AddOrUpdateLock(lockDef);
+                PlaytestDiagnostics.Write("lock.acquire", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=accepted force={force} contractsPerAgency={contractsPerAgency}");
                 return true;
             }
+            PlaytestDiagnostics.Write("lock.acquire", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=denied reason=held force={force}");
             return false;
         }
 
@@ -52,9 +56,11 @@ namespace Server.System
             if (LockQuery.LockBelongsToPlayer(lockDef.Type, lockDef.VesselId, lockDef.KerbalName, lockDef.PlayerName))
             {
                 LockStore.RemoveLock(lockDef);
+                PlaytestDiagnostics.Write("lock.release", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=accepted");
                 return true;
             }
 
+            PlaytestDiagnostics.Write("lock.release", () => $"type={lockDef.Type} vessel={lockDef.VesselId} result=denied reason=not-owner");
             return false;
         }
 

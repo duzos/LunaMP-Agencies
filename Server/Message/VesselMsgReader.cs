@@ -1,3 +1,4 @@
+using Server.Diagnostics;
 using ByteSizeLib;
 using LmpCommon.Message.Data.Vessel;
 using LmpCommon.Message.Interface;
@@ -115,16 +116,22 @@ namespace Server.Message
         {
             var msgData = (VesselProtoMsgData)message;
 
-            if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
+            if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId))
+            {
+                PlaytestDiagnostics.Write("vessel.proto.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} reason=removed");
+                return;
+            }
 
             if (msgData.NumBytes == 0)
             {
+                PlaytestDiagnostics.Write("vessel.proto.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} reason=empty");
                 LunaLog.Warning($"Received a vessel with 0 bytes ({msgData.VesselId}) from {client.PlayerName}.");
                 return;
             }
 
             var vesselText = Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes);
             var isNewVessel = !VesselStoreSystem.VesselExists(msgData.VesselId);
+            PlaytestDiagnostics.Write("vessel.proto", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} firstSeen={isNewVessel} bytes={msgData.NumBytes}", true);
             if (isNewVessel)
             {
                 LunaLog.Debug($"Saving vessel {msgData.VesselId} ({ByteSize.FromBytes(msgData.NumBytes).KiloBytes} KB) from {client.PlayerName}.");
@@ -141,6 +148,7 @@ namespace Server.Message
                         counted = agency.CountedVesselIds.Add(msgData.VesselId);
                         if (counted) agency.VesselsLaunched++;
                     }
+                    PlaytestDiagnostics.Write("vessel.ownership", () => $"agency={agency.Id} vessel={msgData.VesselId} counted={counted} result=assigned");
                     if (counted)
                     {
                         global::Server.Agency.AgencyStore.PersistAgency(agency);

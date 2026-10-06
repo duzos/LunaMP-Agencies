@@ -1,4 +1,5 @@
-﻿using System;
+using Server.Diagnostics;
+using System;
 using LmpCommon.Message.Data.Lock;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
@@ -22,11 +23,15 @@ namespace Server.Message
                     break;
                 case LockMessageType.Acquire:
                     var acquireData = (LockAcquireMsgData)data;
+                    if (acquireData.Lock.PlayerName != client.PlayerName)
+                        PlaytestDiagnostics.Write("lock.request.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={acquireData.Lock.VesselId} reason=owner-mismatch");
                     if (acquireData.Lock.PlayerName == client.PlayerName)
                         LockSystemSender.SendLockAcquireMessage(client, acquireData.Lock, acquireData.Force);
                     break;
                 case LockMessageType.Release:
                     var releaseData = (LockReleaseMsgData)data;
+                    if (releaseData.Lock.PlayerName != client.PlayerName)
+                        PlaytestDiagnostics.Write("lock.request.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={releaseData.Lock.VesselId} reason=owner-mismatch");
                     if (releaseData.Lock.PlayerName == client.PlayerName)
                         LockSystemSender.ReleaseAndSendLockReleaseMessage(client, releaseData.Lock);
                     break;

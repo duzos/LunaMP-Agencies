@@ -46,6 +46,7 @@ namespace LmpClient.Systems.Scenario
 
         private static void QueueScenarioBytes(string scenarioModule, byte[] scenarioData, int numBytes)
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.receive", () => $"module={scenarioModule} bytes={numBytes}", traffic: true);
             var scenarioNode = scenarioData.DeserializeToConfigNode(numBytes);
             if (scenarioNode != null)
             {
@@ -94,9 +95,11 @@ namespace LmpClient.Systems.Scenario
                     ScenarioNode = scenarioNode
                 };
                 System.ScenarioQueue.Enqueue(entry);
+                LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.queued", () => $"module={scenarioModule}");
             }
             else
             {
+                LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.scenario.decode-null", () => $"module={scenarioModule} bytes={numBytes}");
                 LunaLog.LogError($"[LMP]: Scenario data has been lost for {scenarioModule}");
                 byte[] rawCopy = null;
                 if (scenarioData != null && numBytes > 0)

@@ -23,6 +23,7 @@ namespace LmpClient.Network
         /// <param name="reason">Reason</param>
         public static void Disconnect(string reason = "unknown")
         {
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.network.disconnect-request", () => $"state={MainSystem.NetworkState} reasonPresent={!string.IsNullOrEmpty(reason)}");
             lock (DisconnectLock)
             {
                 if (MainSystem.NetworkState > ClientState.Disconnected)

@@ -79,11 +79,18 @@ namespace LmpClient.Systems.ShareFunds
 
         public void SetFundsWithoutTriggeringEvent(double funds)
         {
-            if (!CurrentGameModeIsRelevant) return;
+            if (!CurrentGameModeIsRelevant)
+            {
+                LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.funds.skip", () => $"reason=game-mode requested={funds}");
+                return;
+            }
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.funds.apply-before", () => $"current={Funding.Instance.Funds} requested={funds}");
 
             StartIgnoringEvents();
             Funding.Instance.SetFunds(funds, TransactionReasons.None);
             StopIgnoringEvents();
+            LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.funds.applied", () => $"actual={Funding.Instance.Funds}");
+            LmpClient.Diagnostics.PlaytestDiagnostics.RequestSnapshot();
         }
     }
 }

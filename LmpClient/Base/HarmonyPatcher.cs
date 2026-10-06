@@ -1,4 +1,5 @@
 ﻿using System;
+using LmpClient.Diagnostics;
 using System.Reflection;
 using LmpClient.Harmony;
 namespace LmpClient.Base
@@ -9,14 +10,33 @@ namespace LmpClient.Base
 
         public static void Awake()
         {
-            HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
-            PatchManualTargets();
-            PatchOptionalMods();
+            TracePatchGroup("attributes", () => HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly()));
+            TracePatchGroup("manual", PatchManualTargets);
+            TracePatchGroup("optional-mods", PatchOptionalMods);
             // Per-agency CommNet uses imperative attachment so it can search
             // for a method signature that varies across KSP versions and
             // silently skip if not found. The HarmonyPatch attribute pattern
             // would throw on missing target.
-            LmpClient.Harmony.CommNet_AgencyFilter.TryAttach(HarmonyInstance);
+            TracePatchGroup("agency-commnet", () =>
+            {
+                var attached = LmpClient.Harmony.CommNet_AgencyFilter.TryAttach(HarmonyInstance);
+                PlaytestDiagnostics.Write("client.patch.commnet", () => $"attached={attached}");
+            });
+        }
+
+        private static void TracePatchGroup(string group, Action attach)
+        {
+            PlaytestDiagnostics.Write("client.patch.start", () => $"group={group}");
+            try
+            {
+                attach();
+                PlaytestDiagnostics.Write("client.patch.completed", () => $"group={group}");
+            }
+            catch (Exception e)
+            {
+                PlaytestDiagnostics.Write("client.patch.error", () => $"group={group} exception={e.GetType().Name}");
+                throw;
+            }
         }
 
         /// <summary>
@@ -58,6 +78,7 @@ namespace LmpClient.Base
                 var ccplType = HarmonyLib.AccessTools.TypeByName("ContractConfigurator.ContractPreLoader");
                 if (ccplType == null)
                 {
+                    PlaytestDiagnostics.Write("client.patch.optional-skip", () => "patch=ContractPreLoader reason=type-missing");
                     LunaLog.Log("[LMP]: ContractConfigurator.ContractPreLoader type not found — CC not installed, skipping contract pre-filter patch.");
                     return;
                 }
@@ -65,16 +86,19 @@ namespace LmpClient.Base
                 var onLoad = HarmonyLib.AccessTools.Method(ccplType, "OnLoad");
                 if (onLoad == null)
                 {
+                    PlaytestDiagnostics.Write("client.patch.optional-skip", () => "patch=ContractPreLoader reason=method-missing");
                     LunaLog.LogWarning("[LMP]: ContractPreLoader.OnLoad method not found — CC version mismatch?");
                     return;
                 }
 
                 var prefix = new HarmonyLib.HarmonyMethod(typeof(LmpClient.Harmony.ContractPreLoader_Filter), "Prefix");
                 HarmonyInstance.Patch(onLoad, prefix: prefix);
+                PlaytestDiagnostics.Write("client.patch.optional-attached", () => "patch=ContractPreLoader");
                 LunaLog.Log("[LMP]: Patched ContractConfigurator.ContractPreLoader.OnLoad — invalid contracts will be filtered before CC loads them.");
             }
             catch (Exception e)
             {
+                PlaytestDiagnostics.Write("client.patch.optional-error", () => $"patch=ContractPreLoader exception={e.GetType().Name}");
                 LunaLog.LogWarning($"[LMP]: Could not patch ContractPreLoader.OnLoad: {e.Message}");
             }
         }
@@ -95,6 +119,7 @@ namespace LmpClient.Base
                 var popupType = HarmonyLib.AccessTools.TypeByName("OneTimePopup");
                 if (popupType == null)
                 {
+                    PlaytestDiagnostics.Write("client.patch.optional-skip", () => "patch=OneTimePopup reason=type-missing");
                     LunaLog.Log("[LMP]: ClickThroughBlocker OneTimePopup type not found — mod not installed, skipping");
                     return;
                 }
@@ -102,16 +127,19 @@ namespace LmpClient.Base
                 var startMethod = HarmonyLib.AccessTools.Method(popupType, "Start");
                 if (startMethod == null)
                 {
+                    PlaytestDiagnostics.Write("client.patch.optional-skip", () => "patch=OneTimePopup reason=method-missing");
                     LunaLog.LogWarning("[LMP]: OneTimePopup.Start method not found — CTB version mismatch?");
                     return;
                 }
 
                 var prefix = new HarmonyLib.HarmonyMethod(typeof(HarmonyPatcher), nameof(SkipMethod));
                 HarmonyInstance.Patch(startMethod, prefix: prefix);
+                PlaytestDiagnostics.Write("client.patch.optional-attached", () => "patch=OneTimePopup");
                 LunaLog.Log("[LMP]: Patched OneTimePopup.Start — CTB popup suppressed");
             }
             catch (Exception e)
             {
+                PlaytestDiagnostics.Write("client.patch.optional-error", () => $"patch=OneTimePopup exception={e.GetType().Name}");
                 LunaLog.LogWarning($"[LMP]: Could not patch ClickThroughBlocker popup: {e.Message}");
             }
         }

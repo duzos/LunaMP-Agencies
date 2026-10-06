@@ -332,6 +332,8 @@ try {
         $readme = Join-Path $stage 'LMP Readme.txt'
 
         if (-not $SkipClient) {
+            & (Join-Path $PSScriptRoot 'Assert-ClientPackageLayout.ps1') -GameData (Join-Path $stage 'LMPClient\GameData')
+            if ($LASTEXITCODE -ne 0) { throw "Client package layout check failed for $cfg." }
             $clientZip = Join-Path $OutputDir "LunaMultiplayer-Client-$cfg.zip"
             Remove-Item $clientZip -Force -ErrorAction SilentlyContinue
             Invoke-External $sevenZip 'a' '-bd' '-mx=7' $clientZip `

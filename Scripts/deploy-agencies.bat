@@ -72,6 +72,7 @@ if exist "%REPO%\LmpClient\Localization\XML" xcopy /Y /E "%REPO%\LmpClient\Local
 if exist "%REPO%\LmpClient\ModuleStore\XML" xcopy /Y /E "%REPO%\LmpClient\ModuleStore\XML\*.xml" "%CLIENT_STAGE%\LunaMultiplayer\PartSync\" >nul
 if exist "%REPO%\LmpClient\Resources\Icons" xcopy /Y "%REPO%\LmpClient\Resources\Icons\*" "%CLIENT_STAGE%\LunaMultiplayer\Icons\" >nul
 if exist "%REPO%\LmpClient\Resources\Flags" xcopy /Y "%REPO%\LmpClient\Resources\Flags\*" "%CLIENT_STAGE%\LunaMultiplayer\Flags\" >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO%\Scripts\Assert-ClientPackageLayout.ps1" -GameData "%CLIENT_STAGE%" || goto :fail
 
 echo.
 echo === 4/5 Deploying to KSP + live server ===

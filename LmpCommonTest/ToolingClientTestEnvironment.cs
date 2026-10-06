@@ -67,7 +67,7 @@ namespace LmpClient.Systems.SettingsSys
     {
         internal bool AgencyTooling, AgencyTrade;
         internal bool CanRevert = true;
-        internal double ToolingCostMultiplier = 10, TooledLaunchMultiplier = .1, ToolingCombineMultiplier = .1;
+        internal double ToolingCostMultiplier = ToolingDefaults.ToolingCost, TooledLaunchMultiplier = ToolingDefaults.TooledLaunch, UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch, ToolingCombineMultiplier = ToolingDefaults.Combine;
     }
     internal static class SettingsSystem { internal static TestSettings ServerSettings = new TestSettings(); }
 }

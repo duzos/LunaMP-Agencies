@@ -105,7 +105,7 @@ namespace Server.Agency
                 try
                 {
                     var settings = GeneralSettings.SettingsStore;
-                    if (!ToolingPolicy.FiniteNonNegative(settings.ToolingCostMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.TooledLaunchMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.ToolingCombineMultiplier))
+                    if (!ToolingPolicy.FiniteNonNegative(settings.ToolingCostMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.TooledLaunchMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.UntooledLaunchMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.ToolingCombineMultiplier))
                         throw new InvalidDataException("Invalid tooling multipliers.");
                     if (File.Exists(FilePath))
                     {
@@ -382,11 +382,16 @@ namespace Server.Agency
             if (UsesFunds) agency.Funds -= amount;
         }
 
+        private static ToolingRates Rates()
+        {
+            var settings = GeneralSettings.SettingsStore;
+            return new ToolingRates(settings.ToolingCostMultiplier, settings.TooledLaunchMultiplier, settings.UntooledLaunchMultiplier, settings.ToolingCombineMultiplier);
+        }
+
         private static ToolingQuote Quote(EconomyAgency agency, ToolingManifest manifest, string manifestHash)
         {
             if (ToolingPolicy.ManifestHash(manifest) != manifestHash) throw new InvalidOperationException("Craft manifest changed. Request a fresh quote.");
-            var settings = GeneralSettings.SettingsStore;
-            var quote = ToolingPolicy.Quote(manifest, agency.Designs, settings.ToolingCostMultiplier, settings.TooledLaunchMultiplier, settings.ToolingCombineMultiplier);
+            var quote = ToolingPolicy.Quote(manifest, agency.Designs, Rates());
             if (!quote.Success) throw new InvalidOperationException(quote.Reason);
             return quote;
         }
@@ -448,7 +453,7 @@ namespace Server.Agency
                                 SessionTicks = client.ConnectionTime.Ticks, SessionId = sessionId, CreatedSequence = command.Sequence, Token = Guid.NewGuid(), State = LaunchState.Prepared,
                                 ExpiresUtcTicks = UtcNow().AddSeconds(60).Ticks, Manifest = Copy(command.Manifest),
                                 Charge = UsesFunds ? result.Quote.LaunchCost : 0,
-                                Multiplier = result.Quote.AlreadyTooled ? GeneralSettings.SettingsStore.TooledLaunchMultiplier : 1
+                                Multiplier = result.Quote.AlreadyTooled ? Rates().TooledLaunch : Rates().UntooledLaunch
                             };
                             candidate.Launches[launch.LaunchId] = launch;
                             result.LaunchToken = launch.Token; result.ExpiresUtcTicks = launch.ExpiresUtcTicks;

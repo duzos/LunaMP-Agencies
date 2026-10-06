@@ -1,4 +1,5 @@
 using CommNet;
+using LmpCommon.Agency;
 using LmpCommon.Enums;
 
 namespace LmpClient.Systems.SettingsSys
@@ -39,9 +40,10 @@ namespace LmpClient.Systems.SettingsSys
         public bool AgencyTooling;
         public bool AgencyTrade;
         public bool AgencyHideCraft;
-        public double ToolingCostMultiplier = 10;
-        public double TooledLaunchMultiplier = 0.1;
-        public double ToolingCombineMultiplier = 0.1;
+        public double ToolingCostMultiplier = ToolingDefaults.ToolingCost;
+        public double TooledLaunchMultiplier = ToolingDefaults.TooledLaunch;
+        public double UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch;
+        public double ToolingCombineMultiplier = ToolingDefaults.Combine;
         public bool AgencyCommNetOptIn;
         public bool AgencyCommNetPerAgency { get; set; }
         public bool AgencyLaunchSitesPerAgency { get; set; }

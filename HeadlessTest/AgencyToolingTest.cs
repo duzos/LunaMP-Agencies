@@ -36,11 +36,11 @@ public class AgencyToolingTest
             var toolReply = await CommandAsync(a, tool, token);
             Assert.IsTrue(toolReply.Success, toolReply.Reason);
             var tooled = await a.WaitForAsync<EconomyStateBot>(s => s.State.Revision > initialA.State.Revision && s.State.Designs.Any(d => d.Fingerprint == ToolingPolicy.Fingerprint(manifest)), token);
-            Assert.AreEqual(initialA.State.Funds - 1000, tooled.State.Funds, .001);
+            Assert.AreEqual(initialA.State.Funds - 100 * ToolingDefaults.ToolingCost, tooled.State.Funds, .001);
             Assert.IsTrue((await CommandAsync(a, tool, token)).Success, "Retry must return the original receipt.");
             var quoteB = await CommandAsync(b, new EconomyCommand { Operation = EconomyOperation.Quote, Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) }, token);
             Assert.IsTrue(quoteB.Success, quoteB.Reason); Assert.IsFalse(quoteB.Quote.AlreadyTooled);
-            Assert.AreEqual(400d, quoteB.Quote.LaunchCost);
+            Assert.AreEqual(100 * ToolingDefaults.UntooledLaunch + 300, quoteB.Quote.LaunchCost);
             var prepare = await CommandAsync(a, new EconomyCommand { Operation = EconomyOperation.PrepareLaunch, LaunchId = Guid.NewGuid(), Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) }, token);
             Assert.IsTrue(prepare.Success, prepare.Reason);
             Assert.AreEqual(310d, prepare.Quote.LaunchCost);

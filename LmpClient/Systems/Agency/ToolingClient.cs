@@ -90,11 +90,15 @@ namespace LmpClient.Systems.Agency
             catch (Exception e) { LatestStatus = e.Message; return Guid.Empty; }
         }
         private static ToolingManifest CurrentManifest() => ToolingManifestBuilder.Build(EditorLogic.fetch?.ship, ShipConstruction.ShipManifest);
+        internal static ToolingRates Rates()
+        {
+            var settings = SettingsSystem.ServerSettings;
+            return new ToolingRates(settings.ToolingCostMultiplier, settings.TooledLaunchMultiplier, settings.UntooledLaunchMultiplier, settings.ToolingCombineMultiplier);
+        }
         private static ToolingQuote Quote(ToolingManifest manifest)
         {
             lock (stateLock)
-                return ToolingPolicy.Quote(manifest, snapshot?.Designs ?? Array.Empty<ToolingDesign>(), SettingsSystem.ServerSettings.ToolingCostMultiplier,
-                    SettingsSystem.ServerSettings.TooledLaunchMultiplier, SettingsSystem.ServerSettings.ToolingCombineMultiplier);
+                return ToolingPolicy.Quote(manifest, snapshot?.Designs ?? Array.Empty<ToolingDesign>(), Rates());
         }
         internal static ToolingQuote DisplayQuote(ShipConstruct ship, ShipTemplate template, VesselCrewManifest crew)
         {

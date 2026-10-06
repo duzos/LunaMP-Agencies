@@ -1,8 +1,10 @@
 using LmpClient.Base;
 using LmpClient.Systems.Agency;
 using LmpClient.Systems.SettingsSys;
+using LmpCommon.Agency;
 using LmpCommon.Enums;
 using System;
+using System.Globalization;
 using UnityEngine;
 
 namespace LmpClient.Windows.Agency
@@ -63,14 +65,14 @@ namespace LmpClient.Windows.Agency
                 return;
             }
             scroll = GUILayout.BeginScrollView(scroll);
-            GUILayout.Label(quote.AlreadyTooled ? "This exact design is tooled for your agency." : "This design is not tooled. You can launch at full price or purchase tooling once.", text);
+            GUILayout.Label(quote.AlreadyTooled ? "This exact design is tooled for your agency." : "This design is not tooled. Launching it as is costs " + Multiplier(ToolingClient.Rates().UntooledLaunch) + " its part price (science parts and inventory stay 1x), or you can purchase tooling once.", text);
             CostRow("Science parts · full price", quote.ScienceCost);
             CostRow("Inventory · full price", quote.CargoCost);
             if (!quote.AlreadyTooled)
             {
                 GUILayout.Space(6);
                 GUILayout.Label("Tool this design  " + Money(quote.ToolingCost), heading);
-                GUILayout.Label("Launch after tooling  " + Money(quote.NonScienceCost * SettingsSystem.ServerSettings.TooledLaunchMultiplier + quote.ScienceCost + quote.CargoCost), text);
+                GUILayout.Label("Launch after tooling  " + Money(ToolingPolicy.LaunchCost(quote.ScienceCost, quote.CargoCost, quote.NonScienceCost, true, ToolingClient.Rates())), text);
                 GUILayout.Label("Tooling discounts future launches of this exact part list. Layout changes are fine; changing parts needs new tooling.", text);
                 foreach (var match in quote.Matches)
                     GUILayout.Label(match.Count + " × existing subassembly · combine fee " + Money(match.CombineCost), text);
@@ -95,6 +97,7 @@ namespace LmpClient.Windows.Agency
             if (GUILayout.Button("Collapse", button)) compact = true;
         }
         private static string Money(double value) => value.ToString("N1") + " funds";
+        private static string Multiplier(double value) => value.ToString("0.##", CultureInfo.InvariantCulture) + "x";
         private void CostRow(string label, double amount)
         {
             GUILayout.Label(label + "  " + Money(amount), text, GUILayout.Width(Mathf.Max(180, WindowRect.width - 50)));

@@ -1,4 +1,5 @@
 using Lidgren.Network;
+using LmpCommon.Agency;
 using LmpCommon.Message;
 using LmpCommon.Message.Data.Settings;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -50,7 +51,7 @@ namespace LmpCommonTest
             parsed.AgencyCommNetPerAgency = true;
             parsed.AgencyLaunchSitesPerAgency = true;
             parsed.AgencyVesselOwnership = true;
-            parsed.AgencyCommNetOptIn = true; parsed.AgencyHideCraft = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
+            parsed.AgencyCommNetOptIn = true; parsed.AgencyHideCraft = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7; parsed.UntooledLaunchMultiplier = 7;
             parsed.Deserialize(incoming);
             Assert.AreEqual("Legacy server", parsed.ConsoleIdentifier);
             Assert.IsTrue(parsed.PrintMotdInChat);
@@ -62,7 +63,7 @@ namespace LmpCommonTest
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
             Assert.IsFalse(parsed.AgencyVesselOwnership);
             Assert.IsFalse(parsed.AgencyCommNetOptIn);
-            Assert.IsFalse(parsed.AgencyHideCraft); Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(10d, parsed.ToolingCostMultiplier); Assert.AreEqual(.1, parsed.TooledLaunchMultiplier); Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
+            Assert.IsFalse(parsed.AgencyHideCraft); Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(ToolingDefaults.ToolingCost, parsed.ToolingCostMultiplier); Assert.AreEqual(ToolingDefaults.TooledLaunch, parsed.TooledLaunchMultiplier); Assert.AreEqual(ToolingDefaults.Combine, parsed.ToolingCombineMultiplier); Assert.AreEqual(ToolingDefaults.LegacyUntooledLaunch, parsed.UntooledLaunchMultiplier);
         }
 
         [TestMethod]
@@ -81,13 +82,13 @@ namespace LmpCommonTest
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyLaunchSitesPerAgency = true;
             parsed.AgencyVesselOwnership = true;
-            parsed.AgencyCommNetOptIn = true; parsed.AgencyHideCraft = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
+            parsed.AgencyCommNetOptIn = true; parsed.AgencyHideCraft = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7; parsed.UntooledLaunchMultiplier = 7;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyExperimentsPerAgency && parsed.AgencyKerbalsPerAgency && parsed.AgencyScansatPerAgency && parsed.AgencyContractsPoolPerAgency && parsed.AgencyCommNetPerAgency);
             Assert.IsFalse(parsed.AgencyLaunchSitesPerAgency);
             Assert.IsFalse(parsed.AgencyVesselOwnership);
             Assert.IsFalse(parsed.AgencyCommNetOptIn);
-            Assert.IsFalse(parsed.AgencyHideCraft); Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(10d, parsed.ToolingCostMultiplier); Assert.AreEqual(.1, parsed.TooledLaunchMultiplier); Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
+            Assert.IsFalse(parsed.AgencyHideCraft); Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling); Assert.AreEqual(ToolingDefaults.ToolingCost, parsed.ToolingCostMultiplier); Assert.AreEqual(ToolingDefaults.TooledLaunch, parsed.TooledLaunchMultiplier); Assert.AreEqual(ToolingDefaults.Combine, parsed.ToolingCombineMultiplier); Assert.AreEqual(ToolingDefaults.LegacyUntooledLaunch, parsed.UntooledLaunchMultiplier);
         }
 
         [DataTestMethod]
@@ -105,13 +106,14 @@ namespace LmpCommonTest
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
             incoming.LengthBits = start + 8 + toolingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
-            parsed.AgencyHideCraft = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7;
+            parsed.AgencyHideCraft = true; parsed.AgencyTrade = true; parsed.AgencyTooling = true; parsed.ToolingCostMultiplier = 7; parsed.UntooledLaunchMultiplier = 7;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyCommNetOptIn);
             Assert.IsFalse(parsed.AgencyHideCraft); Assert.IsFalse(parsed.AgencyTrade); Assert.IsFalse(parsed.AgencyTooling);
-            Assert.AreEqual(10d, parsed.ToolingCostMultiplier);
-            Assert.AreEqual(.1, parsed.TooledLaunchMultiplier);
-            Assert.AreEqual(.1, parsed.ToolingCombineMultiplier);
+            Assert.AreEqual(ToolingDefaults.ToolingCost, parsed.ToolingCostMultiplier);
+            Assert.AreEqual(ToolingDefaults.TooledLaunch, parsed.TooledLaunchMultiplier);
+            Assert.AreEqual(ToolingDefaults.Combine, parsed.ToolingCombineMultiplier);
+            Assert.AreEqual(ToolingDefaults.LegacyUntooledLaunch, parsed.UntooledLaunchMultiplier);
         }
 
         [TestMethod]
@@ -167,7 +169,7 @@ namespace LmpCommonTest
             settings.AgencyLaunchSitesPerAgency = !enabled;
             settings.AgencyVesselOwnership = enabled;
             settings.AgencyCommNetOptIn = !enabled;
-            settings.AgencyHideCraft = enabled; settings.AgencyTrade = !enabled; settings.AgencyTooling = enabled; settings.ToolingCostMultiplier = 7; settings.TooledLaunchMultiplier = .2; settings.ToolingCombineMultiplier = .3;
+            settings.AgencyHideCraft = enabled; settings.AgencyTrade = !enabled; settings.AgencyTooling = enabled; settings.ToolingCostMultiplier = 7; settings.TooledLaunchMultiplier = .2; settings.ToolingCombineMultiplier = .3; settings.UntooledLaunchMultiplier = 3.5;
             var outgoing = peer.CreateMessage(settings.GetMessageSize());
             settings.Serialize(outgoing);
             Assert.IsTrue(settings.GetMessageSize() >= outgoing.LengthBytes);
@@ -186,7 +188,49 @@ namespace LmpCommonTest
             Assert.AreEqual(!enabled, parsed.AgencyLaunchSitesPerAgency);
             Assert.AreEqual(enabled, parsed.AgencyVesselOwnership);
             Assert.AreEqual(!enabled, parsed.AgencyCommNetOptIn);
-            Assert.AreEqual(enabled, parsed.AgencyHideCraft); Assert.AreEqual(!enabled, parsed.AgencyTrade); Assert.AreEqual(enabled, parsed.AgencyTooling); Assert.AreEqual(7d, parsed.ToolingCostMultiplier); Assert.AreEqual(.2, parsed.TooledLaunchMultiplier); Assert.AreEqual(.3, parsed.ToolingCombineMultiplier);
+            Assert.AreEqual(enabled, parsed.AgencyHideCraft); Assert.AreEqual(!enabled, parsed.AgencyTrade); Assert.AreEqual(enabled, parsed.AgencyTooling); Assert.AreEqual(7d, parsed.ToolingCostMultiplier); Assert.AreEqual(.2, parsed.TooledLaunchMultiplier); Assert.AreEqual(.3, parsed.ToolingCombineMultiplier); Assert.AreEqual(3.5, parsed.UntooledLaunchMultiplier);
+        }
+
+        [DataTestMethod]
+        [DataRow(64)]
+        [DataRow(1)]
+        public void PreviousThreeDoubleToolingPayloadReadsUntooledAsFaceValue(int missingTrailingBits)
+        {
+            var factory = new ServerMessageFactory();
+            var peer = new NetClient(new NetPeerConfiguration("PreviousUntooledSettings"));
+            var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            source.AgencyTooling = true; source.AgencyTrade = true; source.AgencyHideCraft = true;
+            source.ToolingCostMultiplier = 7; source.TooledLaunchMultiplier = .2; source.ToolingCombineMultiplier = .3; source.UntooledLaunchMultiplier = 4;
+            var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
+            var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
+            // A server without the setting stops after the hide-craft flag; a double that is not fully there must not be half read either.
+            incoming.LengthBits = outgoing.LengthBits - missingTrailingBits;
+            var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>(); parsed.UntooledLaunchMultiplier = 9;
+            parsed.Deserialize(incoming);
+            Assert.IsTrue(parsed.AgencyTooling); Assert.IsTrue(parsed.AgencyTrade); Assert.IsTrue(parsed.AgencyHideCraft);
+            Assert.AreEqual(7d, parsed.ToolingCostMultiplier); Assert.AreEqual(.2, parsed.TooledLaunchMultiplier); Assert.AreEqual(.3, parsed.ToolingCombineMultiplier);
+            Assert.AreEqual(ToolingDefaults.LegacyUntooledLaunch, parsed.UntooledLaunchMultiplier);
+        }
+
+        [TestMethod]
+        public void NewMessagesDefaultToTheShippedRates()
+        {
+            var settings = new ServerMessageFactory().CreateNewMessageData<SettingsReplyMsgData>();
+            Assert.AreEqual(ToolingDefaults.ToolingCost, settings.ToolingCostMultiplier); Assert.AreEqual(ToolingDefaults.TooledLaunch, settings.TooledLaunchMultiplier);
+            Assert.AreEqual(ToolingDefaults.UntooledLaunch, settings.UntooledLaunchMultiplier); Assert.AreEqual(ToolingDefaults.Combine, settings.ToolingCombineMultiplier);
+        }
+
+        [TestMethod]
+        public void MessageSizeEstimateCoversAllFourToolingDoubles()
+        {
+            var factory = new ServerMessageFactory();
+            var peer = new NetClient(new NetPeerConfiguration("SettingsSize"));
+            var settings = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            settings.ConsoleIdentifier = "Size";
+            var outgoing = peer.CreateMessage(); settings.Serialize(outgoing);
+            // The estimate counts each of the 35 bool flags as a whole byte but the wire spends one bit on them, so a complete estimate sits 30+ bytes above the real size.
+            // Leaving the fourth double out of it costs 8 of those bytes, which this bound catches.
+            Assert.IsTrue(settings.GetMessageSize() - outgoing.LengthBytes >= 30, "estimate " + settings.GetMessageSize() + " vs wire " + outgoing.LengthBytes);
         }
     }
 }

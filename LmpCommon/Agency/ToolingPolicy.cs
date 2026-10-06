@@ -111,12 +111,15 @@ namespace LmpCommon.Agency
             });
         }
 
-        public static ToolingQuote Quote(ToolingManifest manifest, IEnumerable<ToolingDesign> existing, double toolingMultiplier, double launchMultiplier, double combineMultiplier)
+        /// <summary>What a launch costs. Science parts and inventory are always full price; only the other parts follow the tooled or untooled multiplier.</summary>
+        public static double LaunchCost(double science, double cargo, double nonScience, bool tooled, ToolingRates rates) => science + cargo + nonScience * (tooled ? rates.TooledLaunch : rates.UntooledLaunch);
+
+        public static ToolingQuote Quote(ToolingManifest manifest, IEnumerable<ToolingDesign> existing, ToolingRates rates)
         {
             try
             {
                 Validate(manifest);
-                if (!FiniteNonNegative(toolingMultiplier) || !FiniteNonNegative(launchMultiplier) || !FiniteNonNegative(combineMultiplier)) throw new ArgumentException("Invalid tooling settings.");
+                if (rates == null || !rates.Valid) throw new ArgumentException("Invalid tooling settings.");
                 var designs = (existing ?? Array.Empty<ToolingDesign>()).Take(MaxDesigns + 1).ToArray();
                 if (designs.Length > MaxDesigns) throw new ArgumentException("Too many saved designs to quote safely.");
                 foreach (var design in designs)
@@ -126,9 +129,9 @@ namespace LmpCommon.Agency
                 result.NonScienceCost = manifest.Parts.Where(p => !p.IsScience).Sum(p => p.UnitCost);
                 result.CargoCost = manifest.Cargo.Sum(c => c.UnitCost * c.Count);
                 result.AlreadyTooled = designs.Any(d => d.Fingerprint == result.Fingerprint);
-                result.LaunchCost = CheckCost(result.ScienceCost + result.CargoCost + result.NonScienceCost * (result.AlreadyTooled ? launchMultiplier : 1));
+                result.LaunchCost = CheckCost(LaunchCost(result.ScienceCost, result.CargoCost, result.NonScienceCost, result.AlreadyTooled, rates));
                 if (result.AlreadyTooled) return result;
-                var search = new CoverSearch(manifest, designs, toolingMultiplier, combineMultiplier);
+                var search = new CoverSearch(manifest, designs, rates.Tooling, rates.Combine);
                 var solution = search.Solve();
                 result.ToolingCost = CheckCost(solution.Cost);
                 result.Matches = solution.Matches.OrderBy(m => m.Key, StringComparer.Ordinal).Select(m => new ToolingMatch { Fingerprint = m.Key, Count = m.Value.Count, CombineCost = m.Value.CombineCost }).ToArray();
@@ -146,7 +149,6 @@ namespace LmpCommon.Agency
         {
             internal string Fingerprint;
             internal int[] Counts;
-            internal double Fee;
         }
         private sealed class CoverSearch
         {
@@ -154,11 +156,11 @@ namespace LmpCommon.Agency
             private readonly double[][] costs;
             private readonly Candidate[] candidates;
             private readonly Dictionary<string, Cover> cache = new Dictionary<string, Cover>(StringComparer.Ordinal);
-            private readonly double multiplier;
+            private readonly double multiplier, combine;
             private int states;
             internal CoverSearch(ToolingManifest manifest, ToolingDesign[] designs, double tooling, double combine)
             {
-                multiplier = tooling;
+                multiplier = tooling; this.combine = combine;
                 var groups = manifest.Parts.GroupBy(p => p.Name, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal).ToArray();
                 var names = groups.Select(g => g.Key).ToArray();
                 initial = groups.Select(g => g.Count()).ToArray();
@@ -166,8 +168,8 @@ namespace LmpCommon.Agency
                 costs = groups.Select(g => g.Select(p => p.IsScience ? 0 : p.UnitCost).OrderBy(c => c).ToArray()).ToArray();
                 candidates = designs.Select(design => new { design, counts = design.Manifest.Parts.GroupBy(p => p.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal) })
                     .Where(x => x.counts.All(p => Array.IndexOf(names, p.Key) >= 0 && p.Value <= initial[Array.IndexOf(names, p.Key)]))
-                    .Select(x => new Candidate { Fingerprint = x.design.Fingerprint, Counts = names.Select(n => x.counts.TryGetValue(n, out var count) ? count : 0).ToArray(), Fee = CheckCost(x.design.ToolingBasis * combine) })
-                    .GroupBy(c => c.Fingerprint, StringComparer.Ordinal).Select(g => g.OrderBy(c => c.Fee).First()).OrderBy(c => c.Fingerprint, StringComparer.Ordinal).ToArray();
+                    .Select(x => new Candidate { Fingerprint = x.design.Fingerprint, Counts = names.Select(n => x.counts.TryGetValue(n, out var count) ? count : 0).ToArray() })
+                    .GroupBy(c => c.Fingerprint, StringComparer.Ordinal).Select(g => g.First()).OrderBy(c => c.Fingerprint, StringComparer.Ordinal).ToArray();
             }
             internal Cover Solve() => Solve(initial, 0);
             private Cover Solve(int[] remaining, int depth)
@@ -187,13 +189,16 @@ namespace LmpCommon.Agency
                         if (next[i] < 0) { fits = false; break; }
                         replaced += costs[i].Skip(next[i]).Take(candidate.Counts[i]).Sum() * multiplier;
                     }
-                    if (!fits || candidate.Fee >= replaced) continue;
+                    // The fee is the combine share of the full tooling value of the parts this craft would stop paying for. It ignores what the saved design cost,
+                    // so nested combines stay a constant fraction per level.
+                    var fee = replaced * combine;
+                    if (!fits || fee >= replaced) continue;
                     var tail = Solve(next, depth + 1);
-                    var total = CheckCost(tail.Cost + candidate.Fee);
+                    var total = CheckCost(tail.Cost + fee);
                     if (total >= best.Cost) continue;
                     best = new Cover { Cost = total, Matches = tail.Matches.ToDictionary(p => p.Key, p => new ToolingMatch { Fingerprint = p.Key, Count = p.Value.Count, CombineCost = p.Value.CombineCost }, StringComparer.Ordinal) };
                     if (!best.Matches.TryGetValue(candidate.Fingerprint, out var match)) best.Matches[candidate.Fingerprint] = match = new ToolingMatch { Fingerprint = candidate.Fingerprint };
-                    match.Count++; match.CombineCost += candidate.Fee;
+                    match.Count++; match.CombineCost += fee;
                 }
                 cache[key] = best;
                 return best;

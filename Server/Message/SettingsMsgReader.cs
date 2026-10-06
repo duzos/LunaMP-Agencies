@@ -54,6 +54,7 @@ namespace Server.Message
             msgData.ToolingCostMultiplier = GeneralSettings.SettingsStore.ToolingCostMultiplier;
             msgData.TooledLaunchMultiplier = GeneralSettings.SettingsStore.TooledLaunchMultiplier;
             msgData.ToolingCombineMultiplier = GeneralSettings.SettingsStore.ToolingCombineMultiplier;
+            msgData.UntooledLaunchMultiplier = GeneralSettings.SettingsStore.UntooledLaunchMultiplier;
 
             if (GeneralSettings.SettingsStore.GameDifficulty == GameDifficulty.Custom && GameplaySettings.SettingsStore != null)
             {

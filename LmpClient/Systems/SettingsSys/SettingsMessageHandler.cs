@@ -49,6 +49,7 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.ToolingCostMultiplier = msgData.ToolingCostMultiplier;
             SettingsSystem.ServerSettings.TooledLaunchMultiplier = msgData.TooledLaunchMultiplier;
             SettingsSystem.ServerSettings.ToolingCombineMultiplier = msgData.ToolingCombineMultiplier;
+            SettingsSystem.ServerSettings.UntooledLaunchMultiplier = msgData.UntooledLaunchMultiplier;
             LmpClient.Harmony.CommNet_AgencyFilter.RequestRefresh();
             SettingsSystem.ServerSettings.AgencyLaunchSitesPerAgency = msgData.AgencyLaunchSitesPerAgency;
             SettingsSystem.ServerSettings.AgencyVesselOwnership = msgData.AgencyVesselOwnership;

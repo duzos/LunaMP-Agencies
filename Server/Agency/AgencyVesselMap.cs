@@ -302,12 +302,18 @@ namespace Server.Agency
             {
                 if(!_document.PendingSplits.TryGetValue(child,out var pending)) return true;
                 if(actualParts.Length==0 || !actualParts.Contains(pending.Boundary) || actualParts.Distinct().Count()!=actualParts.Length || actualParts.Any(p=>!pending.AllowedParts.Contains(p))) return false;
+                HashSet<uint> survivingParent = null;
                 if (AgencyEconomyStore.ToolingEnabled && childProto != null)
                 {
                     if (string.IsNullOrEmpty(parentProto)) return false;
                     var parentVessel = new global::Server.System.Vessel.Classes.Vessel(parentProto);
                     var parentIds = PartIds(parentVessel);
-                    if (!Guid.TryParse(parentVessel.Fields.GetSingle("pid")?.Value, out var parentId) || parentId != pending.ParentId || parentIds.Intersect(actualParts).Any() || !new HashSet<uint>(parentIds.Concat(actualParts)).SetEquals(pending.AllowedParts)) return false;
+                    if (!Guid.TryParse(parentVessel.Fields.GetSingle("pid")?.Value, out var parentId) || parentId != pending.ParentId ||
+                        parentIds.Length == 0 || parentIds.Distinct().Count() != parentIds.Length || parentIds.Intersect(actualParts).Any() ||
+                        parentIds.Any(id => !pending.AllowedParts.Contains(id))) return false;
+                    // Collisions can destroy parts between the last published proto and this
+                    // synchronous split capture. Missing parts are losses, never new entitlement.
+                    survivingParent = new HashSet<uint>(parentIds);
                 }
                 var candidates=pending.Constituents.Where(c=>c.PartUids.Contains(pending.Boundary) && (pending.Root==0 || c.RootPartUid==pending.Root)).ToArray();
                 if(pending.Constituents.Count>0 && candidates.Length!=1) return false;
@@ -318,14 +324,14 @@ namespace Server.Agency
                     var childParts=new List<VesselConstituent>();
                     foreach(var c in parentParts.ToArray())
                     {
-                        var moved=c.PartUids.Where(selected.Contains).ToArray(); if(moved.Length==0) continue;
-                        childParts.Add(new VesselConstituent {OriginalVesselId=c.OriginalVesselId,RootPartUid=c.RootPartUid,PartUids=moved,Ownership=c.Ownership.Copy()});
-                        c.PartUids=c.PartUids.Where(p=>!selected.Contains(p)).ToArray(); if(c.PartUids.Length==0) parentParts.Remove(c);
+                        var moved=c.PartUids.Where(selected.Contains).ToArray();
+                        if(moved.Length>0) childParts.Add(new VesselConstituent {OriginalVesselId=c.OriginalVesselId,RootPartUid=c.RootPartUid,PartUids=moved,Ownership=c.Ownership.Copy()});
+                        c.PartUids=c.PartUids.Where(p=>!selected.Contains(p) && (survivingParent == null || survivingParent.Contains(p))).ToArray(); if(c.PartUids.Length==0) parentParts.Remove(c);
                     }
                     if(childParts.Count>0) next.Constituents[child]=childParts;
                 }
                 owner.VesselId=child; owner.Revision=next.Revision+1; next.Records[child]=owner; next.PendingSplits.Remove(child); next.Absorbed.Remove(child);
-                if (AgencyEconomyStore.ToolingEnabled) { next.Revision = checked(_document.Revision + 1); AgencyEconomyStore.CommitSplit(next, pending.ParentId, child, actualParts, childProto, parentProto); }
+                if (AgencyEconomyStore.ToolingEnabled) { next.Revision = checked(_document.Revision + 1); AgencyEconomyStore.CommitSplit(next, pending.ParentId, child, actualParts, childProto, parentProto, survivingParent); }
                 else Commit(next);
                 return true;
             }

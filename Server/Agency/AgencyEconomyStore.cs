@@ -309,7 +309,7 @@ namespace Server.Agency
             }
         }
 
-        internal static void CommitSplit(OwnershipDocument ownership, Guid parent, Guid child, uint[] actualParts, string childProto = null, string parentProto = null)
+        internal static void CommitSplit(OwnershipDocument ownership, Guid parent, Guid child, uint[] actualParts, string childProto = null, string parentProto = null, HashSet<uint> survivingParent = null)
         {
             lock (AgencyVesselMap.TransactionGate)
             {
@@ -326,8 +326,8 @@ namespace Server.Agency
                     Parts = moved,
                     Cargo = source.Cargo.Where(c => selected.Contains(c.ContainerFlightId)).ToArray()
                 };
-                source.Parts = source.Parts.Where(p => !selected.Contains(p.FlightId)).ToArray();
-                source.Cargo = source.Cargo.Where(c => !selected.Contains(c.ContainerFlightId)).ToArray();
+                source.Parts = source.Parts.Where(p => !selected.Contains(p.FlightId) && (survivingParent == null || survivingParent.Contains(p.FlightId))).ToArray();
+                source.Cargo = source.Cargo.Where(c => !selected.Contains(c.ContainerFlightId) && (survivingParent == null || survivingParent.Contains(c.ContainerFlightId))).ToArray();
                 next.Journal = new EconomyVesselJournal { OwnershipAfter = ownership };
                 if (childProto != null) next.Journal.Upserts[child] = childProto;
                 if (parentProto != null) next.Journal.Upserts[parent] = parentProto;

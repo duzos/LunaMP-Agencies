@@ -134,6 +134,61 @@ namespace ServerTest.Agency
         }
 
         [TestMethod]
+        public void DestructionBetweenSplitsBurnsMissingPartsAndCargoAcrossJournalReplay()
+        {
+            using (var fixture = new AgencyEconomyTest.Fixture())
+            {
+                var parent = Launch(fixture, 1201, out _);
+                var merged = new System.Collections.Generic.List<uint> { 1201 };
+                foreach (var uid in new uint[] { 1202, 1203, 1204 })
+                {
+                    var weak = Launch(fixture, uid, out _);
+                    merged.Add(uid);
+                    var raw = Proto(parent, merged.ToArray());
+                    AgencyVesselMap.CommitCouple(Guid.NewGuid(), fixture.Client.UniqueIdentifier, parent, weak, raw, new Server.System.Vessel.Classes.Vessel(raw), 1201, uid);
+                }
+                var first = Guid.NewGuid();
+                Assert.IsTrue(AgencyVesselMap.RestoreSplit(parent, first, 1202, 1202));
+                Assert.IsTrue(AgencyVesselMap.ResolveSplit(first, new uint[] { 1202 }, Proto(first, 1202), Proto(parent, 1201, 1203, 1204)));
+                var second = Guid.NewGuid();
+                Assert.IsTrue(AgencyVesselMap.RestoreSplit(parent, second, 1203, 1203));
+                var epoch = AgencyVesselMap.CaptureEpoch();
+                foreach (var invalidParent in new[] { Proto(parent), Proto(parent, 1201, 1201), Proto(parent, 1201, 1203), Proto(parent, 9999), Proto(Guid.NewGuid(), 1201) })
+                    Assert.IsFalse(AgencyVesselMap.ResolveSplit(second, new uint[] { 1203 }, Proto(second, 1203), invalidParent));
+                foreach (var invalidChild in new[] { new uint[0], new uint[] { 1203, 1203 }, new uint[] { 1203, 9999 }, new uint[] { 1204 } })
+                    Assert.IsFalse(AgencyVesselMap.ResolveSplit(second, invalidChild, Proto(second, invalidChild), Proto(parent, 1201)));
+                Assert.AreEqual(epoch, AgencyVesselMap.CaptureEpoch());
+                // 1204 was destroyed after the first capture. Interrupt the second split's
+                // projection to verify the lost part and its cargo stay burned on replay.
+                AgencyEconomyStore.PersistenceCheckpoint = point => { if (point == "vessel-written") throw new IOException("split projection interrupted"); };
+                Assert.ThrowsException<IOException>(() => AgencyVesselMap.ResolveSplit(second, new uint[] { 1203 }, Proto(second, 1203), Proto(parent, 1201)));
+                AgencyEconomyStore.PersistenceCheckpoint = null;
+                AgencyEconomyStore.Load();
+                AgencyVesselMap.Load();
+                AgencyEconomyStore.Load();
+                Assert.IsTrue(AgencyEconomyStore.Ready);
+                var ids = new[] { parent, first, second };
+                for (var i = 0; i < ids.Length; i++)
+                {
+                    var expected = (uint)(1201 + i);
+                    CollectionAssert.AreEqual(new[] { expected }, AgencyVesselMap.PartIds(VesselStoreSystem.CurrentVessels[ids[i]]));
+                    var paid = fixture.Snapshot.Vessels.Single(v => v.VesselId == ids[i]);
+                    Assert.AreEqual(expected, paid.Parts.Single().FlightId);
+                    Assert.AreEqual(expected, paid.Cargo.Single().ContainerFlightId);
+                    Assert.IsFalse(AgencyEconomyStore.ValidatePublishedParts(ids[i], new uint[] { expected, 1204 }));
+                }
+                var ownership = Newtonsoft.Json.JsonConvert.DeserializeObject<OwnershipDocument>(File.ReadAllText(AgencyVesselMap.OwnershipFilePath));
+                CollectionAssert.AreEqual(new uint[] { 1201 }, ownership.Constituents[parent].SelectMany(c => c.PartUids).ToArray());
+                Assert.IsFalse(ownership.Constituents.Values.SelectMany(c => c).Any(c => c.PartUids.Contains(1204u)));
+                fixture.RefreshSession();
+                var recovery = fixture.Execute(new EconomyCommand { Operation = EconomyOperation.Recover, VesselId = parent, VesselData = System.Text.Encoding.UTF8.GetBytes(Proto(parent, 1201, 1204)) });
+                Assert.IsFalse(recovery.Success);
+                StringAssert.Contains(recovery.Reason, "unpaid parts");
+                Assert.AreEqual(49500d, fixture.Snapshot.Funds);
+            }
+        }
+
+        [TestMethod]
         public void EvaBoardingMovesCrewCargoOnceWithoutChargingOrLosingPayment()
         {
             using (var fixture = new AgencyEconomyTest.Fixture())

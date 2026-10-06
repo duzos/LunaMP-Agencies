@@ -505,6 +505,7 @@
     <Compile Include="Windows\Agency\TradeDrawer.cs" />
     <Compile Include="Systems\Agency\ToolingBoarding.cs" />
     <Compile Include="Systems\Agency\ToolingSplit.cs" />
+    <Compile Include="Systems\Agency\SplitOrbitSnapshot.cs" />
     <Compile Include="Systems\Agency\ToolingManifestBuilder.cs" />
     <Compile Include="Harmony\AgencyTooling.cs" />
     <Compile Include="Windows\Agency\ToolingEditorWindow.cs" />

@@ -22,6 +22,7 @@
     <ProjectReference Include="..\LmpCommon\LmpCommon.csproj" />
     <Compile Include="..\LmpClient\Systems\Agency\ToolingClient.cs" Link="ClientLogic\ToolingClient.cs" />
     <Compile Include="..\LmpClient\Systems\Agency\VesselPublicationGuard.cs" Link="ClientLogic\VesselPublicationGuard.cs" />
+    <Compile Include="..\LmpClient\Systems\Agency\SplitOrbitSnapshot.cs" Link="ClientLogic\SplitOrbitSnapshot.cs" />
   </ItemGroup>
 
 </Project>

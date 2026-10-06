@@ -49,11 +49,11 @@ namespace LmpClient.Systems.Agency
                 stage = "child-backup";
                 var childProto = child.BackupVessel();
                 stage = "child-serialize";
-                next.ChildData = SerializeTopology(childProto);
+                next.ChildData = SerializeTopology(childProto, child);
                 stage = "parent-backup";
                 var parentProto = parent.BackupVessel();
                 stage = "parent-serialize";
-                next.ParentData = SerializeTopology(parentProto);
+                next.ParentData = SerializeTopology(parentProto, parent);
                 stage = "cargo";
                 next.Cargo = ToolingManifestBuilder.CaptureCargo(childProto);
                 var size = next.ChildData.Length + next.ParentData.Length;
@@ -109,10 +109,17 @@ namespace LmpClient.Systems.Agency
             proto.EconomyCargo = current.Cargo; proto.EconomySplitOperationId = current.Operation; proto.EconomySplitParentData = current.ParentData;
             NetworkSender.QueueOutgoingMessage(NetworkMain.CliMsgFactory.CreateNew<VesselCliMsg>(proto));
         }
-        private static byte[] SerializeTopology(ProtoVessel vessel)
+        private static byte[] SerializeTopology(ProtoVessel vessel, Vessel physicalVessel)
         {
             var buffer = new byte[VesselOwnershipPolicy.MaxMergedVesselBytes];
-            VesselSerializer.SerializeVesselToArray(vessel, buffer, out var count);
+            var original = vessel.orbitSnapShot;
+            int count;
+            try
+            {
+                vessel.orbitSnapShot = SplitOrbitSnapshot.Replacement(physicalVessel, vessel) ?? original;
+                VesselSerializer.SerializeVesselToArray(vessel, buffer, out count);
+            }
+            finally { vessel.orbitSnapShot = original; }
             if (count <= 0 || count > buffer.Length) throw new InvalidOperationException("Cannot serialize final craft topology.");
             var bytes = new byte[count]; Array.Copy(buffer, bytes, count); return bytes;
         }

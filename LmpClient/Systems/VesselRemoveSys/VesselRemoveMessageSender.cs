@@ -38,19 +38,24 @@ namespace LmpClient.Systems.VesselRemoveSys
         /// </summary>
         public void SendVesselRemove(Guid vesselId, bool keepVesselInRemoveList = true, string reason = null)
         {
-            if (LmpClient.Systems.Agency.VesselPublicationGuard.Pending)
+            if (!LmpClient.Systems.Agency.VesselPublicationGuard.RetainRemoval(vesselId, keepVesselInRemoveList, reason,
+                TimeSyncSystem.UniversalTime, out var overflow))
             {
+                if (overflow)
+                {
+                    LmpClient.Systems.Agency.ToolingClient.RecoveryDisconnect("Too many pending vessel removals.");
+                    return;
+                }
                 Diagnostics.PlaytestDiagnostics.Write("client.vessel.remove-blocked", () => $"vessel={vesselId} permanent={keepVesselInRemoveList} reason={reason}");
                 return;
             }
             LunaLog.Log($"[LMP]: Removing {vesselId} from the server ({reason ?? "Unknown reason"})");
-            var msgData = NetworkMain.CliMsgFactory.CreateNewMessageData<VesselRemoveMsgData>();
-            msgData.GameTime = TimeSyncSystem.UniversalTime;
-            msgData.VesselId = vesselId;
-            msgData.AddToKillList = keepVesselInRemoveList;
-            msgData.Reason = reason;
-
-            SendMessage(msgData);
+            Diagnostics.PlaytestDiagnostics.Write("client.vessel.remove-retained", () => $"vessel={vesselId} permanent={keepVesselInRemoveList} blocked={LmpClient.Systems.Agency.VesselPublicationGuard.Pending} reason={reason}");
+            FlushRetainedRemovals();
         }
+
+        public static void FlushRetainedRemovals() => LmpClient.Systems.Agency.VesselPublicationGuard.PumpRemovals(
+            () => NetworkMain.CliMsgFactory.CreateNew<VesselCliMsg>(NetworkMain.CliMsgFactory.CreateNewMessageData<VesselRemoveMsgData>()),
+            (message, epoch) => NetworkSender.QueueOutgoingMessage(message, epoch));
     }
 }

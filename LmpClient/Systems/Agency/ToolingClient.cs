@@ -247,6 +247,7 @@ namespace LmpClient.Systems.Agency
                 RequestQuoteRefresh();
             }
             while (results.TryDequeue(out var result)) { TradeClient.HandleResult(result); Handle(result); }
+            global::LmpClient.Systems.VesselRemoveSys.VesselRemoveMessageSender.FlushRetainedRemovals();
             TradeClient.Tick();
             if (settlementDeadline != default(DateTime) && DateTime.UtcNow > settlementDeadline)
             {

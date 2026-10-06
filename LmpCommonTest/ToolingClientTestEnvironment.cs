@@ -15,11 +15,11 @@ public class Funding : TestUnityObject { public static Funding Instance; }
 public class ResearchAndDevelopment : TestUnityObject { public static ResearchAndDevelopment Instance; }
 public class CrewMember { public string name; }
 public class VesselCrewManifest { public IEnumerable<CrewMember> GetAllCrew(bool value) => throw new NotSupportedException(); }
-public class Vessel : TestUnityObject { public Guid id; }
-public class Part : TestUnityObject { public uint flightID, craftID; public Vessel vessel; public List<CrewMember> protoModuleCrew = new List<CrewMember>(); }
+public class Vessel : TestUnityObject { public Guid id; public bool loaded, packed; public CelestialBody mainBody; public Part rootPart; public Vector3d CoMD, velocityD; }
+public class Part : TestUnityObject { public uint flightID, craftID; public TestUnityObject rb; public Vessel vessel; public List<CrewMember> protoModuleCrew = new List<CrewMember>(); }
 public class ShipConstruct { public List<Part> parts = new List<Part>(); }
 public class ProtoPartSnapshot { public uint flightID; }
-public class ProtoVessel { public Guid vesselID; public List<ProtoPartSnapshot> protoPartSnapshots = new List<ProtoPartSnapshot>(); }
+public class ProtoVessel { public Guid vesselID; public bool landed, splashed; public OrbitSnapshot orbitSnapShot; public List<ProtoPartSnapshot> protoPartSnapshots = new List<ProtoPartSnapshot>(); }
 public class ShipTemplate { public ConfigNode config; }
 public class ConfigNode
 {
@@ -108,3 +108,5 @@ namespace LmpClient.Systems.Agency
         private static bool HandleSplit(EconomyResult result) => false;
     }
 }
+
+namespace LmpClient.Systems.VesselRemoveSys { public static class VesselRemoveMessageSender { public static void FlushRetainedRemovals() { } } }

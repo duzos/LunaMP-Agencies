@@ -1,8 +1,10 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Server.Agency;
 using Server.Context;
+using Server.Settings.Structures;
 using System;
 using System.IO;
+using System.Linq;
 
 namespace ServerTest.Agency
 {
@@ -178,6 +180,146 @@ namespace ServerTest.Agency
             Assert.AreEqual("new-uid", a.OwnerUniqueId);
             Assert.IsTrue(a.HasMember("new-uid"), "New owner auto-joins as a member");
             Assert.IsTrue(a.HasMember("orig-uid"), "Previous owner stays as a member");
+        }
+
+        private static Server.Agency.Agency CreatePopulatedSoloAgency()
+        {
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
+            GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = false;
+            var solo = AgencySystem.EnsureSoloAgency("uid-solo", "Alex");
+            lock (solo.Lock)
+            {
+                solo.Funds = 123456;
+                solo.Science = 77;
+                solo.Reputation = 33;
+                solo.UnlockedTechCount = 5;
+                solo.VesselsLaunched = 3;
+                solo.CountedVesselIds.Add(Guid.NewGuid());
+                solo.FirstAchievements["RecoverFromOrbit:Mun"] = 42;
+            }
+            AgencyStore.PersistAgency(solo);
+            return solo;
+        }
+
+        [TestMethod]
+        public void AdminRename_PromotesSoloAgencyAndKeepsItsData()
+        {
+            var solo = CreatePopulatedSoloAgency();
+            var id = solo.Id;
+            var created = solo.CreatedUtcTicks;
+            var countedVessels = solo.CountedVesselIds.ToArray();
+            var kerbalFiles = Directory.GetFiles(AgencyKerbalStore.KerbalsPath(id)).Length;
+            Assert.AreEqual(4, kerbalFiles);
+            Assert.IsTrue(solo.IsSolo);
+
+            var result = AgencySystem.RenameAgency(id, "console", "Southport", isAdmin: true);
+
+            Assert.IsTrue(result.Success, result.Message);
+            var promoted = AgencySystem.GetAgency(id);
+            Assert.AreSame(solo, promoted);
+            Assert.AreEqual("Southport", promoted.Name);
+            Assert.IsFalse(promoted.IsSolo);
+            Assert.AreEqual("uid-solo", promoted.OwnerUniqueId);
+            Assert.AreEqual(1, promoted.Members.Count);
+            Assert.IsTrue(promoted.HasMember("uid-solo"));
+            Assert.AreEqual(created, promoted.CreatedUtcTicks);
+            Assert.AreEqual(123456, promoted.Funds, 1e-6);
+            Assert.AreEqual(77f, promoted.Science);
+            Assert.AreEqual(33f, promoted.Reputation);
+            Assert.AreEqual(5, promoted.UnlockedTechCount);
+            Assert.AreEqual(3, promoted.VesselsLaunched);
+            CollectionAssert.AreEquivalent(countedVessels, promoted.CountedVesselIds.ToArray());
+            Assert.AreEqual(42, promoted.FirstAchievements["RecoverFromOrbit:Mun"]);
+            Assert.AreEqual(kerbalFiles, Directory.GetFiles(AgencyKerbalStore.KerbalsPath(id)).Length);
+            Assert.IsFalse(promoted.ToInfo().IsSolo, "The broadcast snapshot must carry the promotion.");
+
+            AgencyStore.Agencies.Clear();
+            AgencyStore.LoadExistingAgencies();
+            var reloaded = AgencySystem.GetAgency(id);
+            Assert.IsNotNull(reloaded);
+            Assert.AreEqual("Southport", reloaded.Name);
+            Assert.IsFalse(reloaded.IsSolo, "The promotion must be persisted.");
+            Assert.AreEqual(123456, reloaded.Funds, 1e-6);
+        }
+
+        [TestMethod]
+        public void NonAdminRename_OfSoloAgency_StillDenied()
+        {
+            var solo = AgencySystem.EnsureSoloAgency("uid-solo", "Alex");
+            var before = solo.Name;
+
+            var asOwner = AgencySystem.RenameAgency(solo.Id, "uid-solo", "Southport", isAdmin: false);
+            var asStranger = AgencySystem.RenameAgency(solo.Id, "uid-other", "Southport", isAdmin: false);
+
+            Assert.IsFalse(asOwner.Success);
+            Assert.IsFalse(asStranger.Success);
+            Assert.AreEqual(before, solo.Name);
+            Assert.IsTrue(solo.IsSolo);
+        }
+
+        [TestMethod]
+        public void AdminRename_OfSoloAgency_StillAppliesNameRules()
+        {
+            var solo = AgencySystem.EnsureSoloAgency("uid-solo", "Alex");
+            var before = solo.Name;
+            AgencySystem.CreateAgency("Southport", "uid-other", "Other");
+
+            Assert.IsFalse(AgencySystem.RenameAgency(solo.Id, "console", "   ", isAdmin: true).Success, "empty name");
+            Assert.IsFalse(AgencySystem.RenameAgency(solo.Id, "console", new string('x', 49), isAdmin: true).Success, "too long");
+            Assert.IsFalse(AgencySystem.RenameAgency(solo.Id, "console", "Solo-Renamed", isAdmin: true).Success, "reserved prefix");
+            Assert.IsFalse(AgencySystem.RenameAgency(solo.Id, "console", "solo-renamed", isAdmin: true).Success, "reserved prefix, any case");
+            Assert.IsFalse(AgencySystem.RenameAgency(solo.Id, "console", "southport", isAdmin: true).Success, "duplicate name, any case");
+
+            Assert.AreEqual(before, solo.Name);
+            Assert.IsTrue(solo.IsSolo, "A rejected rename must not promote.");
+        }
+
+        [TestMethod]
+        public void PromotedAgency_ReconnectingKeepsTheSameAgency()
+        {
+            var solo = AgencySystem.EnsureSoloAgency("uid-solo", "Alex");
+            Assert.IsTrue(AgencySystem.RenameAgency(solo.Id, "console", "Southport", isAdmin: true).Success);
+            var count = AgencyStore.Agencies.Count;
+
+            var again = AgencySystem.EnsureSoloAgency("uid-solo", "Alex");
+
+            Assert.AreSame(solo, again);
+            Assert.AreSame(solo, AgencySystem.GetAgencyForPlayer("uid-solo"));
+            Assert.AreEqual(count, AgencyStore.Agencies.Count, "No duplicate solo agency may be created.");
+        }
+
+        [TestMethod]
+        public void PromotedAgency_SurvivesItsLastMemberLeaving()
+        {
+            var solo = CreatePopulatedSoloAgency();
+            Assert.IsTrue(AgencySystem.RenameAgency(solo.Id, "console", "Southport", isAdmin: true).Success);
+
+            var leave = AgencySystem.LeaveAgency("uid-solo", "Alex");
+
+            Assert.IsTrue(leave.Success, leave.Message);
+            var kept = AgencySystem.GetAgency(solo.Id);
+            Assert.IsNotNull(kept, "Only solo agencies are removed when empty.");
+            Assert.AreEqual(0, kept.Members.Count);
+            Assert.AreEqual(123456, kept.Funds, 1e-6);
+            Assert.IsTrue(File.Exists(AgencyStore.MetaPath(solo.Id)));
+            var newSolo = AgencySystem.GetAgencyForPlayer("uid-solo");
+            Assert.IsNotNull(newSolo);
+            Assert.AreNotEqual(solo.Id, newSolo.Id);
+            Assert.IsTrue(newSolo.IsSolo);
+        }
+
+        [TestMethod]
+        public void AdminRename_OfPublicAgency_IsUnchanged()
+        {
+            var (_, _, a) = AgencySystem.CreateAgency("Before", "uid-1", "Jeb");
+
+            var byOwner = AgencySystem.RenameAgency(a.Id, "uid-1", "After", isAdmin: false);
+            Assert.IsTrue(byOwner.Success, byOwner.Message);
+            var byAdmin = AgencySystem.RenameAgency(a.Id, "console", "Final", isAdmin: true);
+            Assert.IsTrue(byAdmin.Success, byAdmin.Message);
+            Assert.AreEqual("Final", a.Name);
+            Assert.IsFalse(a.IsSolo);
+            Assert.IsFalse(AgencySystem.RenameAgency(a.Id, "uid-2", "Hijack", isAdmin: false).Success);
         }
 
         [TestMethod]

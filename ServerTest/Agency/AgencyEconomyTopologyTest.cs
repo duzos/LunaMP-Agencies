@@ -15,7 +15,7 @@ namespace ServerTest.Agency
     {
         private static string Proto(Guid id, params uint[] ids) => "pid = " + id.ToString("N") + "\nname = Fixture\nroot = 0\n" + string.Concat(ids.Select(uid => "PART\n{\nname = probe\nuid = " + uid + "\n}\n")) + string.Concat(new[] { "ORBIT", "ACTIONGROUPS", "DISCOVERY", "FLIGHTPLAN", "CTRLSTATE", "VESSELMODULES" }.Select(n => n + "\n{\n}\n"));
 
-        private static Guid Launch(AgencyEconomyTest.Fixture fixture, uint uid, out Guid launchId)
+        internal static Guid Launch(AgencyEconomyTest.Fixture fixture, uint uid, out Guid launchId)
         {
             var manifest = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "probe", UnitCost = 100 } }, Cargo = new[] { new ToolingCargo { Name = "cargo", Count = 1, UnitCost = 25, ContainerPartIndex = 0 } } };
             launchId = Guid.NewGuid();

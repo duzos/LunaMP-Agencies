@@ -188,10 +188,17 @@ namespace Server.Message
                     {
                         var registration = msgData.EconomyParentVesselId != Guid.Empty ? AgencyEconomyStore.RegisterEva(client, msgData, vesselText, parsed) : AgencyEconomyStore.Register(client, msgData, vesselText, parsed);
                         AgencyEconomyStore.SendResult(client, registration);
-                        if (!registration.Success) return;
+                        if (!registration.Success)
+                        {
+                            PlaytestDiagnostics.Write("vessel.proto.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} reason=registration detail={registration.Reason}");
+                            LunaLog.Warning($"Dropped vessel {msgData.VesselId} from {client.PlayerName}: registration rejected ({registration.Reason}).");
+                            return;
+                        }
                     }
                     if(!existing) AgencyVesselMap.RegisterNew(msgData.VesselId,client.AgencyId);
                     if (AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.ValidatePublishedParts(msgData.VesselId, AgencyVesselMap.PartIds(parsed))) return;
+                    // At the actual store write: a crew name leaving a stored craft may be about to board EVA.
+                    if (existing) AgencyEconomyStore.RecordCrewDepartures(client, msgData.VesselId, parsed);
                     VesselStoreSystem.CurrentVessels[msgData.VesselId]=parsed;
                     if(!existing && !topologyChild)
                     {

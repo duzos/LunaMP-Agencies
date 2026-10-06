@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using Server.Client;
 using Server.Context;
 using Server.Diagnostics;
+using Server.Log;
 using Server.Server;
 using Server.Settings.Structures;
 using Server.System;
@@ -130,6 +131,7 @@ namespace Server.Agency
                         Persist(_document);
                     }
                     Sessions.Clear();
+                    Departures.Clear();
                     PublicationBlocked.Clear();
                     _document.SessionSequences.Clear();
                     _document.Operations.Clear();
@@ -494,6 +496,7 @@ namespace Server.Agency
 
         public static void CancelPending(ClientStructure client = null)
         {
+            if (client != null) DropDepartures(client);
             if (!Enabled || !Ready) return;
             lock (AgencyVesselMap.TransactionGate)
             {
@@ -579,7 +582,8 @@ namespace Server.Agency
                     {
                         if (binding == null || binding.Count < 1 || !currentParts.Contains(binding.ContainerFlightId)) return false;
                         var count = binding.Count;
-                        foreach (var pool in remaining.Where(c => c.Name == binding.Name && c.Count > 0).OrderBy(c => c.UnitCost))
+                        // An exact crew match (then container) binds first, so a crewmate's jetpack or chute cannot take an EVA kerbal's label.
+                        foreach (var pool in remaining.Where(c => c.Name == binding.Name && c.Count > 0).OrderBy(c => c.CrewName == binding.CrewName ? 0 : 1).ThenBy(c => c.ContainerFlightId == binding.ContainerFlightId ? 0 : 1).ThenBy(c => c.UnitCost))
                         {
                             var take = Math.Min(count, pool.Count);
                             if (take == 0) break;
@@ -618,20 +622,73 @@ namespace Server.Agency
             }
         }
 
+        private sealed class CrewDeparture { internal Guid Parent; internal string Crew, Actor; internal long Session, Expires; }
+        private static readonly List<CrewDeparture> Departures = new List<CrewDeparture>();
+        private const int MaxDepartures = 256, DepartureSeconds = 120;
+
+        private static string[] CrewNames(global::Server.System.Vessel.Classes.Vessel vessel)
+            => vessel.Parts.GetAllValues().SelectMany(p => p.Fields.GetAll()).Where(f => f.Key == "crew" && !string.IsNullOrWhiteSpace(f.Value)).Select(f => f.Value).Distinct(StringComparer.Ordinal).ToArray();
+
+        private static bool SameSession(CrewDeparture d, ClientStructure client) => d.Actor == client.UniqueIdentifier && d.Session == client.ConnectionTime.Ticks;
+
+        // The parent's crew-modified proto can reach the server before the EVA proto, so a crew name leaving a
+        // stored craft is remembered briefly. Called at the store write, before the incoming proto replaces the copy.
+        internal static void RecordCrewDepartures(ClientStructure client, Guid parent, global::Server.System.Vessel.Classes.Vessel incoming)
+        {
+            if (!ToolingEnabled) return;
+            lock (AgencyVesselMap.TransactionGate)
+            {
+                if (!VesselStoreSystem.CurrentVessels.TryGetValue(parent, out var stored)) return;
+                var remaining = new HashSet<string>(CrewNames(incoming), StringComparer.Ordinal);
+                var left = CrewNames(stored).Where(name => !remaining.Contains(name)).ToArray();
+                if (left.Length == 0) return;
+                // The Control lock is deliberately not required: it moves to the EVA kerbal on vessel switch, possibly before this proto arrives.
+                var locks = LockSystem.LockQuery;
+                if (!VesselOwnershipSystem.CanControl(client, parent) || !(locks.LockBelongsToPlayer(LmpCommon.Locks.LockType.UnloadedUpdate, parent, null, client.PlayerName) || locks.LockBelongsToPlayer(LmpCommon.Locks.LockType.Update, parent, null, client.PlayerName))) return;
+                var now = UtcNow().Ticks;
+                Departures.RemoveAll(d => d.Expires <= now);
+                foreach (var name in left)
+                {
+                    Departures.RemoveAll(d => d.Parent == parent && d.Crew == name && SameSession(d, client));
+                    Departures.Add(new CrewDeparture { Parent = parent, Crew = name, Actor = client.UniqueIdentifier, Session = client.ConnectionTime.Ticks, Expires = UtcNow().AddSeconds(DepartureSeconds).Ticks });
+                }
+                while (Departures.Count > MaxDepartures) Departures.RemoveAt(0);
+            }
+        }
+
+        private static CrewDeparture FindDeparture(ClientStructure client, Guid parent, string crew)
+        {
+            var now = UtcNow().Ticks;
+            return Departures.FirstOrDefault(d => d.Expires > now && d.Parent == parent && d.Crew == crew && SameSession(d, client));
+        }
+
+        internal static bool HasCrewDeparture(ClientStructure client, Guid parent, string crew) { lock (AgencyVesselMap.TransactionGate) return FindDeparture(client, parent, crew) != null; }
+
+        private static void DropDepartures(ClientStructure client) { lock (AgencyVesselMap.TransactionGate) Departures.RemoveAll(d => SameSession(d, client)); }
+
         public static EconomyResult RegisterEva(ClientStructure client, VesselProtoMsgData message, string raw, global::Server.System.Vessel.Classes.Vessel vessel)
         {
             lock (AgencyVesselMap.TransactionGate)
             {
-                var result = new EconomyResult { Operation = EconomyOperation.RegisterLaunch, VesselId = message.VesselId };
+                // RequestId = VesselId keeps this result from matching an idle client's empty pending ids.
+                var result = new EconomyResult { RequestId = message.VesselId, Operation = EconomyOperation.RegisterLaunch, VesselId = message.VesselId };
                 try
                 {
                     RequireActor(client);
-                    RequireVessel(client, message.EconomyParentVesselId);
+                    RequireVessel(client, message.EconomyParentVesselId, "EVA registration is not authorized.");
                     if (string.IsNullOrWhiteSpace(message.EconomyEvaCrew) || vessel.Fields.GetSingle("type")?.Value != "EVA" || VesselStoreSystem.VesselExists(message.VesselId))
                         throw new InvalidOperationException("Invalid EVA registration.");
-                    var parent = VesselStoreSystem.CurrentVessels[message.EconomyParentVesselId];
-                    if (!parent.Parts.GetAllValues().Any(p => p.Fields.GetAll().Any(f => f.Key == "crew" && f.Value == message.EconomyEvaCrew)))
+                    var parentId = message.EconomyParentVesselId;
+                    var crew = message.EconomyEvaCrew;
+                    var parent = VesselStoreSystem.CurrentVessels[parentId];
+                    var ticket = FindDeparture(client, parentId, crew);
+                    if (ticket == null && !CrewNames(parent).Contains(crew, StringComparer.Ordinal))
                         throw new InvalidOperationException("EVA crew is not aboard its parent vessel.");
+                    // Either way the kerbal must not be aboard another craft of the owning agency (agencies may reuse kerbal names).
+                    var ownerAgency = AgencyVesselMap.Get(parentId)?.OwnerAgencyId ?? Guid.Empty;
+                    if (ownerAgency == Guid.Empty) ownerAgency = client.AgencyId;
+                    if (VesselStoreSystem.CurrentVessels.ToArray().Any(p => p.Key != parentId && (AgencyVesselMap.Get(p.Key)?.OwnerAgencyId ?? Guid.Empty) == ownerAgency && CrewNames(p.Value).Contains(crew, StringComparer.Ordinal)))
+                        throw new InvalidOperationException("EVA crew is already aboard another craft.");
                     var ids = AgencyVesselMap.PartIds(vessel);
                     if (ids.Length != 1 || vessel.Parts.GetAllValues().Any(p => !p.Fields.GetAll().Any(f => f.Key == "crew" && f.Value == message.EconomyEvaCrew)))
                         throw new InvalidOperationException("EVA crew identity does not match.");
@@ -654,24 +711,30 @@ namespace Server.Agency
                     ownership.Records[message.VesselId] = owner;
                     next.Journal = new EconomyVesselJournal { OwnershipAfter = ownership, Upserts = new Dictionary<Guid, string> { [message.VesselId] = raw } };
                     Commit(next);
+                    Departures.RemoveAll(d => d.Parent == parentId && d.Crew == crew && SameSession(d, client));
                     result.Success = true;
                     result.Revision = _document.Revision;
                 }
-                catch (Exception e) { result.RecoveryRequired = _error != null; result.Reason = _error ?? e.Message; }
+                catch (Exception e)
+                {
+                    result.RecoveryRequired = _error != null; result.Reason = _error ?? e.Message;
+                    LunaLog.Warning($"[Economy] EVA registration rejected for {client?.PlayerName}: eva={message.VesselId} parent={message.EconomyParentVesselId} crew={message.EconomyEvaCrew}: {result.Reason}");
+                    PlaytestDiagnostics.Write("economy.eva.reject", () => $"{PlaytestDiagnostics.Client(client)} eva={message.VesselId} parent={message.EconomyParentVesselId} crew={message.EconomyEvaCrew} reason={result.Reason}");
+                }
                 return result;
             }
         }
 
-        private static void RequireVessel(ClientStructure client, Guid id)
+        private static void RequireVessel(ClientStructure client, Guid id, string unauthorized)
         {
-            if (!VesselStoreSystem.VesselExists(id) || !VesselOwnershipPolicy.CanControl(AgencyVesselMap.Get(id), client.AgencyId)) throw new InvalidOperationException("Craft recovery is not authorized.");
+            if (!VesselStoreSystem.VesselExists(id) || !VesselOwnershipPolicy.CanControl(AgencyVesselMap.Get(id), client.AgencyId)) throw new InvalidOperationException(unauthorized);
             if (LockSystem.LockQuery.ControlLockExists(id) && !LockSystem.LockQuery.ControlLockBelongsToPlayer(id, client.PlayerName)) throw new InvalidOperationException("Craft is controlled by another pilot.");
         }
 
         private static void BoardEva(EconomyDocument candidate, ClientStructure client, EconomyCommand command)
         {
-            RequireVessel(client, command.VesselId);
-            RequireVessel(client, command.ParentVesselId);
+            RequireVessel(client, command.VesselId, "Craft boarding is not authorized.");
+            RequireVessel(client, command.ParentVesselId, "Craft boarding is not authorized.");
             if (command.VesselId == command.ParentVesselId || command.VesselData == null || command.VesselData.Length == 0 || command.VesselData.Length > 2 * 1024 * 1024 || string.IsNullOrWhiteSpace(command.CrewName))
                 throw new InvalidOperationException("Invalid boarding envelope.");
             var eva = VesselStoreSystem.CurrentVessels[command.VesselId];
@@ -704,7 +767,7 @@ namespace Server.Agency
 
         private static void Recover(EconomyDocument candidate, ClientStructure client, EconomyCommand command)
         {
-            RequireVessel(client, command.VesselId);
+            RequireVessel(client, command.VesselId, "Craft recovery is not authorized.");
             if (!candidate.Vessels.TryGetValue(command.VesselId, out var record)) throw new InvalidOperationException("Craft has no recoverable provenance.");
             var current = AgencyVesselMap.PartIds(VesselStoreSystem.CurrentVessels[command.VesselId]);
             if (command.VesselData != null && command.VesselData.Length > 0)
@@ -760,7 +823,7 @@ namespace Server.Agency
             if (!candidate.Launches.TryGetValue(command.LaunchId, out var launch) || launch.AgencyId != client.AgencyId || launch.ActorId != client.UniqueIdentifier || launch.State != LaunchState.Registered || launch.ExternallySettled) throw new InvalidOperationException("Launch cannot be reverted after external settlement.");
             var vessels = candidate.Vessels.Values.Where(v => v.Parts.Any(p => p.LaunchId == launch.LaunchId)).ToArray();
             if (vessels.Length == 0 || vessels.Any(v => v.Parts.Any(p => p.LaunchId != launch.LaunchId) || AgencyVesselMap.Get(v.VesselId)?.OwnerAgencyId != client.AgencyId)) throw new InvalidOperationException("Undock or recover separately; launch ownership has changed.");
-            foreach (var vessel in vessels) RequireVessel(client, vessel.VesselId);
+            foreach (var vessel in vessels) RequireVessel(client, vessel.VesselId, "Craft revert is not authorized.");
             var journal = new EconomyVesselJournal { Removals = vessels.Select(v => v.VesselId).Where(v => command.Operation != EconomyOperation.RevertLaunch || v != launch.VesselId).ToArray() };
             foreach (var vessel in vessels) candidate.Vessels.Remove(vessel.VesselId);
             if (command.Operation == EconomyOperation.RevertLaunch)

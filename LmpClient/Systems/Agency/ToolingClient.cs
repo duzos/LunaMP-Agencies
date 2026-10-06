@@ -292,13 +292,14 @@ namespace LmpClient.Systems.Agency
                 lock (stateLock) { settling.Remove(result.VesselId); if (settling.Count == 0 && pendingRevert == Guid.Empty) settlementDeadline = default(DateTime); }
             }
             if (result.RecoveryRequired) { RecoveryDisconnect(result.Reason); return; }
-            if (pending != null && result.Operation == EconomyOperation.RegisterLaunch && result.LaunchId == pending.Launch)
+            // Empty ids are never a match: a RegisterEva result carries neither a launch nor a request of this client.
+            if (pending != null && pending.Launch != Guid.Empty && result.Operation == EconomyOperation.RegisterLaunch && result.LaunchId == pending.Launch)
             {
                 if (!result.Success) { RecoveryDisconnect(result.Reason); return; }
                 lock (stateLock) bindings.Remove(result.VesselId);
                 pending = null; InputLockManager.RemoveControlLock(LaunchLock); return;
             }
-            if (result.RequestId == pendingRevert)
+            if (pendingRevert != Guid.Empty && result.RequestId == pendingRevert)
             {
                 pendingRevert = Guid.Empty;
                 lock (stateLock) { if (settling.Count == 0) settlementDeadline = default(DateTime); }

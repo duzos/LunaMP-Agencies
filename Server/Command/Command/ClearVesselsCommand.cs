@@ -1,5 +1,6 @@
 ﻿using LmpCommon.Message.Data.Vessel;
 using LmpCommon.Message.Server;
+using Server.Agency;
 using Server.Command.Command.Base;
 using Server.Command.Common;
 using Server.Context;
@@ -66,21 +67,11 @@ namespace Server.Command.Command
         //Removes all matching vessels
         private static void RunRemove(string vesselType, string vesselSituation, string vesselSplashed, string vesselName)
         {
-            var removalCount = 0;
-            var vesselList = VesselStoreSystem.CurrentVessels.ToArray();
-
-            foreach (var vesselKeyVal in vesselList.Where(v => IsVesselFound(v.Value, vesselType, vesselSituation, vesselSplashed, vesselName)))
-            {
-                LunaLog.Normal($"Removing vessel: {vesselKeyVal.Key}");
-
-                VesselStoreSystem.RemoveVessel(vesselKeyVal.Key);
-
-                var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<VesselRemoveMsgData>();
-                msgData.VesselId = vesselKeyVal.Key;
-                MessageQueuer.SendToAllClients<VesselSrvMsg>(msgData);
-
-                removalCount++;
-            }
+            var ids = VesselStoreSystem.CurrentVessels.ToArray().Where(v => IsVesselFound(v.Value, vesselType, vesselSituation, vesselSplashed, vesselName)).Select(v => v.Key).ToArray();
+            var result = VesselRemovalService.Remove(ids, "Cleared by admin", VesselRemovalMode.Ordinary, null, VesselRemovalOptions.AdminCleanup(id =>
+                !VesselStoreSystem.CurrentVessels.TryGetValue(id, out var current) || !IsVesselFound(current, vesselType, vesselSituation, vesselSplashed, vesselName) ? "No longer matches." : null));
+            foreach (var id in result.Removed) LunaLog.Normal($"Removed vessel: {id}");
+            var removalCount = result.Removed.Length;
 
             LunaLog.Normal(removalCount > 0 ? $"Removed {removalCount} vessel(s) ..." : "Removed nothing ...");
         }

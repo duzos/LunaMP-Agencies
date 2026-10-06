@@ -2,7 +2,7 @@
 namespace LmpCommon.Agency
 {
     public enum VesselDockingPolicy : byte { Nobody, CoOwners, Anyone }
-    public enum VesselOwnershipOperation : byte { Claim, AddCoOwner, RemoveCoOwner, Transfer, SetDockingPolicy }
+    public enum VesselOwnershipOperation : byte { Claim, AddCoOwner, RemoveCoOwner, Transfer, SetDockingPolicy, Delete }
     public enum DockConsentStatus : byte { Pending, Granted, Denied, Expired, Cancelled, Consumed, Completed, Rejected, RecoveryRequired }
     public enum DockingDecision { Allow, Deny, RequestConsent }
     public sealed class VesselOwnershipRecord

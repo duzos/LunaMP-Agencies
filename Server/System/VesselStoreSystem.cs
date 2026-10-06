@@ -23,7 +23,8 @@ namespace Server.System
         public static bool VesselExists(Guid vesselId) => CurrentVessels.ContainsKey(vesselId);
 
         /// <summary>
-        /// Removes a vessel from the store
+        /// Removes a vessel from the store. Server code removes vessels through VesselRemovalService, which also keeps the
+        /// ownership map in sync and deletes the file synchronously; this version deletes the file in the background.
         /// </summary>
         public static void RemoveVessel(Guid vesselId)
         {

@@ -46,10 +46,14 @@ namespace Server.Agency
         public Dictionary<Guid, VesselOwnershipRecord> Records = new Dictionary<Guid, VesselOwnershipRecord>();
         public Dictionary<Guid, List<VesselConstituent>> Constituents = new Dictionary<Guid, List<VesselConstituent>>();
         public HashSet<Guid> Absorbed = new HashSet<Guid>();
+        // Deleted craft id -> revision of the deleting commit. Pruned by age and capped.
+        public Dictionary<Guid, long> Deleted = new Dictionary<Guid, long>();
         public List<CouplingReceipt> Receipts = new List<CouplingReceipt>();
         public CouplingJournal Journal;
         public Dictionary<Guid,PendingVesselSplit> PendingSplits = new Dictionary<Guid,PendingVesselSplit>();
     }
+    /// <summary>Ordinary removals keep paid launches revertible; Deleted settles them and blocks re-upload.</summary>
+    public enum VesselRemovalMode { Ordinary, Deleted }
     public sealed class OwnershipSnapshot
     {
         public long Revision { get; }
@@ -67,11 +71,17 @@ namespace Server.Agency
         public static string MapFilePath => Path.Combine(ServerContext.UniverseDirectory, "AgencyVesselMap.txt");
         public static string OwnershipFilePath => Path.Combine(ServerContext.UniverseDirectory, "AgencyVesselOwnership.json");
         public static bool Ready { get { lock(TransactionGate) return _loadError == null && _document.Journal == null; } }
-        public static IReadOnlyDictionary<Guid, Guid> Snapshot { get { lock(TransactionGate) return _document.Records.Values.Select(Effective).Where(x=>x.OwnerAgencyId!=Guid.Empty).ToDictionary(x=>x.VesselId,x=>x.OwnerAgencyId); } }
-        public static OwnershipSnapshot GetOwnershipSnapshot() { lock(TransactionGate) return new OwnershipSnapshot(_document.Revision,_document.Records.Values.Select(Effective).ToArray()); }
+        // Bookkeeping predicate: ownership records are created for every first-seen vessel (the stock proto path included), so removals maintain the map in every mode.
+        public static bool MapMaintained => true;
+        // Rules predicate, same as the proto branch of VesselMsgReader: ownership, economy, visibility or CommNet opt-in.
+        public static bool AgencyRulesActive => VesselOwnershipSystem.Enabled || AgencyCommNetStore.Enabled || AgencyEconomyStore.Enabled || AgencyVisibilityStore.Enabled;
+        // Absorbed craft no longer exist; their records stay for undocking but are never advertised to clients.
+        public static IReadOnlyDictionary<Guid, Guid> Snapshot { get { lock(TransactionGate) return _document.Records.Values.Where(x=>!_document.Absorbed.Contains(x.VesselId)).Select(Effective).Where(x=>x.OwnerAgencyId!=Guid.Empty).ToDictionary(x=>x.VesselId,x=>x.OwnerAgencyId); } }
+        public static OwnershipSnapshot GetOwnershipSnapshot() { lock(TransactionGate) return new OwnershipSnapshot(_document.Revision,_document.Records.Values.Where(x=>!_document.Absorbed.Contains(x.VesselId)).Select(Effective).ToArray()); }
         public static VesselOwnershipRecord Get(Guid id) { lock(TransactionGate) return _document.Records.TryGetValue(id,out var r)?Effective(r):null; }
         public static bool TryGetAgency(Guid id,out Guid agency) { lock(TransactionGate) { agency=Get(id)?.OwnerAgencyId??Guid.Empty; return agency!=Guid.Empty; } }
         public static bool IsAbsorbed(Guid id) { lock(TransactionGate) return _document.Absorbed.Contains(id); }
+        public static bool IsDeleted(Guid id) { lock(TransactionGate) return _document.Deleted.ContainsKey(id); }
         public static Task WaitForPendingWritesAsync() => Task.CompletedTask;
         public static void Load()
         {
@@ -85,6 +95,7 @@ namespace Server.Agency
                         if(new FileInfo(OwnershipFilePath).Length>64L*1024*1024) throw new InvalidDataException("Ownership file too large.");
                         _document=JsonConvert.DeserializeObject<OwnershipDocument>(File.ReadAllText(OwnershipFilePath)) ?? throw new InvalidDataException();
                         Validate(_document);
+                        ProjectDeletions(_document, _document.Deleted.Keys);
                     }
                     else if(File.Exists(MapFilePath))
                     {
@@ -100,9 +111,11 @@ namespace Server.Agency
                 catch(Exception e) { _loadError="Ownership data unavailable: "+e.GetType().Name; _document=new OwnershipDocument(); }
             }
         }
-        private static void Validate(OwnershipDocument d)
+        // Every writer of an ownership document must pass through this before the document becomes durable.
+        internal static void Validate(OwnershipDocument d)
         {
-            if(d.Version!=1 || d.Revision<0 || d.Records==null || d.Records.Count>VesselOwnershipPolicy.MaxRecords || d.Constituents==null || d.Absorbed==null || d.Receipts==null || d.Receipts.Count>256) throw new InvalidDataException();
+            if(d==null || d.Version!=1 || d.Revision<0 || d.Records==null || d.Records.Count>VesselOwnershipPolicy.MaxRecords || d.Constituents==null || d.Absorbed==null || d.Receipts==null || d.Receipts.Count>256) throw new InvalidDataException();
+            if (d.Deleted == null || d.Deleted.Count > VesselOwnershipPolicy.MaxRecords || d.Deleted.Any(p => p.Key == Guid.Empty || p.Value < 0 || d.Records.ContainsKey(p.Key) || d.Constituents.ContainsKey(p.Key))) throw new InvalidDataException();
             foreach(var p in d.Records) ValidateRecord(p.Key,p.Value);
             if(d.Constituents.Count>VesselOwnershipPolicy.MaxRecords) throw new InvalidDataException();
             foreach(var list in d.Constituents.Values)
@@ -151,29 +164,108 @@ namespace Server.Agency
             }
             finally { if(File.Exists(temporary)) File.Delete(temporary); }
         }
-        private static void Commit(OwnershipDocument candidate)
+        // Removals are explicit: the economy no longer infers them from the record diff.
+        private static void Commit(OwnershipDocument candidate, Guid[] removed = null, VesselRemovalMode mode = VesselRemovalMode.Ordinary, bool permanent = false)
         {
             candidate.Revision=checked(_document.Revision+1);
-            if (AgencyEconomyStore.Enabled && AgencyEconomyStore.Initialized) AgencyEconomyStore.CommitOwnership(candidate);
-            else { Persist(candidate); _document=candidate; }
+            if (AgencyEconomyStore.Enabled && AgencyEconomyStore.Initialized) AgencyEconomyStore.CommitOwnership(candidate, removed ?? Array.Empty<Guid>(), mode, permanent);
+            else { Persist(candidate); var added=NewDeletions(candidate); _document=candidate; ProjectDeletions(candidate, added); }
         }
         internal static OwnershipDocument ExportDocument() { lock (TransactionGate) return Copy(); }
         internal static void ApplyEconomyProjection(OwnershipDocument candidate)
         {
-            lock (TransactionGate) { Persist(candidate); _document = candidate; }
+            lock (TransactionGate) { Persist(candidate); var added=NewDeletions(candidate); _document = candidate; ProjectDeletions(candidate, added); }
         }
+        private static Guid[] NewDeletions(OwnershipDocument candidate) => candidate.Deleted.Keys.Where(id => !_document.Deleted.ContainsKey(id)).ToArray();
+        // Only ids newly deleted by a commit are projected; Load replays the whole retained set (idempotent).
+        private static void ProjectDeletions(OwnershipDocument document, IEnumerable<Guid> ids)
+        {
+            try
+            {
+                foreach (var id in ids)
+                {
+                    PersistenceCheckpoint?.Invoke("before-deleted-vessel-projection");
+                    var file = Path.Combine(global::Server.System.VesselStoreSystem.VesselsPath, id + global::Server.System.VesselStoreSystem.VesselFileFormat);
+                    if (File.Exists(file)) File.Delete(file);
+                    global::Server.System.VesselStoreSystem.CurrentVessels.TryRemove(id, out _);
+                    global::Server.System.VesselContext.RemovedVessels.TryAdd(id, 0);
+                }
+            }
+            catch { _loadError = "Craft deletion recovery is pending."; throw; }
+        }
+        internal const int DeletedRetentionRevisions = 4096;
+        // Drops entries older than the retention window, then the oldest entries beyond the record cap.
+        internal static void PruneDeleted(OwnershipDocument d, long revision)
+        {
+            foreach (var id in d.Deleted.Where(p => revision - p.Value > DeletedRetentionRevisions).Select(p => p.Key).ToArray()) d.Deleted.Remove(id);
+            if (d.Deleted.Count > VesselOwnershipPolicy.MaxRecords)
+                foreach (var id in d.Deleted.OrderBy(p => p.Value).Take(d.Deleted.Count - VesselOwnershipPolicy.MaxRecords).Select(p => p.Key).ToArray()) d.Deleted.Remove(id);
+        }
+
+        // Authorization only; the removal itself is the central VesselRemovalService path.
+        public static (bool Success, string Reason) DeleteCraft(Guid id, global::Server.Client.ClientStructure requester = null)
+        {
+            var result = VesselRemovalService.Remove(new[] { id }, "Deleted by owning agency", VesselRemovalMode.Deleted, requester, new VesselRemovalOptions
+            {
+                Permanent = true, ClientKillList = true, Target = VesselRemoveTarget.AllClients,
+                Authorize = candidate => DeleteDenial(candidate, requester)
+            });
+            if (result.Denied.TryGetValue(id, out var denial)) return (false, denial);
+            return result.Success ? (true, "Craft deleted. No funds refunded.") : (false, "Deletion could not finish. Server recovery may be required.");
+        }
+        private static string DeleteDenial(Guid id, global::Server.Client.ClientStructure requester)
+        {
+            lock (TransactionGate)
+            {
+                if (!Ready) return "Ownership recovery is pending.";
+                if (AgencyEconomyStore.Enabled && !AgencyEconomyStore.Ready) return "Economy recovery is pending.";
+                if (id == Guid.Empty || IsDeleted(id)) return "Craft was deleted.";
+                if (requester != null && !VesselOwnershipSystem.CanManageCraft(requester, Get(id))) return "Only the owning agency owner can delete this craft.";
+                if (IsAbsorbed(id) || IsPendingSplit(id) || IsSplitParent(id) || global::Server.System.LockSystem.LockQuery.ControlLockExists(id))
+                    return "Leave flight and wait for craft operations to finish before deleting.";
+                if (global::Server.System.VesselStoreSystem.CurrentVessels.TryGetValue(id, out var vessel) && IsCrewed(vessel))
+                    return "Recover or remove the crew before deleting this craft.";
+                if (_document.Constituents.TryGetValue(id, out var parts) && parts.Any(p => Effective(p.Ownership).OwnerAgencyId != (Get(id)?.OwnerAgencyId ?? Guid.Empty)))
+                    return "Undock visiting craft before deleting this vessel.";
+                return null;
+            }
+        }
+        internal static bool IsCrewed(global::Server.System.Vessel.Classes.Vessel vessel)
+            => vessel.Fields.GetSingle("type")?.Value == "EVA" || vessel.Parts.GetAllValues().Any(p => p.Fields.GetAll().Any(f => f.Key == "crew" && !string.IsNullOrWhiteSpace(f.Value)));
         public static void Set(Guid id,Guid agency)
         {
             if(id==Guid.Empty || agency==Guid.Empty) return;
-            lock(TransactionGate) { CheckReady(); var next=Copy(); next.Records[id]=new VesselOwnershipRecord {VesselId=id,OwnerAgencyId=agency,Revision=next.Revision+1}; Commit(next); }
+            lock(TransactionGate) { CheckReady(); if (IsDeleted(id)) throw new InvalidOperationException("Craft was deleted."); var next=Copy(); next.Records[id]=new VesselOwnershipRecord {VesselId=id,OwnerAgencyId=agency,Revision=next.Revision+1}; Commit(next); }
         }
         public static void RegisterNew(Guid id,Guid agency)
         {
             lock(TransactionGate) { CheckReady(); if(!_document.Records.ContainsKey(id)) Set(id,agency); }
         }
-        public static void Remove(Guid id)
+        /// <summary>
+        /// The single ownership removal commit: records, constituents and orphaned payment provenance for every id, with
+        /// an explicit id list. Absorbed markers are never cleared (they block republishing a docked-away vessel).
+        /// Returns false, without a revision bump or write, when no id has a record, constituent or provenance.
+        /// </summary>
+        public static bool RemoveMany(IReadOnlyCollection<Guid> ids, VesselRemovalMode mode, bool permanent)
         {
-            lock(TransactionGate) { CheckReady(); if(!_document.Records.ContainsKey(id) && !_document.Constituents.ContainsKey(id)) return; var next=Copy(); next.Records.Remove(id); next.Constituents.Remove(id); next.Absorbed.Remove(id); Commit(next); }
+            lock(TransactionGate)
+            {
+                CheckReady();
+                var targets = ids.Where(id => id != Guid.Empty).Distinct().ToArray();
+                var affected = targets.Where(id => _document.Records.ContainsKey(id) || _document.Constituents.ContainsKey(id) || AgencyEconomyStore.HasProvenance(id)).ToArray();
+                var recordDeletion = mode == VesselRemovalMode.Deleted && targets.Any(id => !IsDeleted(id));
+                if (affected.Length == 0 && !recordDeletion) return false;
+                var next = Copy();
+                foreach (var id in targets) { next.Records.Remove(id); next.Constituents.Remove(id); }
+                if (mode == VesselRemovalMode.Deleted)
+                {
+                    var revision = checked(_document.Revision + 1);
+                    foreach (var id in targets) next.Deleted[id] = revision;
+                    PruneDeleted(next, revision);
+                }
+                Commit(next, mode == VesselRemovalMode.Deleted ? targets : affected, mode, permanent);
+                return true;
+            }
         }
         public static (bool Success,string Reason) Mutate(Guid id,Guid actor,bool isOwner,VesselOwnershipOperation op,Guid target,VesselDockingPolicy policy)
         {
@@ -181,7 +273,7 @@ namespace Server.Agency
             {
                 try
                 {
-                    CheckReady(); var old=Get(id);
+                    CheckReady(); if (IsDeleted(id)) return (false, "Craft was deleted."); var old=Get(id);
                     if(op==VesselOwnershipOperation.Claim)
                     { if(actor==Guid.Empty || old?.OwnerAgencyId!=null && old.OwnerAgencyId!=Guid.Empty) return (false,"Craft already has an owner."); }
                     else if(!VesselOwnershipPolicy.CanManage(old,actor,isOwner)) return(false,"Only the owning agency owner can manage this craft.");
@@ -260,7 +352,7 @@ namespace Server.Agency
         }
         public static bool HasPendingJournal { get { lock(TransactionGate) return _document.Journal!=null; } }
         public static long CaptureEpoch() { lock(TransactionGate) return _document.Revision; }
-        public static bool CanApplyEpoch(Guid id,long epoch) { lock(TransactionGate) return (!AgencyEconomyStore.Enabled || AgencyEconomyStore.Ready) && (!(VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled) || (Ready && !_document.Absorbed.Contains(id) && !_document.PendingSplits.ContainsKey(id) && !IsSplitParent(id) && _document.Revision==epoch && !global::Server.System.VesselContext.RemovedVessels.ContainsKey(id))); }
+        public static bool CanApplyEpoch(Guid id,long epoch) { lock(TransactionGate) return (!AgencyEconomyStore.Enabled || AgencyEconomyStore.Ready) && (!(VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled) || (Ready && !_document.Absorbed.Contains(id) && !_document.Deleted.ContainsKey(id) && !_document.PendingSplits.ContainsKey(id) && !IsSplitParent(id) && _document.Revision==epoch && !global::Server.System.VesselContext.RemovedVessels.ContainsKey(id))); }
         public static bool IsSplitParent(Guid id) { lock(TransactionGate) return _document.PendingSplits.Values.Any(s => s.ParentId == id); }
         public static Guid PendingSplitParent(Guid id) { lock(TransactionGate) return _document.PendingSplits.TryGetValue(id, out var split) ? split.ParentId : Guid.Empty; }
         public static bool IsPendingSplit(Guid id) { lock(TransactionGate) return _document.PendingSplits.ContainsKey(id); }
@@ -268,7 +360,7 @@ namespace Server.Agency
         {
             lock(TransactionGate)
             {
-                CheckReady(); if(child==Guid.Empty || parent==child || _document.Records.ContainsKey(child) || _document.PendingSplits.ContainsKey(child)) return false;
+                CheckReady(); if(child==Guid.Empty || parent==child || _document.Records.ContainsKey(child) || _document.PendingSplits.ContainsKey(child) || IsDeleted(child) || IsDeleted(parent)) return false;
                 if(!VesselStoreSystem.CurrentVessels.TryGetValue(parent,out var vessel) || !PartIds(vessel).Contains(boundary)) return false;
                 var next=Copy();
                 if(next.PendingSplits.Count>=256) return false;
@@ -301,6 +393,7 @@ namespace Server.Agency
             lock(TransactionGate)
             {
                 if(!_document.PendingSplits.TryGetValue(child,out var pending)) return true;
+                if(IsDeleted(child) || IsDeleted(pending.ParentId)) return false;
                 if(actualParts.Length==0 || !actualParts.Contains(pending.Boundary) || actualParts.Distinct().Count()!=actualParts.Length || actualParts.Any(p=>!pending.AllowedParts.Contains(p))) return false;
                 HashSet<uint> survivingParent = null;
                 if (AgencyEconomyStore.ToolingEnabled && childProto != null)

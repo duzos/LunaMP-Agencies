@@ -194,6 +194,8 @@ namespace Server.Agency
         private static void Persist(EconomyDocument document)
         {
             Validate(document);
+            // The journal's ownership projection must be valid before it is durable, or the next boot could not apply it.
+            if (document.Journal?.OwnershipAfter != null) AgencyVesselMap.Validate(document.Journal.OwnershipAfter);
             // The wire payload has a stricter bound than the ledger. Validate the actual
             // aggregate projection before committing money or assets, including shared vessels.
             foreach (var agencyId in document.Agencies.Keys.Concat(AgencyStore.Agencies.Keys).Distinct())
@@ -268,7 +270,10 @@ namespace Server.Agency
             }
         }
 
-        internal static void CommitOwnership(OwnershipDocument ownership)
+        internal static bool HasProvenance(Guid id) { lock (AgencyVesselMap.TransactionGate) return Enabled && Initialized && _document.Vessels.ContainsKey(id); }
+        internal static bool HasPendingJournal { get { lock (AgencyVesselMap.TransactionGate) return _document.Journal != null; } }
+
+        internal static void CommitOwnership(OwnershipDocument ownership, Guid[] removedIds, VesselRemovalMode mode, bool permanent)
         {
             lock (AgencyVesselMap.TransactionGate)
             {
@@ -282,10 +287,16 @@ namespace Server.Agency
                     foreach (var part in vessel.Parts)
                         if (next.Launches.TryGetValue(part.LaunchId, out var launch)) launch.ExternallySettled = true;
                 }
-                var removedIds = old.Records.Keys.Except(ownership.Records.Keys).ToArray();
-                foreach (var id in removedIds) next.Vessels.Remove(id);
+                foreach (var id in removedIds)
+                {
+                    // Only a deliberate deletion settles the craft's paid launches; ordinary removals keep them revertible.
+                    if (mode == VesselRemovalMode.Deleted && next.Vessels.TryGetValue(id, out var removed))
+                        foreach (var part in removed.Parts)
+                            if (next.Launches.TryGetValue(part.LaunchId, out var launch)) launch.ExternallySettled = true;
+                    next.Vessels.Remove(id);
+                }
                 RetireTerminalLaunches(next);
-                var journal = new EconomyVesselJournal { OwnershipAfter = ownership, Removals = removedIds };
+                var journal = new EconomyVesselJournal { OwnershipAfter = ownership, Removals = removedIds, PermanentRemovals = permanent };
                 InvalidateChangedOffers(next, ownership);
                 if (ownership.Journal != null)
                 {
@@ -316,6 +327,7 @@ namespace Server.Agency
             lock (AgencyVesselMap.TransactionGate)
             {
                 if (!Ready) throw new InvalidOperationException("Economy recovery required.");
+                if (ownership.Deleted.ContainsKey(parent) || ownership.Deleted.ContainsKey(child)) throw new InvalidOperationException("Craft was deleted.");
                 var next = Copy(_document);
                 if (!next.Vessels.TryGetValue(parent, out var source)) throw new InvalidOperationException("Missing split provenance.");
                 var selected = new HashSet<uint>(actualParts);
@@ -527,6 +539,7 @@ namespace Server.Agency
                 try
                 {
                     RequireActor(client);
+                    if (AgencyVesselMap.IsDeleted(message.VesselId)) throw new InvalidOperationException("Craft was deleted.");
                     if (!_document.Launches.TryGetValue(message.EconomyLaunchId, out var saved) || saved.Token != message.EconomyLaunchToken || saved.AgencyId != client.AgencyId || saved.ActorId != client.UniqueIdentifier || saved.SessionTicks != client.ConnectionTime.Ticks) throw new InvalidOperationException("Launch token is invalid for this session.");
                     if (saved.State == LaunchState.Registered && saved.VesselId == message.VesselId) { result.Success = true; result.Revision = _document.Revision; return result; }
                     if (saved.State != LaunchState.Prepared || saved.ExpiresUtcTicks <= UtcNow().Ticks || VesselStoreSystem.VesselExists(message.VesselId)) throw new InvalidOperationException("Launch token expired or was consumed.");
@@ -675,6 +688,7 @@ namespace Server.Agency
                 try
                 {
                     RequireActor(client);
+                    if (AgencyVesselMap.IsDeleted(message.VesselId) || AgencyVesselMap.IsDeleted(message.EconomyParentVesselId)) throw new InvalidOperationException("Craft was deleted.");
                     RequireVessel(client, message.EconomyParentVesselId, "EVA registration is not authorized.");
                     if (string.IsNullOrWhiteSpace(message.EconomyEvaCrew) || vessel.Fields.GetSingle("type")?.Value != "EVA" || VesselStoreSystem.VesselExists(message.VesselId))
                         throw new InvalidOperationException("Invalid EVA registration.");
@@ -823,6 +837,7 @@ namespace Server.Agency
             if (!candidate.Launches.TryGetValue(command.LaunchId, out var launch) || launch.AgencyId != client.AgencyId || launch.ActorId != client.UniqueIdentifier || launch.State != LaunchState.Registered || launch.ExternallySettled) throw new InvalidOperationException("Launch cannot be reverted after external settlement.");
             var vessels = candidate.Vessels.Values.Where(v => v.Parts.Any(p => p.LaunchId == launch.LaunchId)).ToArray();
             if (vessels.Length == 0 || vessels.Any(v => v.Parts.Any(p => p.LaunchId != launch.LaunchId) || AgencyVesselMap.Get(v.VesselId)?.OwnerAgencyId != client.AgencyId)) throw new InvalidOperationException("Undock or recover separately; launch ownership has changed.");
+            if (command.Operation == EconomyOperation.RevertLaunch && AgencyVesselMap.IsDeleted(launch.VesselId)) throw new InvalidOperationException("Craft was deleted.");
             foreach (var vessel in vessels) RequireVessel(client, vessel.VesselId, "Craft revert is not authorized.");
             var journal = new EconomyVesselJournal { Removals = vessels.Select(v => v.VesselId).Where(v => command.Operation != EconomyOperation.RevertLaunch || v != launch.VesselId).ToArray() };
             foreach (var vessel in vessels) candidate.Vessels.Remove(vessel.VesselId);

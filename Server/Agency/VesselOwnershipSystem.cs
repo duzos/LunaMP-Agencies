@@ -32,7 +32,9 @@ namespace Server.Agency
         public static bool Enabled=>GeneralSettings.SettingsStore.AgencyVesselOwnership;
         public static bool IsRejected(ClientStructure c) { lock(AgencyVesselMap.TransactionGate) return Rejected.Contains(c); }
         private static bool Actor(ClientStructure c)=>c!=null && c.Authenticated && c.ConnectionStatus==LmpCommon.Enums.ConnectionStatus.Connected && ServerContext.Clients.Values.Any(x=>ReferenceEquals(x,c)) && c.AgencyId!=Guid.Empty && AgencyStore.Agencies.TryGetValue(c.AgencyId,out var a) && a.HasMember(c.UniqueIdentifier);
-        public static bool CanControl(ClientStructure c,Guid vessel)=>!Enabled || (AgencyVesselMap.Ready && Actor(c) && !IsRejected(c) && !AgencyVesselMap.IsAbsorbed(vessel) && !AgencyVesselMap.IsPendingSplit(vessel) && VesselOwnershipPolicy.CanControl(AgencyVesselMap.Get(vessel),c.AgencyId));
+        // Deleting is a management act: the agency owner of the owning agency, an active member.
+        internal static bool CanManageCraft(ClientStructure c,VesselOwnershipRecord record)=>Actor(c) && VesselOwnershipPolicy.CanManage(record,c.AgencyId,AgencyStore.Agencies[c.AgencyId].OwnerUniqueId==c.UniqueIdentifier);
+        public static bool CanControl(ClientStructure c,Guid vessel)=>!Enabled || (AgencyVesselMap.Ready && Actor(c) && !IsRejected(c) && !AgencyVesselMap.IsDeleted(vessel) && !AgencyVesselMap.IsAbsorbed(vessel) && !AgencyVesselMap.IsPendingSplit(vessel) && VesselOwnershipPolicy.CanControl(AgencyVesselMap.Get(vessel),c.AgencyId));
         private static long Revision(Guid id)=>AgencyVesselMap.Get(id)?.Revision??0;
         private static int Timeout(bool grant)=>Math.Max(1,Math.Min(120,grant?GeneralSettings.SettingsStore.AgencyDockGrantTimeoutSeconds:GeneralSettings.SettingsStore.AgencyDockRequestTimeoutSeconds));
         private static bool Valid(Request r)=>Actor(r.Client) && !Rejected.Contains(r.Client) && r.Client.AgencyId==r.Agency && Revision(r.Source)==r.SourceRevision && Revision(r.Target)==r.TargetRevision && (AgencyVesselMap.Get(r.Target)?.OwnerAgencyId??Guid.Empty)==r.TargetOwner && VesselStoreSystem.VesselExists(r.Source) && VesselStoreSystem.VesselExists(r.Target) && LockSystem.LockQuery.ControlLockBelongsToPlayer(r.Source,r.Client.PlayerName) && CanControl(r.Client,r.Source);
@@ -107,14 +109,16 @@ namespace Server.Agency
         {
             if(!Enabled) return;
             (bool Success,string Reason) result;
-            lock(AgencyVesselMap.TransactionGate)
+            // Deleting runs through the central removal service, which owns the gate, locks and broadcasts.
+            if(data.Operation==VesselOwnershipOperation.Delete) result=Actor(client)?AgencyVesselMap.DeleteCraft(data.VesselId,client):(false,"Craft or agency is unavailable.");
+            else lock(AgencyVesselMap.TransactionGate)
             {
                 if(!Actor(client) || AgencyVesselMap.IsPendingSplit(data.VesselId) || !VesselStoreSystem.VesselExists(data.VesselId)) result=(false,"Craft or agency is unavailable.");
                 else if((data.Operation==VesselOwnershipOperation.Transfer || data.Operation==VesselOwnershipOperation.AddCoOwner) && !AgencyStore.Agencies.ContainsKey(data.TargetAgencyId)) result=(false,"Target agency not found.");
                 else result=AgencyVesselMap.Mutate(data.VesselId,client.AgencyId,AgencyStore.Agencies[client.AgencyId].OwnerUniqueId==client.UniqueIdentifier,data.Operation,data.TargetAgencyId,data.DockingPolicy);
             }
             global::Server.Diagnostics.PlaytestDiagnostics.Write("ownership.command",()=> $"vessel={data.VesselId} operation={data.Operation} actorAgency={client.AgencyId} success={result.Success}");
-            if(result.Success) Changed();
+            if(result.Success && data.Operation!=VesselOwnershipOperation.Delete) Changed();
             var m=ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyVesselOwnershipResultMsgData>();m.RequestId=data.RequestId;m.VesselId=data.VesselId;m.Success=result.Success;m.Reason=result.Reason;MessageQueuer.SendToClient<AgencySrvMsg>(client,m);
         }
         public static void Changed()

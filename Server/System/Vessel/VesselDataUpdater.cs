@@ -40,10 +40,10 @@ namespace Server.System.Vessel
         /// <summary>
         /// Raw updates a vessel in the dictionary and takes care of the locking in case we received another vessel message type
         /// </summary>
-        public static void RawConfigNodeInsertOrUpdate(Guid vesselId, string vesselDataInConfigNodeFormat)
+        public static Task RawConfigNodeInsertOrUpdate(Guid vesselId, string vesselDataInConfigNodeFormat, bool isNewVessel)
         {
             var ownershipEpoch=global::Server.Agency.AgencyVesselMap.CaptureEpoch();
-            _ = Task.Run(() =>
+            return Task.Run(() =>
             {
                 // The insert is scheduled asynchronously, so a VesselRemove for the same vessel may arrive
                 // while this task is queued. Re-check the kill list before touching the store so a delayed
@@ -68,6 +68,12 @@ namespace Server.System.Vessel
                     // Re-check under the per-vessel lock to close the race against HandleVesselRemove,
                     // which now publishes to RemovedVessels before clearing the store entry.
                     if (VesselContext.RemovedVessels.ContainsKey(vesselId) || (GeneralSettings.SettingsStore.AgencyVesselOwnership && global::Server.Agency.AgencyVesselMap.IsAbsorbed(vesselId))) return;
+
+                    // A proto queued before a removal must not re-add a vessel that existed when it arrived but is gone now (the
+                    // removal also dropped its ownership record). The revision check is not applicable here: every Set bumps it.
+                    // Accepted residual race, same as upstream: a brand-new vessel's first proto still queued when a
+                    // non-permanent removal hits can come back.
+                    if (!isNewVessel && !VesselStoreSystem.VesselExists(vesselId)) return;
 
                     VesselStoreSystem.CurrentVessels.AddOrUpdate(vesselId, vessel, (key, existingVal) => vessel);
                 }

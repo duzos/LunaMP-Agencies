@@ -13,6 +13,10 @@ namespace LmpClient.Windows.Agency
         private static Guid _selectedVessel;
         private static Guid _accessAgency;
         private static Guid _transferConfirmation;
+        private static Guid _deleteConfirmation;
+        // A sent deletion stays pending until the server answers (or 30 s pass), so it cannot be pressed twice.
+        private static Guid _deleteRequest, _deleteRequestVessel;
+        private static DateTime _deleteRequestSince;
         private static string _vesselSearch = string.Empty;
         private static Vector2 _vesselsScroll;
         private static Vector2 _vesselDetailsScroll;
@@ -26,7 +30,16 @@ namespace LmpClient.Windows.Agency
         public static void ResetVesselOwnershipUi()
         {
             _selectedVessel = _accessAgency = _transferConfirmation = Guid.Empty;
+            _deleteConfirmation = _deleteRequest = _deleteRequestVessel = Guid.Empty;
             _vesselSearch = string.Empty;
+        }
+
+        private static bool DeleteWaiting(AgencySystem system, Guid vessel)
+        {
+            if (_deleteRequest == Guid.Empty) return false;
+            if (system.LatestOwnershipResult?.RequestId == _deleteRequest || (DateTime.UtcNow - _deleteRequestSince).TotalSeconds > 30)
+            { _deleteRequest = _deleteRequestVessel = Guid.Empty; return false; }
+            return _deleteRequestVessel == vessel;
         }
 
         // Called only by the agency system's main-thread notification routine.
@@ -85,6 +98,7 @@ namespace LmpClient.Windows.Agency
                 {
                     _selectedVessel = entry.Key;
                     _transferConfirmation = Guid.Empty;
+                    _deleteConfirmation = Guid.Empty;
                 }
             }
             if (names.Count == 0) GUILayout.Label("No craft received yet.", _vesselText);
@@ -126,6 +140,27 @@ namespace LmpClient.Windows.Agency
                     }
                     if (system.CanManageVessel(_selectedVessel))
                     {
+                        GUILayout.Space(6);
+                        var deleting = DeleteWaiting(system, _selectedVessel);
+                        var deleteEnabled = GUI.enabled;
+                        GUI.enabled = deleteEnabled && !deleting;
+                        if (GUILayout.Button("Delete craft…", _vesselButton)) _deleteConfirmation = _selectedVessel;
+                        GUI.enabled = deleteEnabled;
+                        if (deleting) GUILayout.Label("Waiting for server...", _vesselText);
+                        else if (_deleteConfirmation == _selectedVessel)
+                        {
+                            GUILayout.Label("Permanently delete " + names[_selectedVessel] + "? This removes the craft and its cargo with no refund. Recover or remove crew first, then leave flight.", _vesselText);
+                            GUILayout.BeginHorizontal();
+                            if (GUILayout.Button("Confirm deletion", _vesselButton))
+                            {
+                                _deleteRequest = system.MessageSender.SendOwnershipCommand(VesselOwnershipOperation.Delete, _selectedVessel);
+                                _deleteRequestVessel = _selectedVessel; _deleteRequestSince = DateTime.UtcNow;
+                                _deleteConfirmation = Guid.Empty;
+                            }
+                            if (GUILayout.Button("Cancel")) _deleteConfirmation = Guid.Empty;
+                            GUILayout.EndHorizontal();
+                        }
+                        GUILayout.Space(6);
                         GUILayout.Label("Offline docking policy", _vesselHeading);
                         var currentPolicy = record == null ? 0 : (int)record.DockingPolicy;
                         var selectedPolicy = GUILayout.Toolbar(currentPolicy, DockPolicyLabels);

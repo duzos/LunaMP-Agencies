@@ -7,6 +7,8 @@ using Server.Server;
 using Server.Settings.Structures;
 using Server.System;
 using System;
+using System.Linq;
+using Server.Agency;
 
 namespace Server.Command.Command
 {
@@ -32,28 +34,18 @@ namespace Server.Command.Command
             return true;
         }
 
+        private static bool IsDebris(global::Server.System.Vessel.Classes.Vessel vessel)
+            => string.Equals(vessel.Fields.GetSingle("type")?.Value, "debris", StringComparison.OrdinalIgnoreCase);
+
         private static void RunDekessler()
         {
-            var removalCount = 0;
-
-            var vesselList = VesselStoreSystem.CurrentVessels.ToArray();
-            foreach (var vesselKeyVal in vesselList)
-            {
-                if (vesselKeyVal.Value.Fields.GetSingle("type").Value.ToLower() == "debris")
-                {
-                    LunaLog.Normal($"Removing debris vessel: {vesselKeyVal.Key}");
-
-                    VesselStoreSystem.RemoveVessel(vesselKeyVal.Key);
-
-                    //Send a vessel remove message
-                    var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<VesselRemoveMsgData>();
-                    msgData.VesselId = vesselKeyVal.Key;
-
-                    MessageQueuer.SendToAllClients<VesselSrvMsg>(msgData);
-
-                    removalCount++;
-                }
-            }
+            var ids = VesselStoreSystem.CurrentVessels.ToArray().Where(p => IsDebris(p.Value)).Select(p => p.Key).ToArray();
+            // One pass, one ownership commit. Filters run under the removal gate: with agency rules active crewed debris is kept.
+            var result = VesselRemovalService.Remove(ids, "Debris cleanup", VesselRemovalMode.Ordinary, null, VesselRemovalOptions.AdminCleanup(id =>
+                !VesselStoreSystem.CurrentVessels.TryGetValue(id, out var current) || !IsDebris(current) ? "Not debris." :
+                AgencyVesselMap.AgencyRulesActive && AgencyVesselMap.IsCrewed(current) ? "Crewed." : null));
+            foreach (var id in result.Removed) LunaLog.Normal($"Removed debris vessel: {id}");
+            var removalCount = result.Removed.Length;
 
             if (removalCount > 0)
                 LunaLog.Normal($"Removed {removalCount} debris");

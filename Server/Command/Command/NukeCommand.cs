@@ -7,6 +7,8 @@ using Server.Server;
 using Server.Settings.Structures;
 using Server.System;
 using System;
+using System.Linq;
+using Server.Agency;
 
 namespace Server.Command.Command
 {
@@ -32,31 +34,20 @@ namespace Server.Command.Command
             return true;
         }
 
+        private static bool IsAtKsc(global::Server.System.Vessel.Classes.Vessel vessel)
+        {
+            var landed = (vessel.Fields.GetSingle("landed")?.Value ?? string.Empty).ToLower();
+            var landedAt = (vessel.Fields.GetSingle("landedAt")?.Value ?? string.Empty).ToLower();
+            return landed == "true" && landedAt.Contains("ksc") || landedAt.Contains("runway") || landedAt.Contains("launchpad");
+        }
+
         private static void RunNuke()
         {
-            var removalCount = 0;
-
-            var vesselList = VesselStoreSystem.CurrentVessels.ToArray();
-            foreach (var vesselKeyVal in vesselList)
-            {
-                if (vesselKeyVal.Value.Fields.GetSingle("landed").Value.ToLower() == "true" &&
-                    vesselKeyVal.Value.Fields.GetSingle("landedAt").Value.ToLower().Contains("ksc") ||
-                    vesselKeyVal.Value.Fields.GetSingle("landedAt").Value.ToLower().Contains("runway") ||
-                    vesselKeyVal.Value.Fields.GetSingle("landedAt").Value.ToLower().Contains("launchpad"))
-                {
-                    LunaLog.Normal($"Removing vessel: {vesselKeyVal.Key} from KSC");
-
-                    VesselStoreSystem.RemoveVessel(vesselKeyVal.Key);
-
-                    //Send a vessel remove message
-                    var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<VesselRemoveMsgData>();
-                    msgData.VesselId = vesselKeyVal.Key;
-
-                    MessageQueuer.SendToAllClients<VesselSrvMsg>(msgData);
-
-                    removalCount++;
-                }
-            }
+            var ids = VesselStoreSystem.CurrentVessels.ToArray().Where(p => IsAtKsc(p.Value)).Select(p => p.Key).ToArray();
+            var result = VesselRemovalService.Remove(ids, "KSC cleanup", VesselRemovalMode.Ordinary, null, VesselRemovalOptions.AdminCleanup(id =>
+                !VesselStoreSystem.CurrentVessels.TryGetValue(id, out var current) || !IsAtKsc(current) ? "Not at the KSC." : null));
+            foreach (var id in result.Removed) LunaLog.Normal($"Removed vessel: {id} from KSC");
+            var removalCount = result.Removed.Length;
 
             if (removalCount > 0)
                 LunaLog.Normal($"Nuked {removalCount} vessels around the KSC");

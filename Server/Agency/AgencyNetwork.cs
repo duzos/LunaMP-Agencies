@@ -115,7 +115,7 @@ namespace Server.Agency
             data.VesselId = vesselId;
             data.AgencyId = agencyId;
             data.OwnershipSnapshotPresent = VesselOwnershipSystem.Enabled && AgencyVesselMap.Ready;
-            data.OwnershipRevision = AgencyVesselMap.GetOwnershipSnapshot().Revision;
+            data.OwnershipRevision = AgencyVesselMap.CaptureEpoch();
             data.OwnershipRecord = AgencyVesselMap.Get(vesselId);
             MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
             AgencyCommNetStore.Broadcast();

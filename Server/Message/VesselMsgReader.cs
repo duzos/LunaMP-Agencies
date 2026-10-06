@@ -93,58 +93,19 @@ namespace Server.Message
         private static void HandleVesselRemove(ClientStructure client, VesselBaseMsgData message)
         {
             var data = (VesselRemoveMsgData)message;
-            if(VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled || AgencyVisibilityStore.Enabled)
+            // Authorization is checked per id under the removal gate; every mode removes through the central service.
+            VesselRemovalService.Remove(new[] { data.VesselId }, data.Reason, VesselRemovalMode.Ordinary, client, new VesselRemovalOptions
             {
-                string removedName;
-                bool existed;
-                lock(AgencyVesselMap.TransactionGate)
-                {
-                    if(!VesselOwnershipSystem.CanControl(client,data.VesselId) || (LockSystem.LockQuery.ControlLockExists(data.VesselId) && !LockSystem.LockQuery.ControlLockBelongsToPlayer(data.VesselId,client.PlayerName))) return;
-                    existed = VesselStoreSystem.VesselExists(data.VesselId);
-                    removedName = existed ? TryGetVesselName(data.VesselId) : null;
-                    AgencyVesselMap.Remove(data.VesselId);
-                    if(data.AddToKillList) VesselContext.RemovedVessels.TryAdd(data.VesselId,0);
-                    VesselStoreSystem.RemoveVessel(data.VesselId);
-                }
-                if (existed) CraftCreationAndRemovalLog.LogRemoved(data.VesselId, removedName, client.PlayerName, data.Reason);
-                VesselOwnershipSystem.Changed();
-                AgencyVisibilityStore.Broadcast();
-                if (AgencyEconomyStore.TradeEnabled) AgencyEconomyStore.Broadcast();
-                MessageQueuer.RelayMessage<VesselSrvMsg>(client,data);return;
-            }
-
-            if (LockSystem.LockQuery.ControlLockExists(data.VesselId) && !LockSystem.LockQuery.ControlLockBelongsToPlayer(data.VesselId, client.PlayerName))
-                return;
-
-
-            // Publish the kill-list entry BEFORE touching the store so any in-flight proto task
-            // (VesselDataUpdater.RawConfigNodeInsertOrUpdate schedules its store write on Task.Run)
-            // observes the flag and aborts instead of resurrecting the vessel we're about to remove.
-            if (data.AddToKillList)
-                VesselContext.RemovedVessels.TryAdd(data.VesselId, 0);
-
-            if (VesselStoreSystem.VesselExists(data.VesselId))
-            {
-                // Resolve the vessel name BEFORE RemoveVessel purges the store entry so the audit log line has something useful.
-                var vesselName = TryGetVesselName(data.VesselId);
-
-                LunaLog.Debug($"Removing vessel {data.VesselId} from {client.PlayerName}");
-                CraftCreationAndRemovalLog.LogRemoved(data.VesselId, vesselName, client.PlayerName, data.Reason);
-
-                VesselStoreSystem.RemoveVessel(data.VesselId);
-            }
-
-            //Relay the message.
-            MessageQueuer.RelayMessage<VesselSrvMsg>(client, data);
-            AgencyCommNetStore.Broadcast();
-            AgencyVisibilityStore.Broadcast();
+                Permanent = data.AddToKillList, ClientKillList = data.AddToKillList, Original = data, Target = VesselRemoveTarget.OtherClients,
+                Authorize = id => VesselOwnershipSystem.CanControl(client, id) && !(LockSystem.LockQuery.ControlLockExists(id) && !LockSystem.LockQuery.ControlLockBelongsToPlayer(id, client.PlayerName)) ? null : "Removal is not permitted."
+            });
         }
 
         private static void HandleVesselProto(ClientStructure client, VesselBaseMsgData message)
         {
             var msgData = (VesselProtoMsgData)message;
 
-            if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId))
+            if (AgencyVesselMap.IsDeleted(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId))
             {
                 PlaytestDiagnostics.Write("vessel.proto.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} reason=removed");
                 return;
@@ -159,11 +120,11 @@ namespace Server.Message
 
             var vesselText = Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes);
             var completedSplitParent = Guid.Empty;
-            if(VesselOwnershipSystem.Enabled || AgencyCommNetStore.Enabled || AgencyEconomyStore.Enabled || AgencyVisibilityStore.Enabled)
+            if(AgencyVesselMap.AgencyRulesActive)
             {
                 lock(AgencyVesselMap.TransactionGate)
                 {
-                    if(!AgencyVesselMap.Ready || AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.Ready || AgencyVesselMap.IsAbsorbed(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
+                    if(!AgencyVesselMap.Ready || AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.Ready || AgencyVesselMap.IsAbsorbed(msgData.VesselId) || AgencyVesselMap.IsDeleted(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
                     global::Server.System.Vessel.Classes.Vessel parsed;
                     try { parsed=new global::Server.System.Vessel.Classes.Vessel(vesselText); } catch { return; }
                     if(!Guid.TryParse(parsed.Fields.GetSingle("pid")?.Value,out var parsedId) || parsedId!=msgData.VesselId) return;
@@ -268,7 +229,7 @@ namespace Server.Message
                 CraftCreationAndRemovalLog.LogCreated(msgData.VesselId, vesselName, client.PlayerName, msgData.Reason);
             }
 
-            VesselDataUpdater.RawConfigNodeInsertOrUpdate(msgData.VesselId, vesselText);
+            VesselDataUpdater.RawConfigNodeInsertOrUpdate(msgData.VesselId, vesselText, isNewVessel);
             MessageQueuer.RelayMessage<VesselSrvMsg>(client, msgData);
         }
 
@@ -343,21 +304,9 @@ namespace Server.Message
             //Now remove the weak vessel but DO NOT add to the removed vessels as they might undock!!!
             LunaLog.Debug($"Removing weak coupled vessel {msgData.CoupledVesselId}");
 
-            // Audit-log the implicit removal triggered by a docking/coupling event. Name must be
-            // resolved BEFORE RemoveVessel clears the store entry.
-            var coupledVesselName = TryGetVesselName(msgData.CoupledVesselId);
-            CraftCreationAndRemovalLog.LogRemoved(msgData.CoupledVesselId, coupledVesselName, client.PlayerName, "Coupled/Docked");
-
-            VesselStoreSystem.RemoveVessel(msgData.CoupledVesselId);
-
-            //Tell all clients to remove the weak vessel
-            var removeMsgData = ServerContext.ServerMessageFactory.CreateNewMessageData<VesselRemoveMsgData>();
-            removeMsgData.VesselId = msgData.CoupledVesselId;
-            removeMsgData.Reason = "Coupled/Docked";
-
-            MessageQueuer.SendToAllClients<VesselSrvMsg>(removeMsgData);
-            AgencyCommNetStore.Broadcast();
-            AgencyVisibilityStore.Broadcast();
+            // The central service audit-logs the removal (name resolved before the store entry goes), keeps the ownership
+            // map in sync and tells all clients, the sender included, to remove the weak vessel.
+            VesselRemovalService.Remove(new[] { msgData.CoupledVesselId }, "Coupled/Docked", VesselRemovalMode.Ordinary, client, new VesselRemovalOptions { Target = VesselRemoveTarget.AllClients });
         }
     }
 }

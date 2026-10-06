@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>HeadlessTest</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.3.2" />
+    <PackageReference Include="MSTest.TestAdapter" Version="2.2.10" />
+    <PackageReference Include="MSTest.TestFramework" Version="2.2.10" />
+    <ProjectReference Include="..\Lidgren.Core\Lidgren.Core.csproj" />
+    <ProjectReference Include="..\LmpCommon\LmpCommon.csproj" />
+    <ProjectReference Include="..\Server\Server.csproj" />
+  </ItemGroup>
+  <Target Name="StageServerRuntime" AfterTargets="Build">
+    <MSBuild Projects="..\Server\Server.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration);TargetFramework=net10.0">
+      <Output TaskParameter="TargetOutputs" ItemName="ServerTargetPath" />
+    </MSBuild>
+    <PropertyGroup>
+      <ServerRuntimeDirectory>@(ServerTargetPath->'%(RootDir)%(Directory)')</ServerRuntimeDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <ServerRuntime Include="$(ServerRuntimeDirectory)**\*" Exclude="$(ServerRuntimeDirectory)Config\**;$(ServerRuntimeDirectory)Universe\**;$(ServerRuntimeDirectory)logs\**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ServerRuntime)" DestinationFiles="@(ServerRuntime->'$(OutDir)server\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

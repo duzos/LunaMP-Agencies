@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every automated test project in the solution (ServerTest, LmpMasterServerTest, LmpCommonTest).
+# Runs every automated test project in the solution (ServerTest, LmpMasterServerTest, LmpCommonTest, HeadlessTest).
 # LmpClient targets .NET Framework 4.7.2 for KSP; there is no client unit-test project here.
 set -euo pipefail
 cd "$(dirname "$0")/.."

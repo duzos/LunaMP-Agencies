@@ -157,8 +157,8 @@ namespace Server.Agency
                         if(!Enum.IsDefined(typeof(LmpCommon.Enums.CoupleTrigger), data.Trigger)) throw new InvalidOperationException("Unknown coupling trigger.");
                         var generic=data.Trigger==(int)LmpCommon.Enums.CoupleTrigger.Kerbal || data.Trigger==(int)LmpCommon.Enums.CoupleTrigger.Other;
                         if(generic && !CanControl(client,target)) throw new InvalidOperationException("Both craft must permit control for boarding or construction.");
-                        var implicitAllow=generic || record==null || record.OwnerAgencyId==Guid.Empty || record.OwnerAgencyId==client.AgencyId;
-                        if(!implicitAllow || data.GrantId!=Guid.Empty)
+                        var implicitAllow=!Enabled || generic || record==null || record.OwnerAgencyId==Guid.Empty || record.OwnerAgencyId==client.AgencyId;
+                        if(Enabled && (!implicitAllow || data.GrantId!=Guid.Empty))
                         {
                             r=Requests.Values.FirstOrDefault(x=>x.Grant==data.GrantId && ReferenceEquals(x.Client,client) && x.Source==source && x.Target==target);
                             if(r==null || r.Status!=DockConsentStatus.Granted || r.Expires<=UtcNow() || !Valid(r)) throw new InvalidOperationException("Docking grant expired or was revoked.");
@@ -170,7 +170,7 @@ namespace Server.Agency
                         if(r!=null) r.Status=DockConsentStatus.Consumed; completed=true;
                     }
                 }
-                catch(Exception e) {recovery=AgencyVesselMap.HasPendingJournal;error=recovery?"Coupling committed; server recovery required.":e.Message;Rejected.Add(client);}
+                catch(Exception e) {recovery=AgencyVesselMap.HasPendingJournal || AgencyEconomyStore.Enabled && !AgencyEconomyStore.Ready;error=recovery?"Coupling committed; server recovery required.":e.Message;Rejected.Add(client);}
             }
             var status=r??new Request {Client=client,Agency=client.AgencyId,Source=data.VesselId,Target=data.CoupledVesselId,Grant=data.GrantId};
             status.Status=completed?DockConsentStatus.Completed:recovery?DockConsentStatus.RecoveryRequired:DockConsentStatus.Rejected;SendStatus(status,client,error??"",data.OperationId);

@@ -1,4 +1,4 @@
-using LmpCommon.Message.Data.ShareProgress;
+﻿using LmpCommon.Message.Data.ShareProgress;
 using LmpCommon.Message.Server;
 using Server.Agency;
 using Server.Client;
@@ -11,6 +11,7 @@ namespace Server.System
     {
         public static void ScienceReceived(ClientStructure client, ShareProgressScienceMsgData data)
         {
+            if (AgencyEconomyStore.Enabled) { AgencyEconomyStore.SendTo(client); return; }
             var agency = AgencySystem.GetAgency(client.AgencyId);
             if (agency == null)
             {

@@ -67,14 +67,15 @@ namespace LmpClient.Systems.VesselProtoSys
             //Doing this in another thread can crash the game as during the serialization into a config node Lingoona is called...
             //TODO: Check if this works fine with the new unity version as it used to crash....
             var epoch = LmpClient.Systems.Agency.VesselPublicationGuard.CaptureEpoch();
-            TaskFactory.StartNew(() => PrepareAndSendProtoVessel(protoVessel, forceReload, reason, epoch));
+            var cargo = LmpClient.Systems.Agency.ToolingClient.Enabled ? LmpClient.Systems.Agency.ToolingManifestBuilder.CaptureCargo(protoVessel) : null;
+            TaskFactory.StartNew(() => PrepareAndSendProtoVessel(protoVessel, forceReload, reason, epoch, cargo));
             //PrepareAndSendProtoVessel(protoVessel);
         }
 
         /// <summary>
         /// This method prepares the protovessel class and send the message, it's intended to be run in another thread
         /// </summary>
-        private void PrepareAndSendProtoVessel(ProtoVessel protoVessel, bool forceReload, string reason, long epoch)
+        private void PrepareAndSendProtoVessel(ProtoVessel protoVessel, bool forceReload, string reason, long epoch, LmpCommon.Agency.ToolingCargo[] cargo)
         {
             if (!LmpClient.Systems.Agency.VesselPublicationGuard.IsCurrent(epoch)) return;
             //Never send empty vessel id's (it happens with flags...)
@@ -92,6 +93,8 @@ namespace LmpClient.Systems.VesselProtoSys
                     msgData.NumBytes = numBytes;
                     msgData.ForceReload = forceReload;
                     msgData.Reason = reason;
+                    msgData.EconomyCargo = cargo;
+                    LmpClient.Systems.Agency.ToolingClient.FillLaunchTail(protoVessel, msgData);
                     if (msgData.Data.Length < numBytes)
                         Array.Resize(ref msgData.Data, numBytes);
                     Array.Copy(VesselSerializedBytes, 0, msgData.Data, 0, numBytes);

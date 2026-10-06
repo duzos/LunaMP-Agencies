@@ -32,6 +32,8 @@ namespace Server.Agency
     public sealed class PendingVesselSplit
     {
         public Guid ParentId;
+        public string Requester;
+        public long ConnectionTicks;
         public uint Root, Boundary;
         public uint[] AllowedParts;
         public List<VesselConstituent> Constituents;
@@ -75,7 +77,7 @@ namespace Server.Agency
         {
             lock(TransactionGate)
             {
-                _document = new OwnershipDocument(); _loadError=null;
+                _document = new OwnershipDocument(); _loadError=null; AgencyEconomyStore.Initialized=false;
                 try
                 {
                     if(File.Exists(OwnershipFilePath))
@@ -152,7 +154,13 @@ namespace Server.Agency
         private static void Commit(OwnershipDocument candidate)
         {
             candidate.Revision=checked(_document.Revision+1);
-            Persist(candidate); _document=candidate;
+            if (AgencyEconomyStore.Enabled && AgencyEconomyStore.Initialized) AgencyEconomyStore.CommitOwnership(candidate);
+            else { Persist(candidate); _document=candidate; }
+        }
+        internal static OwnershipDocument ExportDocument() { lock (TransactionGate) return Copy(); }
+        internal static void ApplyEconomyProjection(OwnershipDocument candidate)
+        {
+            lock (TransactionGate) { Persist(candidate); _document = candidate; }
         }
         public static void Set(Guid id,Guid agency)
         {
@@ -252,9 +260,11 @@ namespace Server.Agency
         }
         public static bool HasPendingJournal { get { lock(TransactionGate) return _document.Journal!=null; } }
         public static long CaptureEpoch() { lock(TransactionGate) return _document.Revision; }
-        public static bool CanApplyEpoch(Guid id,long epoch) { lock(TransactionGate) return !VesselOwnershipSystem.Enabled || (Ready && !_document.Absorbed.Contains(id) && !_document.PendingSplits.ContainsKey(id) && _document.Revision==epoch && !global::Server.System.VesselContext.RemovedVessels.ContainsKey(id)); }
+        public static bool CanApplyEpoch(Guid id,long epoch) { lock(TransactionGate) return (!AgencyEconomyStore.Enabled || AgencyEconomyStore.Ready) && (!(VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled) || (Ready && !_document.Absorbed.Contains(id) && !_document.PendingSplits.ContainsKey(id) && !IsSplitParent(id) && _document.Revision==epoch && !global::Server.System.VesselContext.RemovedVessels.ContainsKey(id))); }
+        public static bool IsSplitParent(Guid id) { lock(TransactionGate) return _document.PendingSplits.Values.Any(s => s.ParentId == id); }
+        public static Guid PendingSplitParent(Guid id) { lock(TransactionGate) return _document.PendingSplits.TryGetValue(id, out var split) ? split.ParentId : Guid.Empty; }
         public static bool IsPendingSplit(Guid id) { lock(TransactionGate) return _document.PendingSplits.ContainsKey(id); }
-        public static bool RestoreSplit(Guid parent,Guid child,uint root,uint boundary,uint[] actualParts=null)
+        public static bool RestoreSplit(Guid parent,Guid child,uint root,uint boundary,uint[] actualParts=null,string requester=null,long connectionTicks=0)
         {
             lock(TransactionGate)
             {
@@ -262,17 +272,43 @@ namespace Server.Agency
                 if(!VesselStoreSystem.CurrentVessels.TryGetValue(parent,out var vessel) || !PartIds(vessel).Contains(boundary)) return false;
                 var next=Copy();
                 if(next.PendingSplits.Count>=256) return false;
-                next.PendingSplits[child]=new PendingVesselSplit {ParentId=parent,Root=root,Boundary=boundary,AllowedParts=PartIds(vessel),Constituents=next.Constituents.TryGetValue(parent,out var c)?c:new List<VesselConstituent>(),ParentOwnership=Get(parent)??new VesselOwnershipRecord {VesselId=parent}};
+                next.PendingSplits[child]=new PendingVesselSplit {ParentId=parent,Requester=requester,ConnectionTicks=connectionTicks,Root=root,Boundary=boundary,AllowedParts=PartIds(vessel),Constituents=next.Constituents.TryGetValue(parent,out var c)?c:new List<VesselConstituent>(),ParentOwnership=Get(parent)??new VesselOwnershipRecord {VesselId=parent}};
                 Commit(next);
                 return actualParts==null || ResolveSplit(child,actualParts);
             }
         }
-        public static bool ResolveSplit(Guid child,uint[] actualParts)
+        public static bool SplitBelongsTo(Guid child, string requester, long connectionTicks)
+        {
+            lock (TransactionGate) return !_document.PendingSplits.TryGetValue(child, out var pending) || pending.Requester == requester && pending.ConnectionTicks == connectionTicks;
+        }
+
+        public static void CancelPendingSplits(string requester = null, long connectionTicks = 0, Guid? child = null)
+        {
+            lock (TransactionGate)
+            {
+                // An irreversible topology journal must replay before pending cleanup.
+                if (!Ready || AgencyEconomyStore.Enabled && !AgencyEconomyStore.Ready) return;
+                var cancelled = _document.PendingSplits.Where(p => (!child.HasValue || p.Key == child.Value) && (requester == null || p.Value.Requester == requester && p.Value.ConnectionTicks == connectionTicks)).Select(p => p.Key).ToArray();
+                if (cancelled.Length == 0) return;
+                var next = Copy();
+                foreach (var id in cancelled) next.PendingSplits.Remove(id);
+                Commit(next);
+            }
+        }
+
+        public static bool ResolveSplit(Guid child,uint[] actualParts,string childProto=null,string parentProto=null)
         {
             lock(TransactionGate)
             {
                 if(!_document.PendingSplits.TryGetValue(child,out var pending)) return true;
                 if(actualParts.Length==0 || !actualParts.Contains(pending.Boundary) || actualParts.Distinct().Count()!=actualParts.Length || actualParts.Any(p=>!pending.AllowedParts.Contains(p))) return false;
+                if (AgencyEconomyStore.Enabled && childProto != null)
+                {
+                    if (string.IsNullOrEmpty(parentProto)) return false;
+                    var parentVessel = new global::Server.System.Vessel.Classes.Vessel(parentProto);
+                    var parentIds = PartIds(parentVessel);
+                    if (!Guid.TryParse(parentVessel.Fields.GetSingle("pid")?.Value, out var parentId) || parentId != pending.ParentId || parentIds.Intersect(actualParts).Any() || !new HashSet<uint>(parentIds.Concat(actualParts)).SetEquals(pending.AllowedParts)) return false;
+                }
                 var candidates=pending.Constituents.Where(c=>c.PartUids.Contains(pending.Boundary) && (pending.Root==0 || c.RootPartUid==pending.Root)).ToArray();
                 if(pending.Constituents.Count>0 && candidates.Length!=1) return false;
                 var owner=Effective(candidates.Length==1?candidates[0].Ownership:pending.ParentOwnership);
@@ -288,7 +324,10 @@ namespace Server.Agency
                     }
                     if(childParts.Count>0) next.Constituents[child]=childParts;
                 }
-                owner.VesselId=child; owner.Revision=next.Revision+1; next.Records[child]=owner; next.PendingSplits.Remove(child); next.Absorbed.Remove(child);Commit(next);return true;
+                owner.VesselId=child; owner.Revision=next.Revision+1; next.Records[child]=owner; next.PendingSplits.Remove(child); next.Absorbed.Remove(child);
+                if (AgencyEconomyStore.Enabled) { next.Revision = checked(_document.Revision + 1); AgencyEconomyStore.CommitSplit(next, pending.ParentId, child, actualParts, childProto, parentProto); }
+                else Commit(next);
+                return true;
             }
         }
     }

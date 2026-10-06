@@ -19,6 +19,7 @@ namespace LmpClient.Systems.Agency
     {
         [ThreadStatic] private static int replayDepth;
         [ThreadStatic] private static int localDepth;
+        public static bool Enabled => AgencySystem.OwnershipEnabled || ToolingClient.Enabled;
         public static bool Replaying => replayDepth > 0;
         public static bool InDocking => localDepth > 0;
         private static PendingCouple pending;
@@ -43,7 +44,7 @@ namespace LmpClient.Systems.Agency
         internal static bool Enter(Part a, Part b, CoupleTrigger trigger, out bool entered, bool beginTransaction = true)
         {
             entered = false;
-            if (!AgencySystem.OwnershipEnabled || Replaying) return true;
+            if (!Enabled || Replaying) return true;
             if (!a || !b || !a.vessel || !b.vessel) return false;
             if (a.vessel.id == b.vessel.id)
             {
@@ -62,12 +63,12 @@ namespace LmpClient.Systems.Agency
                 LockSystem.LockQuery.ControlLockBelongsToPlayer(b.vessel.id, player) ? b.vessel : null;
             if (!source || !AgencySystem.Singleton.CanControlVessel(source.id)) return false;
             var target = source == a.vessel ? b.vessel : a.vessel;
-            if (!AgencySystem.Singleton.OwnershipReady) return false;
+            if (AgencySystem.OwnershipEnabled && !AgencySystem.Singleton.OwnershipReady) return false;
             var ownership = AgencySystem.Singleton.GetOwnershipSnapshot();
             ownership.TryGetValue(target.id, out var targetOwner);
             var generic = trigger == CoupleTrigger.Kerbal || trigger == CoupleTrigger.Other;
             if (generic && !AgencySystem.Singleton.CanControlVessel(target.id)) return false;
-            var implicitPermission = generic || targetOwner == null || targetOwner.OwnerAgencyId == Guid.Empty || targetOwner.OwnerAgencyId == AgencySystem.Singleton.MyAgencyId;
+            var implicitPermission = !AgencySystem.OwnershipEnabled || generic || targetOwner == null || targetOwner.OwnerAgencyId == Guid.Empty || targetOwner.OwnerAgencyId == AgencySystem.Singleton.MyAgencyId;
             var grant = AgencySystem.Singleton.GetDockRequests().FirstOrDefault(r => r.Status == DockConsentStatus.Granted && r.SourceVesselId == source.id && r.TargetVesselId == target.id && r.ExpiresUtcTicks > DateTime.UtcNow.Ticks);
             if (!implicitPermission && grant == null)
             {
@@ -121,7 +122,7 @@ namespace LmpClient.Systems.Agency
         internal static bool BeforePartCouple(Part a, Part b, out bool entered)
         {
             entered = false;
-            if (!AgencySystem.OwnershipEnabled || Replaying) return true;
+            if (!Enabled || Replaying) return true;
             if (!a || !b || !a.vessel || !b.vessel) return false;
             if (a.vessel == b.vessel) return true;
             if (pending != null)
@@ -140,7 +141,7 @@ namespace LmpClient.Systems.Agency
         }
         public static bool DeferCouple(Part from, Part to, Guid removed)
         {
-            if (!AgencySystem.OwnershipEnabled || Replaying || pending == null) return false;
+            if (!Enabled || Replaying || pending == null) return false;
             pending.Survivor = from.vessel.id; pending.Removed = removed;
             pending.SurvivorPart = to.flightID; pending.RemovedPart = from.flightID; pending.PhysicalComplete = true;
             return true;
@@ -154,6 +155,11 @@ namespace LmpClient.Systems.Agency
         }
         public static bool BeforeTopologyChange()
         {
+            if (!Replaying && ToolingClient.Enabled && VesselPublicationGuard.Pending && pending == null && !ToolingClient.HasSplitPending)
+            {
+                ToolingClient.RecoveryDisconnect("Craft changed while economy topology confirmation was pending.");
+                return false;
+            }
             if (Replaying || pending == null) return true;
             Abort("Craft changed while docking confirmation was pending."); return false;
         }

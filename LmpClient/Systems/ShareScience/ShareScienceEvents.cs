@@ -6,6 +6,7 @@ namespace LmpClient.Systems.ShareScience
     {
         public void ScienceChanged(float science, TransactionReasons reason)
         {
+            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return;
             if (System.IgnoreEvents) return;
 
             System.MessageSender.SendScienceMessage(science, reason.ToString());

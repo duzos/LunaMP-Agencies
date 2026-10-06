@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.SettingsSys;
 using LmpClient.Systems.ShareScienceSubject;
@@ -122,7 +122,7 @@ namespace LmpClient.Systems.VesselProtoSys
 
         public void PartUndocked(Part part, DockedVesselInfo dockedInfo, Vessel originalVessel)
         {
-            if (LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled) return; // Ordered after the split announcement by its completion handler.
+            if (LmpClient.Systems.Agency.DockingCoordinator.Enabled) return; // Ordered after the split announcement by its completion handler.
             if (VesselCommon.IsSpectating) return;
 
             //Quarantine both vessel ids to avoid applying stale proto updates during local rewrites.
@@ -139,7 +139,7 @@ namespace LmpClient.Systems.VesselProtoSys
 
         public void PartDecoupled(Part part, float breakForce, Vessel originalVessel)
         {
-            if (LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled) return; // Ordered after the split announcement by its completion handler.
+            if (LmpClient.Systems.Agency.DockingCoordinator.Enabled) return; // Ordered after the split announcement by its completion handler.
             if (VesselCommon.IsSpectating || originalVessel == null) return;
 
             //Quarantine both vessel ids; local topology changes can arrive in bursts.

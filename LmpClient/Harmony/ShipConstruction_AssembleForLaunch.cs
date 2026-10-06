@@ -32,7 +32,10 @@ namespace LmpClient.Harmony
             bool fromShipAssembly, bool setActiveVessel, bool isLanded, bool preCreate, Orbit orbit, bool orbiting, bool isSplashed, Vessel __result)
         {
             if (fromShipAssembly && __result && ship != null)
+            {
+                LmpClient.Systems.Agency.ToolingClient.BindLaunch(__result, ship);
                 VesselAssemblyEvent.onAssembledVessel.Fire(__result, ship);
+            }
         }
     }
 }

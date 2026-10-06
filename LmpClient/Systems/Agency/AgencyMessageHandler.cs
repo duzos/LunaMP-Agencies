@@ -59,6 +59,12 @@ namespace LmpClient.Systems.Agency
                 case AgencyMessageType.SrvCommNetResult:
                     System.ApplyCommNetResult((AgencyCommNetResultMsgData)data);
                     break;
+                case AgencyMessageType.SrvEconomySnapshot:
+                    ToolingClient.Receive(((AgencyEconomySnapshotMsgData)data).Snapshot);
+                    break;
+                case AgencyMessageType.SrvEconomyResult:
+                    ToolingClient.Receive(((AgencyEconomyResultMsgData)data).Result);
+                    break;
                 default:
                     LunaLog.LogWarning($"[Agency] Unhandled Srv subtype {data.AgencyMessageType}");
                     break;

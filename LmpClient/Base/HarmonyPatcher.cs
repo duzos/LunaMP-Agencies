@@ -58,6 +58,7 @@ namespace LmpClient.Base
         {
             AgencyLaunchSites.Install(HarmonyInstance);
             AgencyVesselDocking.Install(HarmonyInstance);
+            AgencyTooling.Install(HarmonyInstance);
             SuppressClickThroughBlockerPopup();
             PatchContractPreLoader();
         }

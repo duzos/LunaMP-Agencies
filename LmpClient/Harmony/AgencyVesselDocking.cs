@@ -45,7 +45,7 @@ namespace LmpClient.Harmony
         private static bool EventPrefix(KerbalFSM __instance, KFSMEvent __0, out bool __state)
         {
             __state = false;
-            if (!AgencySystem.OwnershipEnabled || DockingCoordinator.Replaying || __0 == null) return true;
+            if (!DockingCoordinator.Enabled || DockingCoordinator.Replaying || __0 == null) return true;
             if (!modules.TryGetValue(__instance, out var module)) module = __0.OnEvent?.Target as PartModule;
             if (module is ModuleDockingNode node && ReferenceEquals(node.fsm, __instance))
             {

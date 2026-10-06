@@ -1,4 +1,4 @@
-﻿using LunaConfigNode;
+using LunaConfigNode;
 using Server.Context;
 using System;
 using System.Collections.Concurrent;
@@ -92,8 +92,9 @@ namespace Server.System
         {
             lock (BackupLock)
             {
-                if (global::Server.Agency.VesselOwnershipSystem.Enabled && !global::Server.Agency.AgencyVesselMap.Ready) return;
-                var vesselsInCfgNode = CurrentVessels.ToArray().Where(p=>!global::Server.Agency.VesselOwnershipSystem.Enabled || !global::Server.Agency.AgencyVesselMap.IsAbsorbed(p.Key));
+                if (global::Server.Agency.AgencyEconomyStore.Enabled && !global::Server.Agency.AgencyEconomyStore.Ready) return;
+                if ((global::Server.Agency.VesselOwnershipSystem.Enabled || global::Server.Agency.AgencyEconomyStore.Enabled) && !global::Server.Agency.AgencyVesselMap.Ready) return;
+                var vesselsInCfgNode = CurrentVessels.ToArray().Where(p=>!(global::Server.Agency.VesselOwnershipSystem.Enabled || global::Server.Agency.AgencyEconomyStore.Enabled) || !global::Server.Agency.AgencyVesselMap.IsAbsorbed(p.Key));
                 foreach (var vessel in vesselsInCfgNode)
                 {
                     FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vessel.Key}{VesselFileFormat}"), vessel.Value.ToString());
@@ -109,7 +110,8 @@ namespace Server.System
             global::Server.Agency.AgencyVesselMap.PersistenceCheckpoint?.Invoke("before-vessel-persist");
             lock (BackupLock)
             {
-                if (global::Server.Agency.VesselOwnershipSystem.Enabled && (!global::Server.Agency.AgencyVesselMap.Ready || global::Server.Agency.AgencyVesselMap.IsAbsorbed(vesselId))) return;
+                if (global::Server.Agency.AgencyEconomyStore.Enabled && !global::Server.Agency.AgencyEconomyStore.Ready) return;
+                if ((global::Server.Agency.VesselOwnershipSystem.Enabled || global::Server.Agency.AgencyEconomyStore.Enabled) && (!global::Server.Agency.AgencyVesselMap.Ready || global::Server.Agency.AgencyVesselMap.IsAbsorbed(vesselId))) return;
                 if (!CurrentVessels.TryGetValue(vesselId, out var vessel)) return;
                 FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vesselId}{VesselFileFormat}"), vessel.ToString());
             }

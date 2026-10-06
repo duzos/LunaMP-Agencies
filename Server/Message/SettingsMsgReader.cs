@@ -48,6 +48,10 @@ namespace Server.Message
             msgData.AgencyLaunchSitesPerAgency = GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency;
             msgData.AgencyVesselOwnership = GeneralSettings.SettingsStore.AgencyVesselOwnership;
             msgData.AgencyCommNetOptIn = GeneralSettings.SettingsStore.AgencyCommNetOptIn && GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
+            msgData.AgencyTooling = GeneralSettings.SettingsStore.AgencyTooling;
+            msgData.ToolingCostMultiplier = GeneralSettings.SettingsStore.ToolingCostMultiplier;
+            msgData.TooledLaunchMultiplier = GeneralSettings.SettingsStore.TooledLaunchMultiplier;
+            msgData.ToolingCombineMultiplier = GeneralSettings.SettingsStore.ToolingCombineMultiplier;
 
             if (GeneralSettings.SettingsStore.GameDifficulty == GameDifficulty.Custom && GameplaySettings.SettingsStore != null)
             {

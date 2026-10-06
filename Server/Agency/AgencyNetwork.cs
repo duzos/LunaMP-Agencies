@@ -99,6 +99,7 @@ namespace Server.Agency
             }
             MessageQueuer.SendToClient<AgencySrvMsg>(client, data);
             AgencyCommNetStore.SendTo(client);
+            AgencyEconomyStore.SendTo(client);
         }
 
         /// <summary>

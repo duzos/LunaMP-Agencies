@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.SettingsSys;
 using LmpClient.Systems.VesselPositionSys;
@@ -24,11 +24,18 @@ namespace LmpClient.Systems.VesselUndockSys
             LockSystem.Singleton.AcquireUnloadedUpdateLock(part.vessel.id, true, true);
             LockSystem.Singleton.AcquireUpdateLock(part.vessel.id, true, true);
 
+            if (LmpClient.Systems.Agency.ToolingClient.Enabled)
+            {
+                LmpClient.Systems.VesselProtoSys.LocalTopologyTracker.RecordMutation(part.vessel.id);
+                LmpClient.Systems.VesselProtoSys.LocalTopologyTracker.RecordMutation(originalVessel.id);
+                LmpClient.Systems.Agency.ToolingClient.CaptureSplit(originalVessel, part.vessel, part.flightID, 0, dockedInfo);
+                return;
+            }
             VesselPositionSystem.Singleton.MessageSender.SendVesselPositionUpdate(part.vessel, true);
 
             LunaLog.Log($"Undock complete! Part: {part} Vessel: {originalVessel.id}");
             System.MessageSender.SendVesselUndock(originalVessel, part.flightID, dockedInfo, part.vessel.id);
-            if (LmpClient.Systems.Agency.AgencySystem.OwnershipEnabled)
+            if (LmpClient.Systems.Agency.DockingCoordinator.Enabled)
             {
                 LmpClient.Systems.VesselProtoSys.LocalTopologyTracker.RecordMutation(part.vessel.id);
                 LmpClient.Systems.VesselProtoSys.LocalTopologyTracker.RecordMutation(originalVessel.id);

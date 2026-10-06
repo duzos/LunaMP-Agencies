@@ -13,14 +13,17 @@ namespace LmpClient.Harmony
     public class FlightDriver_RevertToPrelaunch
     {
         [HarmonyPrefix]
-        private static void PrefixRevertToPrelaunch(EditorFacility facility)
+        private static bool PrefixRevertToPrelaunch(EditorFacility facility)
         {
+            if (!LmpClient.Systems.Agency.ToolingClient.BeginRevert(facility, false)) return false;
             RevertEvent.onReturningToEditor.Fire(facility);
+            return true;
         }
 
         [HarmonyPostfix]
-        private static void PostfixRevertToPrelaunch(EditorFacility facility)
+        private static void PostfixRevertToPrelaunch(EditorFacility facility, bool __runOriginal)
         {
+            if (!__runOriginal) return;
             RevertEvent.onReturnedToEditor.Fire(facility);
         }
     }

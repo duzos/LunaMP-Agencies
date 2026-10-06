@@ -81,6 +81,8 @@ namespace LmpCommon.Message.Data.Settings
         public bool AgencyLaunchSitesPerAgency;
         public bool AgencyVesselOwnership;
         public bool AgencyCommNetOptIn;
+        public bool AgencyTooling;
+        public double ToolingCostMultiplier = 10, TooledLaunchMultiplier = 0.1, ToolingCombineMultiplier = 0.1;
 
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
 
@@ -154,6 +156,10 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(AgencyLaunchSitesPerAgency);
             lidgrenMsg.Write(AgencyVesselOwnership);
             lidgrenMsg.Write(AgencyCommNetOptIn);
+            lidgrenMsg.Write(AgencyTooling);
+            lidgrenMsg.Write(ToolingCostMultiplier);
+            lidgrenMsg.Write(TooledLaunchMultiplier);
+            lidgrenMsg.Write(ToolingCombineMultiplier);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -244,12 +250,21 @@ namespace LmpCommon.Message.Data.Settings
             catch { /* Older servers omit this independent trailing flag. */ }
             AgencyVesselOwnership = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
             AgencyCommNetOptIn = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
+            AgencyTooling = false;
+            ToolingCostMultiplier = 10; TooledLaunchMultiplier = 0.1; ToolingCombineMultiplier = 0.1;
+            if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 193)
+            {
+                AgencyTooling = lidgrenMsg.ReadBoolean();
+                ToolingCostMultiplier = lidgrenMsg.ReadDouble();
+                TooledLaunchMultiplier = lidgrenMsg.ReadDouble();
+                ToolingCombineMultiplier = lidgrenMsg.ReadDouble();
+            }
         }
 
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 32 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 33 + sizeof(double) * 3 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

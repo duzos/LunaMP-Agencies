@@ -45,7 +45,7 @@ namespace LmpClient.Systems.Agency
             }
             while (agency.DockNotifications.TryDequeue(out var status))
             {
-                if (!AgencySystem.OwnershipEnabled) continue;
+                if (!DockingCoordinator.Enabled) continue;
                 DockingCoordinator.HandleStatus(status);
                 if (status.Status == DockConsentStatus.Pending && status.ExpiresUtcTicks > DateTime.UtcNow.Ticks)
                 {

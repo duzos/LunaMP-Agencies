@@ -119,7 +119,7 @@ namespace Server.Server
             {
                 while (ServerContext.ServerRunning)
                 {
-                    if(global::Server.Agency.VesselOwnershipSystem.Enabled && DateTime.UtcNow>=ownershipSweep) { global::Server.Agency.VesselOwnershipSystem.SweepExpired(); ownershipSweep=DateTime.UtcNow.AddSeconds(1); }
+                    if((global::Server.Agency.VesselOwnershipSystem.Enabled || global::Server.Agency.AgencyEconomyStore.Enabled) && DateTime.UtcNow>=ownershipSweep) { global::Server.Agency.VesselOwnershipSystem.SweepExpired(); global::Server.Agency.AgencyEconomyStore.CancelPending(); ownershipSweep=DateTime.UtcNow.AddSeconds(1); }
                     var msg = Server.ReadMessage();
                     if (msg != null)
                     {

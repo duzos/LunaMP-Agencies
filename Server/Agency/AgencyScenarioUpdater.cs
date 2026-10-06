@@ -1,4 +1,4 @@
-using Server.Diagnostics;
+﻿using Server.Diagnostics;
 using LunaConfigNode.CfgNode;
 using Server.Log;
 using Server.System.Scenario;
@@ -30,8 +30,14 @@ namespace Server.Agency
                 try
                 {
                     var node = ScenarioDataUpdater.ParseClientConfigNode(scenarioAsConfigNodeText, moduleName);
+                    lock (AgencyVesselMap.TransactionGate)
                     lock (AgencyScenarioStore.SemaphoreFor(agencyId, moduleName))
                     {
+                        if (AgencyEconomyStore.Enabled && AgencyEconomyStore.TryBalance(agencyId, out var funds, out var science))
+                        {
+                            if (moduleName == "Funding") node.UpdateValue("funds", funds.ToString(CultureInfo.InvariantCulture));
+                            if (moduleName == "ResearchAndDevelopment") node.UpdateValue("sci", science.ToString(CultureInfo.InvariantCulture));
+                        }
                         AgencyScenarioStore.AddOrUpdate(agencyId, moduleName, node);
                     }
                     PlaytestDiagnostics.Write("scenario.apply", () => $"agency={agencyId} module={moduleName} route=agency result=applied-in-memory");
@@ -46,6 +52,7 @@ namespace Server.Agency
 
         public static void WriteFunds(Guid agencyId, double funds)
         {
+            if (AgencyEconomyStore.Enabled && AgencyEconomyStore.TryBalance(agencyId, out var authoritativeFunds, out _)) funds = authoritativeFunds;
             lock (AgencyScenarioStore.SemaphoreFor(agencyId, "Funding"))
             {
                 var node = AgencyScenarioStore.GetOrNull(agencyId, "Funding");
@@ -56,6 +63,7 @@ namespace Server.Agency
 
         public static void WriteScience(Guid agencyId, float science)
         {
+            if (AgencyEconomyStore.Enabled && AgencyEconomyStore.TryBalance(agencyId, out _, out var authoritativeScience)) science = (float)authoritativeScience;
             lock (AgencyScenarioStore.SemaphoreFor(agencyId, "ResearchAndDevelopment"))
             {
                 var node = AgencyScenarioStore.GetOrNull(agencyId, "ResearchAndDevelopment");

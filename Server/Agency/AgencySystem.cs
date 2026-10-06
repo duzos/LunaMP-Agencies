@@ -405,6 +405,7 @@ namespace Server.Agency
             Guid fromAgencyId, Guid toAgencyId, ResourceKind kind, double amount,
             string actorUniqueId, bool isAdmin)
         {
+            if (AgencyEconomyStore.Enabled) return AgencyEconomyStore.TransferResources(fromAgencyId, toAgencyId, kind, amount, actorUniqueId, isAdmin);
             (bool Success, string Message) Result(bool success, string reason)
             {
                 PlaytestDiagnostics.Write("agency.transfer.result", () => $"source={fromAgencyId} target={toAgencyId} kind={kind} amount={amount} success={success} reason={reason}");
@@ -494,6 +495,7 @@ namespace Server.Agency
 
         public static void SetAgencyFunds(Agency agency, double value, string reason)
         {
+            if (AgencyEconomyStore.Enabled) { AgencyEconomyStore.SetBalance(agency.Id, value, null); return; }
             if (agency == null) return;
             double before;
             lock (agency.Lock)
@@ -509,6 +511,7 @@ namespace Server.Agency
 
         public static void SetAgencyScience(Agency agency, float value, string reason)
         {
+            if (AgencyEconomyStore.Enabled) { AgencyEconomyStore.SetBalance(agency.Id, null, value); return; }
             if (agency == null) return;
             float before;
             lock (agency.Lock)

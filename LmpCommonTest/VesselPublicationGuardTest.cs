@@ -37,6 +37,32 @@ namespace LmpCommonTest
             Assert.IsTrue(CanSend(Message(operation), epoch));
         }
         [TestMethod]
+        public void SplitQueueAdvancesWithoutPublishingIntermediateOrdinaryUpdates()
+        {
+            var first = Guid.NewGuid(); var second = Guid.NewGuid();
+            var parent = Guid.NewGuid(); var child = Guid.NewGuid(); var nextChild = Guid.NewGuid();
+            var factory = new ClientMessageFactory();
+            Func<Guid, Guid, IMessageBase> proto = (id, operation) => {
+                var data = factory.CreateNewMessageData<VesselProtoMsgData>();
+                data.VesselId = id; data.EconomySplitOperationId = operation;
+                return factory.CreateNew<VesselCliMsg>(data);
+            };
+            Assert.IsTrue(VesselPublicationGuard.Begin(first, parent, child));
+            var epoch = VesselPublicationGuard.CaptureEpoch();
+            Assert.IsTrue(CanSend(proto(child, first), epoch));
+            Assert.IsFalse(CanSend(proto(nextChild, second), epoch));
+            Assert.IsTrue(VesselPublicationGuard.AdvanceSplit(first, second, parent, nextChild));
+            Assert.IsTrue(VesselPublicationGuard.Pending);
+            VesselPublicationGuard.Complete(first);
+            Assert.IsTrue(VesselPublicationGuard.Pending);
+            Assert.IsFalse(CanSend(Message(), VesselPublicationGuard.CaptureEpoch()));
+            Assert.IsFalse(CanSend(proto(child, first), epoch));
+            Assert.IsTrue(CanSend(proto(nextChild, second), VesselPublicationGuard.CaptureEpoch()));
+            VesselPublicationGuard.Complete(second);
+            Assert.IsTrue(CanSend(Message(), VesselPublicationGuard.CaptureEpoch()));
+        }
+
+        [TestMethod]
         public void AckNeverReleasesOldSerializationJobs()
         {
             var before = VesselPublicationGuard.CaptureEpoch();

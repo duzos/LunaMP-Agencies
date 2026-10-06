@@ -7,6 +7,7 @@ namespace LmpClient.Systems.ShareFunds
     {
         public void FundsChanged(double funds, TransactionReasons reason)
         {
+            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return;
             //Capture rollout debit here so revert-to-editor can refund the exact launch cost.
             //Always update LastKnownFunds, even when events are ignored, to keep deltas correct.
             if (System.LastKnownFunds.HasValue)
@@ -34,7 +35,7 @@ namespace LmpClient.Systems.ShareFunds
         {
             System.Reverting = true;
 
-            if (System.CurrentShipCost != null)
+            if (!LmpClient.Systems.Agency.ToolingClient.Enabled && System.CurrentShipCost != null)
             {
                 Funding.Instance.AddFunds(System.CurrentShipCost.Item2, TransactionReasons.VesselRecovery);
                 System.CurrentShipCost = null;

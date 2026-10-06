@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.SettingsSys;
 using LmpClient.Systems.VesselProtoSys;
@@ -15,6 +15,7 @@ namespace LmpClient.Systems.VesselCrewSys
         /// </summary>
         public void OnCrewBoard(Guid kerbalId, string kerbalName, Vessel vessel)
         {
+            if (LmpClient.Systems.Agency.ToolingClient.IsBoarding(kerbalId)) return;
             LunaLog.Log("Crew boarding detected!");
 
             VesselRemoveSystem.Singleton.MessageSender.SendVesselRemove(kerbalId, false, "Kerbal boarded vessel");
@@ -29,6 +30,7 @@ namespace LmpClient.Systems.VesselCrewSys
         /// </summary>
         public void OnCrewEva(GameEvents.FromToAction<Part, Part> data)
         {
+            LmpClient.Systems.Agency.ToolingClient.BindEva(data);
             EvaReady.FireOnCrewEvaReady(data.to.FindModuleImplementing<KerbalEVA>());
         }
 

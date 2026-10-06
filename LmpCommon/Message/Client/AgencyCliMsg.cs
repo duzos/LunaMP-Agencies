@@ -1,4 +1,4 @@
-﻿using Lidgren.Network;
+using Lidgren.Network;
 using LmpCommon.Enums;
 using LmpCommon.Message.Client.Base;
 using LmpCommon.Message.Data.Agency;
@@ -17,6 +17,7 @@ namespace LmpCommon.Message.Client
         protected override Dictionary<ushort, Type> SubTypeDictionary { get; } = new Dictionary<ushort, Type>
         {
             [(ushort)AgencyMessageType.CliVesselOwnershipCommand] = typeof(AgencyVesselOwnershipCommandMsgData),
+            [(ushort)AgencyMessageType.CliEconomyCommand] = typeof(AgencyEconomyCommandMsgData),
             [(ushort)AgencyMessageType.CliCommNetCommand] = typeof(AgencyCommNetCommandMsgData),
             [(ushort)AgencyMessageType.CliDockRequest] = typeof(AgencyDockRequestMsgData),
             [(ushort)AgencyMessageType.CliDockResponse] = typeof(AgencyDockResponseMsgData),
@@ -36,7 +37,7 @@ namespace LmpCommon.Message.Client
 
         public override ClientMessageType MessageType => ClientMessageType.Agency;
 
-        protected override int DefaultChannel => 22;
+        protected override int DefaultChannel => Data is AgencyEconomyCommandMsgData ? 8 : 22;
 
         public override NetDeliveryMethod NetDeliveryMethod => NetDeliveryMethod.ReliableOrdered;
     }

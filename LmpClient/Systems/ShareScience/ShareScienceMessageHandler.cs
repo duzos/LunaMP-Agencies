@@ -13,6 +13,7 @@ namespace LmpClient.Systems.ShareScience
 
         public void HandleMessage(IServerMessageBase msg)
         {
+            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return;
             if (!(msg.Data is ShareProgressBaseMsgData msgData)) return;
             if (msgData.ShareProgressMessageType != ShareProgressMessageType.ScienceUpdate) return;
 

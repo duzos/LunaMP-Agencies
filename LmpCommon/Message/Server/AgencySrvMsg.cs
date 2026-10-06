@@ -16,6 +16,8 @@ namespace LmpCommon.Message.Server
 
         protected override Dictionary<ushort, Type> SubTypeDictionary { get; } = new Dictionary<ushort, Type>
         {
+            [(ushort)AgencyMessageType.SrvEconomyResult] = typeof(AgencyEconomyResultMsgData),
+            [(ushort)AgencyMessageType.SrvEconomySnapshot] = typeof(AgencyEconomySnapshotMsgData),
             [(ushort)AgencyMessageType.SrvCommNetSnapshot] = typeof(AgencyCommNetSnapshotMsgData),
             [(ushort)AgencyMessageType.SrvCommNetResult] = typeof(AgencyCommNetResultMsgData),
             [(ushort)AgencyMessageType.SrvDockStatus] = typeof(AgencyDockStatusMsgData),

@@ -1,4 +1,4 @@
-﻿using Lidgren.Network;
+using Lidgren.Network;
 using LmpCommon.Enums;
 using LmpCommon.Message.Data.PlayerConnection;
 using LmpCommon.Message.Server;
@@ -28,6 +28,8 @@ namespace Server.Client
             if (!string.IsNullOrEmpty(reason))
                 LunaLog.Debug($"{client.PlayerName} sent Connection end message, reason: {reason}");
 
+            global::Server.Agency.AgencyVesselMap.CancelPendingSplits(client.UniqueIdentifier, client.ConnectionTime.Ticks);
+            global::Server.Agency.AgencyEconomyStore.CancelPending(client);
             global::Server.Agency.VesselOwnershipSystem.Disconnect(client);
             //Remove Clients from list
             if (ServerContext.Clients.ContainsKey(client.Endpoint))

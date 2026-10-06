@@ -35,6 +35,10 @@ namespace LmpClient.Systems.SettingsSys
         public bool AgencyKerbalsPerAgency { get; set; }
         public bool AgencyScansatPerAgency { get; set; }
         public bool AgencyContractsPoolPerAgency { get; set; }
+        public bool AgencyTooling;
+        public double ToolingCostMultiplier = 10;
+        public double TooledLaunchMultiplier = 0.1;
+        public double ToolingCombineMultiplier = 0.1;
         public bool AgencyCommNetOptIn;
         public bool AgencyCommNetPerAgency { get; set; }
         public bool AgencyLaunchSitesPerAgency { get; set; }

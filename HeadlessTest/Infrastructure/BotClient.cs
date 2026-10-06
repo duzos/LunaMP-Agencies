@@ -29,6 +29,8 @@ internal sealed record CommNetEndpointBot(Guid VesselId, Guid OwnerAgencyId, lon
 internal sealed record CommNetPreferenceBot(CommNetEndpointBot Source, bool AcceptAll, IReadOnlyList<CommNetEndpointBot> Targets);
 internal sealed record CommNetMapSnapshot(int Generation, bool Ready, long Revision, IReadOnlyList<CommNetEndpointBot> Endpoints, IReadOnlyList<CommNetPreferenceBot> Preferences) : BotSnapshot(Generation);
 internal sealed record CommNetResultBot(int Generation, Guid RequestId, bool Success, string Reason) : BotSnapshot(Generation);
+internal sealed record EconomyStateBot(int Generation, EconomySnapshot State) : BotSnapshot(Generation);
+internal sealed record EconomyResultBot(int Generation, EconomyResult Result) : BotSnapshot(Generation);
 internal abstract record BotSnapshot(int Generation);
 internal sealed record StatusSnapshot(int Generation, NetConnectionStatus Status, string Reason) : BotSnapshot(Generation);
 internal sealed record HandshakeSnapshot(int Generation, HandshakeReply Response, string Reason) : BotSnapshot(Generation);
@@ -162,6 +164,22 @@ internal sealed class BotClient : IAsyncDisposable
         Send<AgencyCliMsg, AgencyCommNetCommandMsgData>(d => { d.RequestId = request; d.Operation = operation; d.VesselId = vessel; d.TargetVesselId = target; d.Enabled = enabled; });
         return request;
     }
+    public void UploadPaidVessel(Guid vessel, string text, Guid launch, Guid token, int[] indices)
+        => Send<VesselCliMsg, VesselProtoMsgData>(d =>
+        {
+            d.VesselId = vessel; d.Data = Encoding.UTF8.GetBytes(text); d.NumBytes = d.Data.Length; d.ForceReload = false; d.Reason = "Headless paid launch";
+            d.EconomyLaunchId = launch; d.EconomyLaunchToken = token; d.EconomyManifestIndices = indices;
+        });
+    private Guid _economySession;
+    private long _economySequence;
+    public Guid SendEconomy(EconomyCommand command)
+    {
+        if (command.RequestId == Guid.Empty) command.RequestId = Guid.NewGuid();
+        lock (_gate) { if (command.SessionId == Guid.Empty) command.SessionId = _economySession; if (command.Sequence == 0) command.Sequence = ++_economySequence; }
+        Send<AgencyCliMsg, AgencyEconomyCommandMsgData>(d => d.Command = command);
+        return command.RequestId;
+    }
+    private static T CopyEconomy<T>(T data) => Newtonsoft.Json.JsonConvert.DeserializeObject<T>(Newtonsoft.Json.JsonConvert.SerializeObject(data));
     public Guid RequestDock(Guid source, Guid target)
     {
         var request = Guid.NewGuid();
@@ -347,6 +365,8 @@ internal sealed class BotClient : IAsyncDisposable
             Array.AsReadOnly(d.Endpoints.Select(e => new CommNetEndpointBot(e.VesselId, e.OwnerAgencyId, e.OwnershipRevision)).ToArray()),
             Array.AsReadOnly(d.Preferences.Select(p => new CommNetPreferenceBot(new CommNetEndpointBot(p.Source.VesselId, p.Source.OwnerAgencyId, p.Source.OwnershipRevision), p.AcceptAll,
                 Array.AsReadOnly(p.Targets.Select(e => new CommNetEndpointBot(e.VesselId, e.OwnerAgencyId, e.OwnershipRevision)).ToArray()))).ToArray())),
+        AgencyEconomySnapshotMsgData d => new EconomyStateBot(generation, CopyEconomy(d.Snapshot)),
+        AgencyEconomyResultMsgData d => new EconomyResultBot(generation, CopyEconomy(d.Result)),
         PlayerConnectionLeaveMsgData d => new PlayerLeftSnapshot(generation, d.PlayerName),
         LockAcquireMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, true, string.Empty),
         LockAcquireDeniedMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, false, d.Reason),
@@ -375,6 +395,11 @@ internal sealed class BotClient : IAsyncDisposable
         {
             if (_pending.Count >= 4096 || _chatHistory.Count >= 4096 || _kerbalHistory.Count >= 4096)
                 throw new InvalidOperationException("Bot snapshot capacity exceeded; refusing to lose negative assertion evidence");
+            if (snapshot is EconomyStateBot economy)
+            {
+                if (_economySession != economy.State.SessionId) { _economySession = economy.State.SessionId; _economySequence = economy.State.LastSequence; }
+                else _economySequence = Math.Max(_economySequence, economy.State.LastSequence);
+            }
             _pending.Add(snapshot);
             if (snapshot is ChatSnapshot chat) _chatHistory.Add(chat);
             if (snapshot is KerbalProtoSnapshot kerbal) _kerbalHistory.Add(kerbal);

@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Events;
 using LmpClient.Localization;
 using LmpClient.Systems.Lock;
@@ -20,6 +20,8 @@ namespace LmpClient.Systems.VesselRemoveSys
         /// </summary>
         public void OnVesselWillDestroy(Vessel dyingVessel)
         {
+            if (LmpClient.Systems.Agency.ToolingClient.IsBoarding(dyingVessel.id)) return;
+            if (LmpClient.Systems.Agency.ToolingClient.IsRecovering(dyingVessel.id)) return;
             if (!LmpClient.Systems.Agency.DockingCoordinator.BeforeDestroy(dyingVessel)) return;
             //Only send the vessel remove msg if we own the unloaded update lock
             if (!LockSystem.LockQuery.UnloadedUpdateLockExists(dyingVessel.id) ||
@@ -76,7 +78,9 @@ namespace LmpClient.Systems.VesselRemoveSys
             _recoveringTerminatingVesselId = recoveredVessel.vesselID;
             LunaLog.Log($"[LMP]: Removing vessel {recoveredVessel.vesselID}, Name: {recoveredVessel.vesselName} from the server: Recovered");
 
-            System.MessageSender.SendVesselRemove(recoveredVessel.vesselID, true, "Recovered");
+            if (LmpClient.Systems.Agency.ToolingClient.Enabled)
+                LmpClient.Systems.Agency.ToolingClient.MarkRecovering(recoveredVessel.vesselID);
+            else System.MessageSender.SendVesselRemove(recoveredVessel.vesselID, true, "Recovered");
 
             //Vessel is recovered so remove the locks. Do not remove the kerbal locks as that's done in the Kerbal system
             LockSystem.Singleton.ReleaseAllVesselLocks(null, recoveredVessel.vesselID, 1);
@@ -119,6 +123,7 @@ namespace LmpClient.Systems.VesselRemoveSys
         /// </summary>
         public void OnRevertToLaunch()
         {
+            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return; // Server settlement owns topology removal/restoration.
             if (FlightGlobals.ActiveVessel != null && !VesselCommon.IsSpectating)
             {
                 LunaLog.Log("[LMP]: Detected a revert to launch!");
@@ -133,6 +138,7 @@ namespace LmpClient.Systems.VesselRemoveSys
         /// </summary>
         public void OnRevertToEditor(EditorFacility data)
         {
+            if (LmpClient.Systems.Agency.ToolingClient.Enabled) return;
             if (FlightGlobals.ActiveVessel != null && !VesselCommon.IsSpectating)
             {
                 LunaLog.Log($"[LMP]: Detected a revert to editor! {data}");

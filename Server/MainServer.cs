@@ -1,4 +1,4 @@
-﻿using Server.Diagnostics;
+using Server.Diagnostics;
 using LmpCommon;
 using LmpCommon.Time;
 using Server.Agency;
@@ -148,6 +148,9 @@ namespace Server
                 AgencyVesselMap.Load();
                 AgencyCommNetStore.Load();
                 if (GeneralSettings.SettingsStore.AgencyVesselOwnership) { AgencyVesselMap.RecoverJournal(); if (!AgencyVesselMap.Ready) throw new global::System.IO.InvalidDataException("Ownership data unavailable."); }
+                AgencyEconomyStore.Load();
+                if (AgencyEconomyStore.Enabled && !AgencyEconomyStore.Ready) throw new global::System.IO.InvalidDataException("Economy recovery required.");
+                AgencyVesselMap.CancelPendingSplits();
                 AgencyLaunchSiteStore.Load();
                 AgencyMigration.RunIfNeeded();
 

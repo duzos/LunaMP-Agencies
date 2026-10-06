@@ -41,7 +41,7 @@ namespace LmpClient.Windows.Agency
             var names = new Dictionary<Guid, string>();
             if (FlightGlobals.Vessels != null)
                 foreach (var vessel in FlightGlobals.Vessels)
-                    if (vessel != null) names[vessel.id] = vessel.vesselName ?? ShortVesselId(vessel.id);
+                    if (vessel != null && VisibilityClient.CanSee(vessel)) names[vessel.id] = vessel.vesselName ?? ShortVesselId(vessel.id);
             var own = endpoints.Values.Where(e => e.OwnerAgencyId == system.MyAgencyId && e.OwnerAgencyId != Guid.Empty)
                 .OrderBy(e => VesselDisplayName(names, e.VesselId), StringComparer.OrdinalIgnoreCase).ToArray();
             if (!own.Any(e => e.VesselId == commNetSelected)) commNetSelected = own.FirstOrDefault()?.VesselId ?? Guid.Empty;
@@ -69,7 +69,7 @@ namespace LmpClient.Windows.Agency
             GUILayout.BeginHorizontal(); GUILayout.Label("Search", GUILayout.Width(48)); commNetSearch = GUILayout.TextField(commNetSearch); GUILayout.EndHorizontal();
             commNetTargetsScroll = GUILayout.BeginScrollView(commNetTargetsScroll);
             var count = 0;
-            foreach (var target in endpoints.Values.Where(e => e.OwnerAgencyId != Guid.Empty && e.OwnerAgencyId != source.OwnerAgencyId)
+            foreach (var target in endpoints.Values.Where(e => e.OwnerAgencyId != Guid.Empty && e.OwnerAgencyId != source.OwnerAgencyId && VisibilityClient.CanSee(e.VesselId))
                 .OrderBy(e => VesselDisplayName(names, e.VesselId), StringComparer.OrdinalIgnoreCase))
             {
                 var label = VesselDisplayName(names, target.VesselId) + " · " + OwnershipAgencyName(target.OwnerAgencyId);

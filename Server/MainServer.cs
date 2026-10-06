@@ -147,6 +147,7 @@ namespace Server
                 AgencyScenarioStore.LoadAllExisting();
                 AgencyVesselMap.Load();
                 AgencyCommNetStore.Load();
+                AgencyVisibilityStore.Load();
                 if (GeneralSettings.SettingsStore.AgencyVesselOwnership) { AgencyVesselMap.RecoverJournal(); if (!AgencyVesselMap.Ready) throw new global::System.IO.InvalidDataException("Ownership data unavailable."); }
                 AgencyEconomyStore.Load();
                 if (AgencyEconomyStore.Enabled && !AgencyEconomyStore.Ready) throw new global::System.IO.InvalidDataException("Economy recovery required.");

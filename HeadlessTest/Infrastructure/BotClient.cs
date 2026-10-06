@@ -31,6 +31,8 @@ internal sealed record CommNetMapSnapshot(int Generation, bool Ready, long Revis
 internal sealed record CommNetResultBot(int Generation, Guid RequestId, bool Success, string Reason) : BotSnapshot(Generation);
 internal sealed record EconomyStateBot(int Generation, EconomySnapshot State) : BotSnapshot(Generation);
 internal sealed record EconomyResultBot(int Generation, EconomyResult Result) : BotSnapshot(Generation);
+internal sealed record VisibilityStateBot(int Generation, VisibilitySnapshot State) : BotSnapshot(Generation);
+internal sealed record VisibilityResultBot(int Generation, Guid RequestId, bool Success, string Reason) : BotSnapshot(Generation);
 internal abstract record BotSnapshot(int Generation);
 internal sealed record StatusSnapshot(int Generation, NetConnectionStatus Status, string Reason) : BotSnapshot(Generation);
 internal sealed record HandshakeSnapshot(int Generation, HandshakeReply Response, string Reason) : BotSnapshot(Generation);
@@ -178,6 +180,12 @@ internal sealed class BotClient : IAsyncDisposable
         lock (_gate) { if (command.SessionId == Guid.Empty) command.SessionId = _economySession; if (command.Sequence == 0) command.Sequence = ++_economySequence; }
         Send<AgencyCliMsg, AgencyEconomyCommandMsgData>(d => d.Command = command);
         return command.RequestId;
+    }
+    public Guid SetVisibility(VisibilityOperation operation, Guid target, Guid vessel = default, bool enabled = false, VisibilityOverride rule = VisibilityOverride.Inherit, long ownershipRevision = 0)
+    {
+        var request = Guid.NewGuid();
+        Send<AgencyCliMsg, AgencyVisibilityCommandMsgData>(d => { d.RequestId = request; d.Operation = operation; d.TargetAgencyId = target; d.VesselId = vessel; d.Enabled = enabled; d.Rule = rule; d.ExpectedOwnershipRevision = ownershipRevision; });
+        return request;
     }
     private static T CopyEconomy<T>(T data) => Newtonsoft.Json.JsonConvert.DeserializeObject<T>(Newtonsoft.Json.JsonConvert.SerializeObject(data));
     public Guid RequestDock(Guid source, Guid target)
@@ -367,6 +375,8 @@ internal sealed class BotClient : IAsyncDisposable
                 Array.AsReadOnly(p.Targets.Select(e => new CommNetEndpointBot(e.VesselId, e.OwnerAgencyId, e.OwnershipRevision)).ToArray()))).ToArray())),
         AgencyEconomySnapshotMsgData d => new EconomyStateBot(generation, CopyEconomy(d.Snapshot)),
         AgencyEconomyResultMsgData d => new EconomyResultBot(generation, CopyEconomy(d.Result)),
+        AgencyVisibilitySnapshotMsgData d => new VisibilityStateBot(generation, CopyEconomy(new VisibilitySnapshot { Ready = d.Ready, Revision = d.Revision, Endpoints = d.Endpoints, AgencyGrants = d.AgencyGrants, CraftOverrides = d.CraftOverrides })),
+        AgencyVisibilityResultMsgData d => new VisibilityResultBot(generation, d.RequestId, d.Success, d.Reason),
         PlayerConnectionLeaveMsgData d => new PlayerLeftSnapshot(generation, d.PlayerName),
         LockAcquireMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, true, string.Empty),
         LockAcquireDeniedMsgData d when d.Lock.Type == LockType.Control => new ControlSnapshot(generation, d.Lock.VesselId, d.Lock.PlayerName, false, d.Reason),

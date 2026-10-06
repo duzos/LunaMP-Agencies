@@ -93,7 +93,7 @@ namespace Server.Message
         private static void HandleVesselRemove(ClientStructure client, VesselBaseMsgData message)
         {
             var data = (VesselRemoveMsgData)message;
-            if(VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled)
+            if(VesselOwnershipSystem.Enabled || AgencyEconomyStore.Enabled || AgencyVisibilityStore.Enabled)
             {
                 string removedName;
                 bool existed;
@@ -108,6 +108,7 @@ namespace Server.Message
                 }
                 if (existed) CraftCreationAndRemovalLog.LogRemoved(data.VesselId, removedName, client.PlayerName, data.Reason);
                 VesselOwnershipSystem.Changed();
+                AgencyVisibilityStore.Broadcast();
                 if (AgencyEconomyStore.TradeEnabled) AgencyEconomyStore.Broadcast();
                 MessageQueuer.RelayMessage<VesselSrvMsg>(client,data);return;
             }
@@ -136,6 +137,7 @@ namespace Server.Message
             //Relay the message.
             MessageQueuer.RelayMessage<VesselSrvMsg>(client, data);
             AgencyCommNetStore.Broadcast();
+            AgencyVisibilityStore.Broadcast();
         }
 
         private static void HandleVesselProto(ClientStructure client, VesselBaseMsgData message)
@@ -157,7 +159,7 @@ namespace Server.Message
 
             var vesselText = Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes);
             var completedSplitParent = Guid.Empty;
-            if(VesselOwnershipSystem.Enabled || AgencyCommNetStore.Enabled || AgencyEconomyStore.Enabled)
+            if(VesselOwnershipSystem.Enabled || AgencyCommNetStore.Enabled || AgencyEconomyStore.Enabled || AgencyVisibilityStore.Enabled)
             {
                 lock(AgencyVesselMap.TransactionGate)
                 {
@@ -348,6 +350,7 @@ namespace Server.Message
 
             MessageQueuer.SendToAllClients<VesselSrvMsg>(removeMsgData);
             AgencyCommNetStore.Broadcast();
+            AgencyVisibilityStore.Broadcast();
         }
     }
 }

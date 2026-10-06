@@ -17,6 +17,7 @@ namespace LmpCommon.Message.Client
         protected override Dictionary<ushort, Type> SubTypeDictionary { get; } = new Dictionary<ushort, Type>
         {
             [(ushort)AgencyMessageType.CliVesselOwnershipCommand] = typeof(AgencyVesselOwnershipCommandMsgData),
+            [(ushort)AgencyMessageType.CliVisibilityCommand] = typeof(AgencyVisibilityCommandMsgData),
             [(ushort)AgencyMessageType.CliEconomyCommand] = typeof(AgencyEconomyCommandMsgData),
             [(ushort)AgencyMessageType.CliCommNetCommand] = typeof(AgencyCommNetCommandMsgData),
             [(ushort)AgencyMessageType.CliDockRequest] = typeof(AgencyDockRequestMsgData),

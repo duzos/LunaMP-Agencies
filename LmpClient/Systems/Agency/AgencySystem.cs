@@ -48,6 +48,7 @@ namespace LmpClient.Systems.Agency
                     if (myAgencyId == value) return;
                     myAgencyId = value;
                 }
+                VisibilityClient.Invalidate();
                 LaunchSiteCatalog.RequestRefresh();
             }
         }
@@ -100,6 +101,7 @@ namespace LmpClient.Systems.Agency
             ClearCommNet();
             ToolingClient.Clear();
             TradeClient.Clear();
+            VisibilityClient.Clear();
             LatestServerReply = null;
             LmpClient.Windows.Admin.AdminWindow.ResetLaunchSitesUi();
             while (PendingServerMessages.TryDequeue(out _)) { }

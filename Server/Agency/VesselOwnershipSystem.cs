@@ -129,6 +129,7 @@ namespace Server.Agency
             foreach(var l in revoked) {var m=ServerContext.ServerMessageFactory.CreateNewMessageData<LockReleaseMsgData>();m.Lock=l;m.LockResult=true;MessageQueuer.SendToAllClients<LockSrvMsg>(m);}
             foreach(var client in ClientRetriever.GetAuthenticatedClients()) AgencyNetwork.SendVesselMapSyncTo(client);
             AgencyCommNetStore.Broadcast();
+            AgencyVisibilityStore.Broadcast();
         }
         public static void Disconnect(ClientStructure client)
         {

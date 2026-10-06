@@ -104,6 +104,7 @@ namespace Server.Settings.Definition
         public bool AgencyCommNetOptIn { get; set; } = false;
         public bool AgencyTooling { get; set; } = false;
         public bool AgencyTrade { get; set; } = false;
+        public bool AgencyHideCraft { get; set; } = false;
         public double ToolingCostMultiplier { get; set; } = 10;
         public double TooledLaunchMultiplier { get; set; } = 0.1;
         public double ToolingCombineMultiplier { get; set; } = 0.1;

@@ -7,6 +7,7 @@ using LmpCommon.Message.Server;
 using Newtonsoft.Json;
 using Server.Client;
 using Server.Context;
+using Server.Diagnostics;
 using Server.Server;
 using Server.Settings.Structures;
 using Server.System;
@@ -894,12 +895,15 @@ namespace Server.Agency
             Dictionary<Guid, string> before;
             Dictionary<Guid, string> after;
             EconomyResult result;
+            Guid actorAgency;
             lock (AgencyVesselMap.TransactionGate)
             {
                 before = IsSettlement(command) ? VesselStoreSystem.CurrentVessels.ToDictionary(p => p.Key, p => p.Value.ToString()) : new Dictionary<Guid, string>();
+                actorAgency = client.AgencyId;
                 result = Execute(client, command);
                 after = IsSettlement(command) ? VesselStoreSystem.CurrentVessels.ToDictionary(p => p.Key, p => p.Value.ToString()) : new Dictionary<Guid, string>();
             }
+            PlaytestDiagnostics.Write("economy.command", () => $"operation={result.Operation} request={result.RequestId} agency={actorAgency} success={result.Success} recoveryRequired={result.RecoveryRequired} revision={result.Revision}");
             if (result.Success && (command.Operation == EconomyOperation.Recover || command.Operation == EconomyOperation.Revert || command.Operation == EconomyOperation.RevertLaunch || command.Operation == EconomyOperation.BoardEva))
             {
                 foreach (var removed in before.Keys.Except(after.Keys))

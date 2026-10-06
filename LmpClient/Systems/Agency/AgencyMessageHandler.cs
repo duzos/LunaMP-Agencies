@@ -19,6 +19,10 @@ namespace LmpClient.Systems.Agency
             LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.receive", () => $"subtype={data.AgencyMessageType} agency={System.MyAgencyId}", traffic: true);
             switch (data.AgencyMessageType)
             {
+                case AgencyMessageType.SrvVisibilitySnapshot:
+                    VisibilityClient.Apply((AgencyVisibilitySnapshotMsgData)data); break;
+                case AgencyMessageType.SrvVisibilityResult:
+                    VisibilityClient.ApplyResult((AgencyVisibilityResultMsgData)data); break;
                 case AgencyMessageType.SrvSyncAll:
                     Handle((AgencySyncAllMsgData)data);
                     break;
@@ -75,6 +79,7 @@ namespace LmpClient.Systems.Agency
         private static void Handle(AgencyVesselMapSyncMsgData data)
         {
             System.InvalidateCommNet();
+            VisibilityClient.Invalidate();
             System.ApplyOwnership(data.OwnershipSnapshotPresent, data.OwnershipRevision, data.OwnershipRecords, true);
             System.VesselAgencyMap.Clear();
             for (int i = 0; i < data.VesselIds.Length; i++)
@@ -86,6 +91,7 @@ namespace LmpClient.Systems.Agency
         private static void Handle(AgencyVesselMapEntryMsgData data)
         {
             System.InvalidateCommNet();
+            VisibilityClient.Invalidate();
             System.ApplyOwnershipEntry(data);
             if (data.AgencyId != global::System.Guid.Empty) TradeClient.Registered(data.VesselId);
             if (data.AgencyId == global::System.Guid.Empty)
@@ -101,6 +107,7 @@ namespace LmpClient.Systems.Agency
             {
                 if (a != null) System.KnownAgencies[a.Id] = a;
             }
+            if (System.MyAgencyId != data.MyAgencyId) VisibilityClient.Invalidate();
             System.MyAgencyId = data.MyAgencyId;
             System.ApplyLaunchSites(data);
             LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.sync-applied", () => $"agency={data.MyAgencyId} count={data.Agencies.Length}");

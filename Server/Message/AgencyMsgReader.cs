@@ -19,6 +19,7 @@ namespace Server.Message
             switch (data.AgencyMessageType)
             {
                 case AgencyMessageType.CliEconomyCommand: AgencyEconomyStore.HandleCommand(client, ((AgencyEconomyCommandMsgData)data).Command); break;
+                case AgencyMessageType.CliVisibilityCommand: AgencyVisibilityStore.HandleCommand(client, (AgencyVisibilityCommandMsgData)data); break;
                 case AgencyMessageType.CliCommNetCommand: AgencyCommNetStore.HandleCommand(client,(AgencyCommNetCommandMsgData)data); break;
                 case AgencyMessageType.CliVesselOwnershipCommand: VesselOwnershipSystem.Command(client,(AgencyVesselOwnershipCommandMsgData)data); break;
                 case AgencyMessageType.CliDockRequest: VesselOwnershipSystem.RequestDock(client,(AgencyDockRequestMsgData)data); break;

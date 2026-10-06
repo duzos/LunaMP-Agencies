@@ -59,9 +59,9 @@ namespace LmpClient.Windows.Agency
             var names = new Dictionary<Guid, string>();
             if (FlightGlobals.Vessels != null)
                 foreach (var vessel in FlightGlobals.Vessels)
-                    if (vessel != null) names[vessel.id] = vessel.vesselName ?? ShortVesselId(vessel.id);
+                    if (vessel != null && VisibilityClient.CanSee(vessel)) names[vessel.id] = vessel.vesselName ?? ShortVesselId(vessel.id);
             foreach (var id in records.Keys)
-                if (!names.ContainsKey(id)) names[id] = ShortVesselId(id) + " (not loaded)";
+                if (!names.ContainsKey(id) && VisibilityClient.CanSee(id)) names[id] = ShortVesselId(id) + " (not loaded)";
 
             DrawDockRequests(names);
             GUILayout.Label("Craft ownership", _vesselHeading);

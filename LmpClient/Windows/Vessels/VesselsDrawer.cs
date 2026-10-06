@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace LmpClient.Windows.Vessels
 {
@@ -17,7 +17,7 @@ namespace LmpClient.Windows.Vessels
         {
             _fastUpdate = GUILayout.Toggle(_fastUpdate, "Fast Update");
             VesselFilter.DrawFilters();
-            if (_activeVesselDisplayStore != null)
+            if (_activeVesselDisplayStore != null && LmpClient.Systems.Agency.VisibilityClient.CanSee(_activeVesselDisplayStore.VesselId))
             {
                 GUILayout.Label("Active vessel:");
                 GUILayout.BeginVertical(Skin.box);
@@ -33,6 +33,7 @@ namespace LmpClient.Windows.Vessels
 
             foreach (var keyVal in VesselDisplayStore)
             {
+                if (!LmpClient.Systems.Agency.VisibilityClient.CanSee(keyVal.Key)) continue;
                 GUILayout.BeginVertical(Skin.box);
                 keyVal.Value.Display = GUILayout.Toggle(keyVal.Value.Display, keyVal.Value.VesselId.ToString());
                 keyVal.Value.Print();

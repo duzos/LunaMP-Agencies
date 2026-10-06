@@ -1,4 +1,4 @@
-﻿using LmpClient.Base;
+using LmpClient.Base;
 using LmpClient.Windows.Vessels.Structures;
 using LmpCommon.Enums;
 using LmpCommon.Time;
@@ -41,7 +41,7 @@ namespace LmpClient.Windows.Vessels
             base.Update();
             if (Display && TimeUtil.IsInInterval(ref _lastUpdateTime, _fastUpdate ? FastUpdateInterval : SlowUpdateInterval))
             {
-                if (FlightGlobals.ActiveVessel)
+                if (FlightGlobals.ActiveVessel && LmpClient.Systems.Agency.VisibilityClient.CanSee(FlightGlobals.ActiveVessel))
                 {
                     if (_activeVesselDisplayStore == null)
                         _activeVesselDisplayStore = new VesselDisplay(FlightGlobals.ActiveVessel.id);
@@ -57,7 +57,7 @@ namespace LmpClient.Windows.Vessels
                 for (var i = 0; i < FlightGlobals.Vessels.Count; i++)
                 {
                     var vessel = FlightGlobals.Vessels[i];
-                    if (FlightGlobals.ActiveVessel == vessel || !VesselFilter.MatchesFilters(vessel))
+                    if (FlightGlobals.ActiveVessel == vessel || !LmpClient.Systems.Agency.VisibilityClient.CanSee(vessel) || !VesselFilter.MatchesFilters(vessel))
                     {
                         keysToRemove.Add(vessel.id);
                         continue;

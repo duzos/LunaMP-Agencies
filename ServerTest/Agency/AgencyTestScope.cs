@@ -24,7 +24,7 @@ namespace ServerTest.Agency
         private readonly bool _previousZeroStartingKerbals;
         private readonly bool _previousLaunchSites;
         private readonly bool _previousOwnership;
-        private readonly bool _previousCommNetOptIn, _previousCommNetPerAgency;
+        private readonly bool _previousCommNetOptIn, _previousCommNetPerAgency, _previousHideCraft;
         private readonly List<Action> _restore = new List<Action>();
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "LMPAgencyTest_" + Guid.NewGuid().ToString("N"));
 
@@ -41,6 +41,12 @@ namespace ServerTest.Agency
             _previousScansatPerAgency = GeneralSettings.SettingsStore.AgencyScansatPerAgency;
             _previousKerbalsPerAgency = GeneralSettings.SettingsStore.AgencyKerbalsPerAgency;
             _previousZeroStartingKerbals = GeneralSettings.SettingsStore.AgencyZeroStartingKerbals;
+            _previousHideCraft = GeneralSettings.SettingsStore.AgencyHideCraft;
+            GeneralSettings.SettingsStore.AgencyHideCraft = false;
+            SaveAndReplacePrivateField(typeof(AgencyVisibilityStore), "_document", new VisibilityDocument());
+            SaveAndReplacePrivateField(typeof(AgencyVisibilityStore), "_loadError", null);
+            SaveAndReplacePrivateField(typeof(AgencyVisibilityStore), "_snapshotRevision", 0L);
+            SaveAndReplacePrivateField(typeof(AgencyVisibilityStore), "PersistenceCheckpoint", null);
             _previousCommNetOptIn = GeneralSettings.SettingsStore.AgencyCommNetOptIn;
             _previousCommNetPerAgency = GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
             GeneralSettings.SettingsStore.AgencyCommNetOptIn = false;
@@ -67,7 +73,7 @@ namespace ServerTest.Agency
 
         private void SaveAndReplacePrivateField(Type type, string name, object replacement)
         {
-            var field = type.GetField(name, BindingFlags.NonPublic | BindingFlags.Static);
+            var field = type.GetField(name, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
             var saved = field.GetValue(null);
             field.SetValue(null, replacement);
             _restore.Add(() => field.SetValue(null, saved));
@@ -100,6 +106,7 @@ namespace ServerTest.Agency
             GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = _previousZeroStartingKerbals;
             GeneralSettings.SettingsStore.AgencyLaunchSitesPerAgency = _previousLaunchSites;
             GeneralSettings.SettingsStore.AgencyVesselOwnership = _previousOwnership;
+            GeneralSettings.SettingsStore.AgencyHideCraft = _previousHideCraft;
             GeneralSettings.SettingsStore.AgencyCommNetOptIn = _previousCommNetOptIn;
             GeneralSettings.SettingsStore.AgencyCommNetPerAgency = _previousCommNetPerAgency;
             if (Directory.Exists(Root)) Directory.Delete(Root, true);

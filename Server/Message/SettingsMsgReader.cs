@@ -50,6 +50,7 @@ namespace Server.Message
             msgData.AgencyCommNetOptIn = GeneralSettings.SettingsStore.AgencyCommNetOptIn && GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
             msgData.AgencyTooling = GeneralSettings.SettingsStore.AgencyTooling;
             msgData.AgencyTrade = GeneralSettings.SettingsStore.AgencyTrade;
+            msgData.AgencyHideCraft = GeneralSettings.SettingsStore.AgencyHideCraft;
             msgData.ToolingCostMultiplier = GeneralSettings.SettingsStore.ToolingCostMultiplier;
             msgData.TooledLaunchMultiplier = GeneralSettings.SettingsStore.TooledLaunchMultiplier;
             msgData.ToolingCombineMultiplier = GeneralSettings.SettingsStore.ToolingCombineMultiplier;

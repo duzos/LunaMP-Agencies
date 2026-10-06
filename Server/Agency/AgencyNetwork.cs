@@ -68,6 +68,7 @@ namespace Server.Agency
         public static void BroadcastDelete(Guid agencyId)
         {
             AgencyCommNetStore.Broadcast();
+            AgencyVisibilityStore.Broadcast();
             var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyDeleteMsgData>();
             data.AgencyId = agencyId;
             MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
@@ -99,6 +100,7 @@ namespace Server.Agency
             }
             MessageQueuer.SendToClient<AgencySrvMsg>(client, data);
             AgencyCommNetStore.SendTo(client);
+            AgencyVisibilityStore.SendTo(client);
             AgencyEconomyStore.SendTo(client);
         }
 
@@ -117,6 +119,7 @@ namespace Server.Agency
             data.OwnershipRecord = AgencyVesselMap.Get(vesselId);
             MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
             AgencyCommNetStore.Broadcast();
+            AgencyVisibilityStore.Broadcast();
         }
 
         public static void SendSyncAllTo(ClientStructure client)

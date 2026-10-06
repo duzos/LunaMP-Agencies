@@ -37,6 +37,7 @@ namespace LmpClient.Systems.SettingsSys
         public bool AgencyContractsPoolPerAgency { get; set; }
         public bool AgencyTooling;
         public bool AgencyTrade;
+        public bool AgencyHideCraft;
         public double ToolingCostMultiplier = 10;
         public double TooledLaunchMultiplier = 0.1;
         public double ToolingCombineMultiplier = 0.1;

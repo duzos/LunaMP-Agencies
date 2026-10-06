@@ -508,6 +508,7 @@
     <Compile Include="Systems\Agency\SplitOrbitSnapshot.cs" />
     <Compile Include="Systems\Agency\ToolingManifestBuilder.cs" />
     <Compile Include="Harmony\AgencyTooling.cs" />
+    <Compile Include="Harmony\AgencyCostDisplay.cs" />
     <Compile Include="Windows\Agency\ToolingEditorWindow.cs" />
     <Compile Include="Windows\Agency\AgencyCommNetDrawer.cs" />
     <Compile Include="Harmony\AgencyLaunchSites.cs" />

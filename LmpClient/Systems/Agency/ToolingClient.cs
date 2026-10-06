@@ -96,6 +96,12 @@ namespace LmpClient.Systems.Agency
                 return ToolingPolicy.Quote(manifest, snapshot?.Designs ?? Array.Empty<ToolingDesign>(), SettingsSystem.ServerSettings.ToolingCostMultiplier,
                     SettingsSystem.ServerSettings.TooledLaunchMultiplier, SettingsSystem.ServerSettings.ToolingCombineMultiplier);
         }
+        internal static ToolingQuote DisplayQuote(ShipConstruct ship, ShipTemplate template, VesselCrewManifest crew)
+        {
+            if (!Ready) return null;
+            if (template != null) return Quote(ToolingManifestBuilder.FromConfig(template.config, crew));
+            return ship == null ? null : Quote(ToolingManifestBuilder.Build(ship, crew));
+        }
         internal static bool BeginLaunch(string path, string flag, string site, VesselCrewManifest crew)
         {
             if (!Enabled) return true;
@@ -265,6 +271,7 @@ namespace LmpClient.Systems.Agency
                 editorQuoteHash = manifest == null ? null : ToolingPolicy.ManifestHash(manifest);
             }
             catch (Exception e) { EditorQuote = null; LatestStatus = e.Message; }
+            LmpClient.Harmony.AgencyCostDisplay.Refresh();
         }
         private static void Handle(EconomyResult result)
         {
@@ -322,6 +329,7 @@ namespace LmpClient.Systems.Agency
         }
         internal static void Clear()
         {
+            LmpClient.Harmony.AgencyCostDisplay.Clear();
             lock (stateLock) { snapshot = null; revision = -1; nextSequence = 0; economySession = Guid.Empty; bindings.Clear(); settling.Clear(); evaParents.Clear(); }
             while (snapshots.TryDequeue(out _)) { } while (results.TryDequeue(out _)) { }
             settlementDeadline = default(DateTime);

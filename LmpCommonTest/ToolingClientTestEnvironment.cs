@@ -110,3 +110,4 @@ namespace LmpClient.Systems.Agency
 }
 
 namespace LmpClient.Systems.VesselRemoveSys { public static class VesselRemoveMessageSender { public static void FlushRetainedRemovals() { } } }
+namespace LmpClient.Harmony { internal static class AgencyCostDisplay { internal static void Refresh() { } internal static void Clear() { } } }

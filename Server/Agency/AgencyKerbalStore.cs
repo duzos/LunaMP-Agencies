@@ -1,3 +1,6 @@
+using LmpCommon.Agency;
+using Server.Diagnostics;
+using Server.Settings.Structures;
 using Server.Log;
 using Server.Properties;
 using Server.System;
@@ -22,21 +25,38 @@ namespace Server.Agency
         public static string KerbalPath(Guid agencyId, string kerbalName) =>
             Path.Combine(KerbalsPath(agencyId), kerbalName + KerbalFileFormat);
 
-        /// <summary>
-        /// Ensure the agency's Kerbals folder exists and contains the four
-        /// canonical starting kerbals. Idempotent — won't overwrite existing
-        /// kerbals. Called whenever an agency is created or migrated.
-        /// </summary>
-        public static void EnsureDefaultRoster(Guid agencyId)
-        {
-            var dir = KerbalsPath(agencyId);
-            if (!FileHandler.FolderExists(dir))
-                FileHandler.FolderCreate(dir);
+        private static readonly object RosterInitializationLock = new object();
 
-            FileHandler.CreateFile(Path.Combine(dir, "Jebediah Kerman.txt"), Resources.Jebediah_Kerman);
-            FileHandler.CreateFile(Path.Combine(dir, "Bill Kerman.txt"), Resources.Bill_Kerman);
-            FileHandler.CreateFile(Path.Combine(dir, "Bob Kerman.txt"), Resources.Bob_Kerman);
-            FileHandler.CreateFile(Path.Combine(dir, "Valentina Kerman.txt"), Resources.Valentina_Kerman);
+        /// <summary>Initialize a newly created agency according to the configured starting-crew policy.</summary>
+        public static void InitializeNewAgency(Guid agencyId) => InitializeRoster(agencyId, isNewAgency: true);
+
+        /// <summary>Legacy fallback for an absent roster. Existing directories, even empty, are authoritative.</summary>
+        public static void EnsureDefaultRoster(Guid agencyId) => InitializeRoster(agencyId, isNewAgency: false);
+
+        private static void InitializeRoster(Guid agencyId, bool isNewAgency)
+        {
+            var perAgency = GeneralSettings.SettingsStore.AgencyKerbalsPerAgency;
+            var zeroStarting = GeneralSettings.SettingsStore.AgencyZeroStartingKerbals;
+            if (!perAgency) return;
+            var dir = KerbalsPath(agencyId);
+            string reason;
+            var count = 0;
+            lock (RosterInitializationLock)
+            {
+                var exists = FileHandler.FolderExists(dir);
+                var seedDefaults = AgencyKerbalPolicy.ShouldSeedDefaults(exists, isNewAgency, perAgency, zeroStarting);
+                if (!exists) FileHandler.FolderCreate(dir);
+                if (seedDefaults)
+                {
+                    FileHandler.CreateFile(Path.Combine(dir, "Jebediah Kerman.txt"), Resources.Jebediah_Kerman);
+                    FileHandler.CreateFile(Path.Combine(dir, "Bill Kerman.txt"), Resources.Bill_Kerman);
+                    FileHandler.CreateFile(Path.Combine(dir, "Bob Kerman.txt"), Resources.Bob_Kerman);
+                    FileHandler.CreateFile(Path.Combine(dir, "Valentina Kerman.txt"), Resources.Valentina_Kerman);
+                }
+                reason = exists ? "existing-roster" : !isNewAgency ? "legacy-defaults" : seedDefaults ? "new-defaults" : "new-empty";
+                if (PlaytestDiagnostics.Enabled) count = Directory.GetFiles(dir).Length;
+            }
+            PlaytestDiagnostics.Write("kerbal.initialize", () => $"agency={agencyId} reason={reason} count={count} perAgency={perAgency} zeroStarting={zeroStarting}");
         }
 
         /// <summary>
@@ -73,6 +93,7 @@ namespace Server.Agency
                     try { FileHandler.FileCopy(src, dest); }
                     catch (Exception e) { LunaLog.Warning($"[Agency] Failed to seed kerbal {Path.GetFileName(src)} into '{agency.Name}': {e.Message}"); }
                 }
+                PlaytestDiagnostics.Write("kerbal.migration", () => $"agency={agency.Id} reason=global-copy count={Directory.GetFiles(target).Length} zeroStarting={GeneralSettings.SettingsStore.AgencyZeroStartingKerbals}");
                 LunaLog.Info($"[Agency] Seeded '{agency.Name}' with {globalFiles.Length} kerbals from the global roster.");
             }
         }

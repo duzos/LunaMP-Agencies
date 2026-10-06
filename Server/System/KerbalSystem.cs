@@ -15,7 +15,7 @@ namespace Server.System
 {
     public class KerbalSystem
     {
-        public static readonly string KerbalsPath = Path.Combine(ServerContext.UniverseDirectory, "Kerbals");
+        public static string KerbalsPath => Path.Combine(ServerContext.UniverseDirectory, "Kerbals");
 
         public static void GenerateDefaultKerbals()
         {
@@ -58,8 +58,8 @@ namespace Server.System
 
             if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency && client.AgencyId != global::System.Guid.Empty)
             {
-                // Seed default roster on first access so new agencies (or
-                // agencies from before the flag flipped) aren't empty.
+                // Only absent legacy rosters receive defaults. New agencies already
+                // have an initialized roster, which may intentionally be empty.
                 AgencyKerbalStore.EnsureDefaultRoster(client.AgencyId);
                 kerbalFiles = FileHandler.GetFilesInPath(AgencyKerbalStore.KerbalsPath(client.AgencyId));
                 LunaLog.Debug($"[Agency] Sending {client.PlayerName} {kerbalFiles.Length} kerbals from agency {client.AgencyId}");

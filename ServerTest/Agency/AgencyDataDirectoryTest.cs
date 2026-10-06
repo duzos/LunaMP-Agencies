@@ -2,6 +2,7 @@ using LunaConfigNode.CfgNode;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Server.Agency;
 using Server.Context;
+using Server.Settings.Structures;
 using System;
 using System.IO;
 using System.Threading.Tasks;
@@ -32,6 +33,7 @@ namespace ServerTest.Agency
                 AgencyStore.PersistAgency(agency);
                 AgencyScenarioStore.AddOrUpdate(agency.Id, "Funding", new ConfigNode("name = Funding\nfunds = 12345\n") { Name = "Funding" });
                 AgencyScenarioStore.BackupAgency(agency.Id);
+                GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = true;
                 AgencyKerbalStore.EnsureDefaultRoster(agency.Id);
                 AgencyVesselMap.Set(vessel, agency.Id);
                 await AgencyVesselMap.WaitForPendingWritesAsync();

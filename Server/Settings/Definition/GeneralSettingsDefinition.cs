@@ -95,6 +95,9 @@ namespace Server.Settings.Definition
                             "pool is shared globally across all agencies. Agencies-feature only.")]
         public bool AgencyKerbalsPerAgency { get; set; } = false;
 
+        [XmlComment(Value = "New agencies start with an empty crew roster when AgencyKerbalsPerAgency is also true. Existing rosters and legacy migration are preserved.")]
+        public bool AgencyZeroStartingKerbals { get; set; } = false;
+
         [XmlComment(Value = "If true, SCANsat satellite-imaging coverage (the SCANcontroller scenario) " +
                             "is tracked per agency. Each agency scans the planets independently. If " +
                             "false (default), every agency shares one global coverage map. " +

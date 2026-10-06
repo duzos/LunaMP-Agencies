@@ -20,6 +20,8 @@ namespace ServerTest.Agency
         private readonly string _previousScenariosPath;
         private readonly LmpCommon.Enums.GameMode _previousGameMode;
         private readonly bool _previousScansatPerAgency;
+        private readonly bool _previousKerbalsPerAgency;
+        private readonly bool _previousZeroStartingKerbals;
         private readonly List<Action> _restore = new List<Action>();
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "LMPAgencyTest_" + Guid.NewGuid().ToString("N"));
 
@@ -34,6 +36,8 @@ namespace ServerTest.Agency
             _previousScenariosPath = ScenarioSystem.ScenariosPath;
             _previousGameMode = GeneralSettings.SettingsStore.GameMode;
             _previousScansatPerAgency = GeneralSettings.SettingsStore.AgencyScansatPerAgency;
+            _previousKerbalsPerAgency = GeneralSettings.SettingsStore.AgencyKerbalsPerAgency;
+            _previousZeroStartingKerbals = GeneralSettings.SettingsStore.AgencyZeroStartingKerbals;
             SaveAndClear(AgencyStore.Agencies);
             SaveAndClear(PrivateDictionary<string, Guid>(typeof(AgencyAchievementRegistry), "Holders"));
             SaveAndClear(ScenarioStoreSystem.CurrentScenarios);
@@ -68,6 +72,8 @@ namespace ServerTest.Agency
             ScenarioSystem.ScenariosPath = _previousScenariosPath;
             GeneralSettings.SettingsStore.GameMode = _previousGameMode;
             GeneralSettings.SettingsStore.AgencyScansatPerAgency = _previousScansatPerAgency;
+            GeneralSettings.SettingsStore.AgencyKerbalsPerAgency = _previousKerbalsPerAgency;
+            GeneralSettings.SettingsStore.AgencyZeroStartingKerbals = _previousZeroStartingKerbals;
             if (Directory.Exists(Root)) Directory.Delete(Root, true);
         }
     }

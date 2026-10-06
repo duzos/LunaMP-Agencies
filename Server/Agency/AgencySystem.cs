@@ -76,6 +76,8 @@ namespace Server.Agency
             AgencyStore.PersistAgency(agency);
             AgencyScenarioStore.EnsureBaselineForAgency(agency.Id,
                 agency.Funds, agency.Science, agency.Reputation);
+            if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency)
+                AgencyKerbalStore.InitializeNewAgency(agency.Id);
             AgencyScenarioStore.BackupAgency(agency.Id);
 
             LunaLog.Info($"[Agency] Created solo agency '{agency.Name}' id={agency.Id} owner={displayName}({uniqueId})");
@@ -122,6 +124,8 @@ namespace Server.Agency
 
             AgencyStore.PersistAgency(agency);
             AgencyScenarioStore.EnsureBaselineForAgency(agency.Id, agency.Funds, agency.Science, agency.Reputation);
+            if (GeneralSettings.SettingsStore.AgencyKerbalsPerAgency)
+                AgencyKerbalStore.InitializeNewAgency(agency.Id);
             AgencyScenarioStore.BackupAgency(agency.Id);
 
             ApplyClientAgencyAssignment(ownerUniqueId, agency.Id,

@@ -39,14 +39,14 @@ namespace HeadlessTest.Infrastructure
             Directory.CreateDirectory(_artifacts);
         }
 
-        public static async Task<ServerProcess> StartAsync(TestContext context, CancellationToken cancellationToken = default)
+        public static async Task<ServerProcess> StartAsync(TestContext context, CancellationToken cancellationToken = default, Action<GeneralSettingsDefinition> configureGeneral = null)
         {
             for (var attempt = 1; attempt <= 3; attempt++)
             {
                 var server = new ServerProcess(context);
                 try
                 {
-                    await server.StartCoreAsync(cancellationToken);
+                    await server.StartCoreAsync(cancellationToken, configureGeneral);
                     return server;
                 }
                 catch (Exception e)
@@ -63,7 +63,7 @@ namespace HeadlessTest.Infrastructure
             throw new InvalidOperationException("Server startup attempts exhausted.");
         }
 
-        private async Task StartCoreAsync(CancellationToken cancellationToken)
+        private async Task StartCoreAsync(CancellationToken cancellationToken, Action<GeneralSettingsDefinition> configureGeneral)
         {
             var runtime = Path.Combine(AppContext.BaseDirectory, "server");
             var entry = Path.Combine(runtime, "Server.dll");
@@ -77,7 +77,9 @@ namespace HeadlessTest.Infrastructure
                 Port = ((IPEndPoint)socket.LocalEndPoint).Port;
             }
             WriteSettings("ConnectionSettings.xml", new ConnectionSettingsDefinition { ListenAddress = "127.0.0.1", Port = Port, Upnp = false });
-            WriteSettings("GeneralSettings.xml", new GeneralSettingsDefinition { ServerName = "Headless isolated test", GameMode = GameMode.Career, MaxPlayers = 8, Password = "", AdminPassword = "", ModControl = false, AutoDekessler = 0, AutoNuke = 0 });
+            var general = new GeneralSettingsDefinition { ServerName = "Headless isolated test", GameMode = GameMode.Career, MaxPlayers = 8, Password = "", AdminPassword = "", ModControl = false, AutoDekessler = 0, AutoNuke = 0 };
+            configureGeneral?.Invoke(general);
+            WriteSettings("GeneralSettings.xml", general);
             WriteSettings("MasterServerSettings.xml", new MasterServerSettingsDefinition { RegisterWithMasterServer = false });
             WriteSettings("WebsiteSettings.xml", new WebsiteSettingsDefinition { EnableWebsite = false });
             WriteSettings("DebugSettings.xml", new DebugSettingsDefinition { VerboseDiagnostics = true, CustomMasterServer = "127.0.0.1:9" });

@@ -1,6 +1,7 @@
 using LunaConfigNode.CfgNode;
 using Server.Log;
 using Server.System;
+using Server.System.Scenario;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -54,6 +55,8 @@ namespace Server.Agency
 
         public static void AddOrUpdate(Guid agencyId, string module, ConfigNode node)
         {
+            if (module == "ContractSystem") ScenarioDataUpdater.MigrateContractsScenario(node);
+            if (module == "ProgressTracking") ScenarioDataUpdater.MigrateProgressTrackingScenario(node);
             var dict = GetOrCreateDict(agencyId);
             dict.AddOrUpdate(module, node, (_, __) => node);
         }
@@ -84,7 +87,7 @@ namespace Server.Agency
                 try
                 {
                     var key = Path.GetFileNameWithoutExtension(file);
-                    dict[key] = new ConfigNode(FileHandler.ReadFileText(file));
+                    AddOrUpdate(agencyId, key, ScenarioDataUpdater.ParseClientConfigNode(FileHandler.ReadFileText(file), key));
                 }
                 catch (Exception e)
                 {
@@ -146,8 +149,7 @@ namespace Server.Agency
             if (!TryGet(agencyId, "ContractSystem", out _))
             {
                 var text = "name = ContractSystem\nscene = 7, 8, 5, 6, 9\nupdate = 0\n"
-                           + "CONTRACTS\n{\n}\n"
-                           + "CONTRACTS_FINISHED\n{\n}\n";
+                           + "CONTRACTS\n{\n}\n";
                 AddOrUpdate(agencyId, "ContractSystem", new ConfigNode(text) { Name = "ContractSystem" });
             }
         }

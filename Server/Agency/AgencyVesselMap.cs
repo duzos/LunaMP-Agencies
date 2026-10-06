@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Server.Agency
 {
@@ -22,10 +23,11 @@ namespace Server.Agency
     /// </summary>
     public static class AgencyVesselMap
     {
-        public static string MapFilePath = Path.Combine(ServerContext.UniverseDirectory, "AgencyVesselMap.txt");
+        public static string MapFilePath => Path.Combine(ServerContext.UniverseDirectory, "AgencyVesselMap.txt");
 
         private static readonly ConcurrentDictionary<Guid, Guid> _map = new ConcurrentDictionary<Guid, Guid>();
         private static readonly object _diskLock = new object();
+        private static Task _pendingWrite = Task.CompletedTask;
 
         public static IReadOnlyDictionary<Guid, Guid> Snapshot => _map;
 
@@ -67,32 +69,45 @@ namespace Server.Agency
             }
         }
 
+        /// <summary>Waits for all writes queued before this call, for shutdown or data-root changes.</summary>
+        public static Task WaitForPendingWritesAsync()
+        {
+            lock (_diskLock)
+                return _pendingWrite;
+        }
+
         private static void FlushAsync()
         {
-            // Cheap to flush — small file, infrequent updates. Synchronous is
-            // fine here; offload to a Task only if profiling shows otherwise.
-            global::System.Threading.Tasks.Task.Run(() =>
+            lock (_diskLock)
             {
-                lock (_diskLock)
+                // Capture the selected root and contents together. Serialize writes so an
+                // older snapshot cannot overwrite a newer one, even during a root switch.
+                var path = MapFilePath;
+                var sb = new global::System.Text.StringBuilder();
+                foreach (var kv in _map.OrderBy(p => p.Key))
                 {
-                    try
-                    {
-                        var sb = new global::System.Text.StringBuilder();
-                        foreach (var kv in _map.OrderBy(p => p.Key))
-                        {
-                            sb.Append(kv.Key.ToString("N"));
-                            sb.Append(" = ");
-                            sb.Append(kv.Value.ToString("N"));
-                            sb.Append('\n');
-                        }
-                        FileHandler.WriteToFile(MapFilePath, sb.ToString());
-                    }
-                    catch (Exception e)
-                    {
-                        LunaLog.Error($"[Agency] Failed to flush vessel-agency map: {e}");
-                    }
+                    sb.Append(kv.Key.ToString("N"));
+                    sb.Append(" = ");
+                    sb.Append(kv.Value.ToString("N"));
+                    sb.Append('\n');
                 }
-            });
+                var contents = sb.ToString();
+                _pendingWrite = _pendingWrite.ContinueWith(_ =>
+                {
+                    lock (_diskLock)
+                    {
+                        try
+                        {
+                            FileHandler.FolderCreate(Path.GetDirectoryName(path));
+                            FileHandler.WriteToFile(path, contents);
+                        }
+                        catch (Exception e)
+                        {
+                            LunaLog.Error($"[Agency] Failed to flush vessel-agency map: {e}");
+                        }
+                    }
+                }, TaskScheduler.Default);
+            }
         }
     }
 }

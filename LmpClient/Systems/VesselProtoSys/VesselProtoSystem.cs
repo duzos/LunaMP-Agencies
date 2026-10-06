@@ -1,6 +1,10 @@
 ﻿using LmpClient.Base;
+using LmpClient.Diagnostics;
 using LmpClient.Events;
 using LmpClient.Extensions;
+using LmpClient.Systems.KerbalSys;
+using LmpClient.Systems.Lock;
+using LmpClient.Systems.SettingsSys;
 using LmpClient.Systems.TimeSync;
 using LmpClient.Systems.VesselRemoveSys;
 using LmpClient.Utilities;
@@ -20,9 +24,21 @@ namespace LmpClient.Systems.VesselProtoSys
 
         private static readonly HashSet<Guid> QueuedVesselsToSend = new HashSet<Guid>();
 
+        /// <summary>
+        /// Tracks last-sent maneuver node signatures per vessel to detect dV edits between ticks.
+        /// </summary>
+        private static readonly Dictionary<Guid, string> ManeuverSignatures = new Dictionary<Guid, string>();
+
         public readonly HashSet<Guid> VesselsUnableToLoad = new HashSet<Guid>();
 
         public ConcurrentDictionary<Guid, VesselProtoQueue> VesselProtos { get; } = new ConcurrentDictionary<Guid, VesselProtoQueue>();
+
+        //Tracks last broadcast drift count per vessel so identical drift states are not re-sent.
+        private static readonly ConcurrentDictionary<Guid, int> LastBroadcastDriftPartCount =
+            new ConcurrentDictionary<Guid, int>();
+
+        //Per-tick cap for expensive ProtoVessel.Load work to avoid frame spikes.
+        private const int MaxExpensiveReloadsPerTick = 2;
 
         public bool ProtoSystemReady => Enabled && FlightGlobals.ready && HighLogic.LoadedScene == GameScenes.FLIGHT &&
             FlightGlobals.ActiveVessel != null && !VesselCommon.IsSpectating;
@@ -55,7 +71,9 @@ namespace LmpClient.Systems.VesselProtoSys
             PartEvent.onPartCoupled.Add(VesselProtoEvents.PartCoupled);
 
             WarpEvent.onTimeWarpStopped.Add(VesselProtoEvents.WarpStopped);
-
+            GameEvents.onManeuverAdded.Add(VesselProtoEvents.ManeuverNodeAdded);
+            GameEvents.onManeuverRemoved.Add(VesselProtoEvents.ManeuverNodeRemoved);
+            
             SetupRoutine(new RoutineDefinition(0, RoutineExecution.Update, CheckVesselsToLoad));
             SetupRoutine(new RoutineDefinition(2500, RoutineExecution.Update, SendVesselDefinition));
         }
@@ -76,11 +94,16 @@ namespace LmpClient.Systems.VesselProtoSys
             PartEvent.onPartCoupled.Remove(VesselProtoEvents.PartCoupled);
 
             WarpEvent.onTimeWarpStopped.Remove(VesselProtoEvents.WarpStopped);
+            GameEvents.onManeuverAdded.Remove(VesselProtoEvents.ManeuverNodeAdded);
+            GameEvents.onManeuverRemoved.Remove(VesselProtoEvents.ManeuverNodeRemoved);
 
             //This is the main system that handles the vesselstore so if it's disabled clear the store too
             VesselProtos.Clear();
             VesselsUnableToLoad.Clear();
             QueuedVesselsToSend.Clear();
+            ManeuverSignatures.Clear();
+            LastBroadcastDriftPartCount.Clear();
+            LocalTopologyTracker.ClearAll();
         }
 
         #endregion
@@ -94,16 +117,19 @@ namespace LmpClient.Systems.VesselProtoSys
         {
             try
             {
-                if (ProtoSystemReady)
-                {
-                    if (FlightGlobals.ActiveVessel.parts.Count != FlightGlobals.ActiveVessel.protoVessel.protoPartSnapshots.Count)
-                        MessageSender.SendVesselMessage(FlightGlobals.ActiveVessel);
+                if (!ProtoSystemReady) return;
 
-                    foreach (var vessel in VesselCommon.GetSecondaryVessels())
-                    {
-                        if (vessel.parts.Count != vessel.protoVessel.protoPartSnapshots.Count)
-                            MessageSender.SendVesselMessage(vessel);
-                    }
+                if (ShouldBroadcastDriftFor(FlightGlobals.ActiveVessel))
+                    MessageSender.SendVesselMessage(FlightGlobals.ActiveVessel, reason: "Part count drift (active vessel)");
+
+                CheckAndSendManeuverChanges(FlightGlobals.ActiveVessel);
+
+                foreach (var vessel in VesselCommon.GetSecondaryVessels())
+                {
+                    if (ShouldBroadcastDriftFor(vessel))
+                        MessageSender.SendVesselMessage(vessel, reason: "Part count drift (secondary vessel)");
+
+                    CheckAndSendManeuverChanges(vessel);
                 }
             }
             catch (Exception e)
@@ -114,53 +140,210 @@ namespace LmpClient.Systems.VesselProtoSys
         }
 
         /// <summary>
+        /// Returns true only for new part-count drift states that have not been sent yet.
+        /// </summary>
+        private static bool ShouldBroadcastDriftFor(Vessel vessel)
+        {
+            if (vessel == null || vessel.protoVessel?.protoPartSnapshots == null) return false;
+
+            var liveCount = vessel.parts.Count;
+            var protoCount = vessel.protoVessel.protoPartSnapshots.Count;
+            if (liveCount == protoCount) return false;
+
+            //Concurrent map is used because entries may be cleared from message threads.
+            if (LastBroadcastDriftPartCount.TryGetValue(vessel.id, out var lastSent) && lastSent == liveCount)
+                return false;
+
+            LastBroadcastDriftPartCount[vessel.id] = liveCount;
+            return true;
+        }
+
+        /// <summary>
+        /// Compare current maneuver-node signature with the last-sent signature and
+        /// broadcast when it changes (covers dV edits where KSP raises no event).
+        /// </summary>
+        private void CheckAndSendManeuverChanges(Vessel vessel)
+        {
+            if (vessel == null) return;
+            if (!LockSystem.LockQuery.UpdateLockBelongsToPlayer(vessel.id, SettingsSystem.CurrentSettings.PlayerName)) return;
+
+            var signature = GetManeuverSignature(vessel);
+            if (ManeuverSignatures.TryGetValue(vessel.id, out var lastSignature))
+            {
+                if (lastSignature == signature) return;
+
+                ManeuverSignatures[vessel.id] = signature;
+                MessageSender.SendVesselMessage(vessel, reason: "Maneuver node change");
+            }
+            else
+            {
+                // First sighting records a baseline and avoids a gratuitous send.
+                ManeuverSignatures[vessel.id] = signature;
+            }
+        }
+
+        /// <summary>
+        /// Build a stable signature of all maneuver nodes for change detection.
+        /// </summary>
+        private static string GetManeuverSignature(Vessel vessel)
+        {
+            var nodes = vessel?.patchedConicSolver?.maneuverNodes;
+            if (nodes == null || nodes.Count == 0) return string.Empty;
+
+            var parts = new string[nodes.Count];
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                var dv = nodes[i].DeltaV;
+                parts[i] = $"{nodes[i].UT:F1}|{dv.x:F4},{dv.y:F4},{dv.z:F4}";
+            }
+
+            return string.Join(";", parts);
+        }
+
+        /// <summary>
+        /// Scenes where proto-swap is cheaper and safe; FLIGHT/TRACKSTATION keep full reloads.
+        /// </summary>
+        private static bool IsProtoSwapEligibleScene(GameScenes scene)
+            => scene == GameScenes.SPACECENTER || scene == GameScenes.EDITOR;
+
+        /// <summary>
         /// Check vessels that must be loaded
         /// </summary>
         public void CheckVesselsToLoad()
         {
             if (HighLogic.LoadedScene < GameScenes.SPACECENTER) return;
 
+            //Snapshot current scene for off-thread diagnostics.
+            VesselSyncDiagnostics.NotifyScene(HighLogic.LoadedScene);
+
             try
             {
+                // Merge queued kerbals first so vessel loads resolve crew entries correctly.
+                if (KerbalSystem.Singleton != null && !KerbalSystem.Singleton.KerbalsToProcess.IsEmpty)
+                {
+                    KerbalSystem.Singleton.LoadKerbalsIntoGame();
+                }
+
+                var protoSwapEligible = IsProtoSwapEligibleScene(HighLogic.LoadedScene);
+                var expensiveReloadsRemaining = MaxExpensiveReloadsPerTick;
+
                 foreach (var keyVal in VesselProtos)
                 {
-                    if (keyVal.Value.TryPeek(out var vesselProto) && vesselProto.GameTime <= TimeSyncSystem.UniversalTime)
+                    if (!keyVal.Value.TryPeek(out var vesselProto)) continue;
+                    if (vesselProto.GameTime > TimeSyncSystem.UniversalTime) continue;
+
+                    //Delay incoming proto applies briefly after local topology mutations.
+                    if (LocalTopologyTracker.IsQuarantined(keyVal.Key, out var firstObservation))
                     {
-                        keyVal.Value.TryDequeue(out _);
+                        if (firstObservation)
+                        {
+                            VesselSyncDiagnostics.LogDeferred(keyVal.Key, vesselName: null, parts: -1,
+                                reason: "LocalTopologyTracker quarantine (Couple/Decouple/Undock within last 250 ms)");
+                        }
+                        continue;
+                    }
 
-                        if (VesselRemoveSystem.VesselWillBeKilled(vesselProto.VesselId))
-                            continue;
+                    //Decide swap-vs-reload before dequeue so expensive reloads can be rate-limited.
+                    var existingVessel = FlightGlobals.FindVessel(vesselProto.VesselId);
+                    var willUseProtoSwap = protoSwapEligible && existingVessel != null && !vesselProto.ForceReload;
 
-                        var forceReload = vesselProto.ForceReload;
-                        var protoVessel = vesselProto.CreateProtoVessel();
+                    if (!willUseProtoSwap && expensiveReloadsRemaining <= 0)
+                        continue;
+
+                    keyVal.Value.TryDequeue(out _);
+
+                    if (VesselRemoveSystem.VesselWillBeKilled(vesselProto.VesselId))
+                    {
+                        VesselSyncDiagnostics.LogDiscarded(vesselProto.VesselId, vesselName: null, parts: -1,
+                            reason: "VesselRemoveSystem.VesselWillBeKilled returned true on drain (race vs network thread)");
+                        //Recycle on the kill-list path too, otherwise the proto buffer
+                        //leaks back to the pool only on the success branches below.
                         keyVal.Value.Recycle(vesselProto);
+                        continue;
+                    }
 
-                        var verboseErrors = !VesselsUnableToLoad.Contains(vesselProto.VesselId);
-                        if (protoVessel == null || !protoVessel.Validate(verboseErrors) || protoVessel.HasInvalidParts(verboseErrors))
+                    var forceReload = vesselProto.ForceReload;
+                    var protoVessel = vesselProto.CreateProtoVessel();
+                    var vesselId = vesselProto.VesselId;
+                    keyVal.Value.Recycle(vesselProto);
+
+                    var verboseErrors = !VesselsUnableToLoad.Contains(vesselId);
+                    if (protoVessel == null)
+                    {
+                        //CreateProtoVessel already logged a discard reason.
+                        VesselsUnableToLoad.Add(vesselId);
+                        continue;
+                    }
+                    if (!protoVessel.Validate(verboseErrors))
+                    {
+                        VesselSyncDiagnostics.LogDiscarded(vesselId, SafeName(protoVessel),
+                            SafePartCount(protoVessel),
+                            reason: "ProtoVessel.Validate returned false");
+                        VesselsUnableToLoad.Add(vesselId);
+                        continue;
+                    }
+                    if (protoVessel.HasInvalidParts(verboseErrors))
+                    {
+                        VesselSyncDiagnostics.LogDiscarded(vesselId, SafeName(protoVessel),
+                            SafePartCount(protoVessel),
+                            reason: "ProtoVessel.HasInvalidParts returned true (one or more part definitions absent from local install)");
+                        VesselsUnableToLoad.Add(vesselId);
+                        continue;
+                    }
+
+                    VesselsUnableToLoad.Remove(vesselId);
+
+                    if (willUseProtoSwap)
+                    {
+                        //SPACECENTER / EDITOR fast path: pointer-swap protoVessel without
+                        //destroying the live Vessel. No reload event fires here -- the
+                        //live Vessel was never touched, so any listener that did real
+                        //work on reload would be running on a no-op. The flightState
+                        //ProtoVessel list (the source-of-truth for save / scene
+                        //transition) is updated to the fresh proto. If the in-place
+                        //swap itself fails for any reason, fall through to the
+                        //destructive path so we don't silently drop a wire update.
+                        if (VesselLoader.UpdateProtoInPlace(existingVessel, protoVessel))
                         {
-                            VesselsUnableToLoad.Add(vesselProto.VesselId);
+                            VesselSyncDiagnostics.LogProtoSwapped(vesselId, SafeName(protoVessel),
+                                SafePartCount(protoVessel), SafeSituation(protoVessel));
                             continue;
                         }
+                        VesselSyncDiagnostics.LogDiscarded(vesselId, SafeName(protoVessel),
+                            SafePartCount(protoVessel),
+                            reason: "UpdateProtoInPlace returned false (falling through to destructive reload)");
+                    }
 
-                        VesselsUnableToLoad.Remove(vesselProto.VesselId);
+                    //Expensive path -- count it against the per-tick budget. We
+                    //decrement even on Failed / UnchangedEarlyOut because the cost of
+                    //ProtoVessel.Load was already paid by the time we know which
+                    //outcome we got, and over-budget-failures are still wall-clock
+                    //expensive.
+                    expensiveReloadsRemaining--;
 
-                        var existingVessel = FlightGlobals.FindVessel(vesselProto.VesselId);
-                        if (existingVessel == null)
-                        {
-                            if (VesselLoader.LoadVessel(protoVessel, forceReload))
-                            {
-                                LunaLog.Log($"[LMP]: Vessel {protoVessel.vesselID} loaded");
-                                VesselLoadEvent.onLmpVesselLoaded.Fire(protoVessel.vesselRef);
-                            }
-                        }
-                        else
-                        {
-                            if (VesselLoader.LoadVessel(protoVessel, forceReload))
-                            {
-                                LunaLog.Log($"[LMP]: Vessel {protoVessel.vesselID} reloaded");
-                                VesselReloadEvent.onLmpVesselReloaded.Fire(protoVessel.vesselRef);
-                            }
-                        }
+                    var outcome = VesselLoader.LoadVessel(protoVessel, forceReload);
+                    VesselSyncDiagnostics.LogLoadOutcome(vesselId, SafeName(protoVessel),
+                        SafePartCount(protoVessel), SafeSituation(protoVessel), outcome);
+                    switch (outcome)
+                    {
+                        case VesselLoadOutcome.FreshlyLoaded:
+                            LunaLog.Log($"[LMP]: Vessel {protoVessel.vesselID} loaded");
+                            VesselLoadEvent.onLmpVesselLoaded.Fire(protoVessel.vesselRef);
+                            break;
+                        case VesselLoadOutcome.Reloaded:
+                            LunaLog.Log($"[LMP]: Vessel {protoVessel.vesselID} reloaded");
+                            VesselReloadEvent.onLmpVesselReloaded.Fire(protoVessel.vesselRef);
+                            break;
+                        case VesselLoadOutcome.UnchangedEarlyOut:
+                            //Stock-matched early-out from LoadVesselIntoGame. Deliberately
+                            //silent in KSP.log: no "reloaded" line and no VesselReloadEvent
+                            //fire because nothing actually changed. The sync diagnostic
+                            //still gets the UNCHANGED event above because "incoming wire
+                            //update for an already-matched vessel" is a useful signal
+                            //when reading the trace.
+                            break;
+                        case VesselLoadOutcome.Failed:
+                            break;
                     }
                 }
             }
@@ -176,9 +359,10 @@ namespace LmpClient.Systems.VesselProtoSys
 
         /// <summary>
         /// Sends a delayed vessel definition to the server.
-        /// Call this method if you expect to do a lot of modifications to a vessel and you want to send it only once
+        /// Call this method if you expect to do a lot of modifications to a vessel and you want to send it only once.
+        /// <paramref name="reason"/> is forwarded to the server's craft create/remove audit log.
         /// </summary>
-        public void DelayedSendVesselMessage(Guid vesselId, float delayInSec, bool forceReload = false)
+        public void DelayedSendVesselMessage(Guid vesselId, float delayInSec, bool forceReload = false, string reason = null)
         {
             if (QueuedVesselsToSend.Contains(vesselId)) return;
 
@@ -188,7 +372,7 @@ namespace LmpClient.Systems.VesselProtoSys
                 QueuedVesselsToSend.Remove(vesselId);
 
                 LunaLog.Log($"[LMP]: Sending delayed proto vessel {vesselId}");
-                MessageSender.SendVesselMessage(FlightGlobals.FindVessel(vesselId));
+                MessageSender.SendVesselMessage(FlightGlobals.FindVessel(vesselId), forceReload, reason);
             }, delayInSec);
         }
 
@@ -198,6 +382,61 @@ namespace LmpClient.Systems.VesselProtoSys
         public void RemoveVessel(Guid vesselId)
         {
             VesselProtos.TryRemove(vesselId, out _);
+            //Drop the drift cache entry so a vessel re-created with the same id later
+            //in the session (e.g. revert-to-launch from EDITOR, or a re-spawn after a
+            //remote kill+resend) starts from a clean slate and the first legitimate
+            //broadcast after the recreate isn't suppressed.
+            LastBroadcastDriftPartCount.TryRemove(vesselId, out _);
+            //A vessel id resurrected in the same session must not inherit a stale
+            //"I just mutated locally" record from the previous incarnation, which
+            //would suppress the first wire update on the new vessel.
+            LocalTopologyTracker.ClearVessel(vesselId);
+
+            //Best-effort name lookup so the trace stays human-readable; FindVessel
+            //may have already returned null by the time we get here (e.g. when
+            //RemoveVessel runs from the kill-vessel pipeline after the live
+            //Vessel was destroyed).
+            string vesselName = null;
+            try { vesselName = FlightGlobals.FindVessel(vesselId)?.vesselName; } catch { /* swallow */ }
+            VesselSyncDiagnostics.LogRemoved(vesselId, vesselName, reason: "VesselProtoSystem.RemoveVessel");
+        }
+
+        #endregion
+
+        #region Diagnostic helpers
+
+        /// <summary>
+        /// Try/catch wrapper around <c>ProtoVessel.vesselName</c> so a half-loaded
+        /// proto with a broken name field can't break the diagnostic write that
+        /// is supposed to surface it. Returns null on failure; the writer
+        /// substitutes its own placeholder.
+        /// </summary>
+        private static string SafeName(ProtoVessel proto)
+        {
+            try { return proto?.vesselName; }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Try/catch wrapper around <c>ProtoVessel.protoPartSnapshots.Count</c>
+        /// for the same reason as <see cref="SafeName"/>. Returns -1 on failure,
+        /// which the writer renders as "?".
+        /// </summary>
+        private static int SafePartCount(ProtoVessel proto)
+        {
+            try { return proto?.protoPartSnapshots?.Count ?? -1; }
+            catch { return -1; }
+        }
+
+        /// <summary>
+        /// Try/catch wrapper around <c>ProtoVessel.situation</c>. Returns
+        /// <see cref="Vessel.Situations.PRELAUNCH"/> as a benign fallback so
+        /// the diagnostic write can never propagate a partial-proto exception.
+        /// </summary>
+        private static Vessel.Situations SafeSituation(ProtoVessel proto)
+        {
+            try { return proto?.situation ?? Vessel.Situations.PRELAUNCH; }
+            catch { return Vessel.Situations.PRELAUNCH; }
         }
 
         #endregion

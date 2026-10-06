@@ -1,5 +1,7 @@
 using LunaConfigNode.CfgNode;
 using Server.Log;
+using Server.System.Scenario;
+using System.Threading.Tasks;
 using System;
 using System.Globalization;
 using System.Linq;
@@ -20,13 +22,13 @@ namespace Server.Agency
         /// one. Used when a client uploads scenario state (on scene change,
         /// disconnect, etc.) so each agency's state stays independent.
         /// </summary>
-        public static void RawConfigNodeInsertOrUpdate(Guid agencyId, string moduleName, string scenarioAsConfigNodeText)
+        public static Task RawConfigNodeInsertOrUpdate(Guid agencyId, string moduleName, string scenarioAsConfigNodeText)
         {
-            global::System.Threading.Tasks.Task.Run(() =>
+            return Task.Run(() =>
             {
                 try
                 {
-                    var node = new ConfigNode(scenarioAsConfigNodeText) { Name = moduleName };
+                    var node = ScenarioDataUpdater.ParseClientConfigNode(scenarioAsConfigNodeText, moduleName);
                     lock (AgencyScenarioStore.SemaphoreFor(agencyId, moduleName))
                     {
                         AgencyScenarioStore.AddOrUpdate(agencyId, moduleName, node);
@@ -81,7 +83,7 @@ namespace Server.Agency
                 var rd = AgencyScenarioStore.GetOrNull(agencyId, "ResearchAndDevelopment");
                 if (rd == null) return false;
 
-                var incoming = new ConfigNode(Encoding.UTF8.GetString(techNodeBytes, 0, numBytes)) { Name = "Tech" };
+                var incoming = ScenarioDataUpdater.ParseClientConfigNode(techNodeBytes, numBytes, "Tech");
                 var incomingId = incoming.GetValue("id")?.Value;
                 if (string.IsNullOrEmpty(incomingId)) return false;
 
@@ -128,8 +130,9 @@ namespace Server.Agency
                 var rd = AgencyScenarioStore.GetOrNull(agencyId, "ResearchAndDevelopment");
                 if (rd == null) return;
 
-                var received = new ConfigNode(Encoding.UTF8.GetString(subjectBytes, 0, numBytes)) { Parent = rd, Name = "Science" };
-                if (received.IsEmpty()) return;
+                var received = ScenarioDataUpdater.ParseClientConfigNode(subjectBytes, numBytes, "Science");
+                if (received.IsEmpty() || string.IsNullOrEmpty(received.GetValue("id")?.Value)) return;
+                received.Parent = rd;
 
                 var existing = rd.GetNodes("Science").Select(v => v.Value)
                     .FirstOrDefault(n => n.GetValue("id")?.Value == received.GetValue("id")?.Value);
@@ -154,36 +157,15 @@ namespace Server.Agency
                 var existingValues = tech.GetValues("part").Select(v => v.Value).ToArray();
                 if (existingValues.Any(v => v == partName)) return false;
 
-                // Append part via text-edit. LunaConfigNode does not expose
-                // a value-add primitive on ConfigNode, so rebuild the Tech
-                // node by appending the part line to its serialized form.
-                var originalText = tech.ToString();
-                var injected = InjectPartLine(originalText, partName);
-                var rebuilt = new ConfigNode(injected);
-
-                rd.ReplaceNode(tech, rebuilt);
+                tech.CreateValue(new CfgNodeValue<string, string>("part", partName));
                 return true;
             }
         }
 
-        /// <summary>
-        /// Inserts a <c>part = &lt;name&gt;</c> line just before the closing
-        /// brace of the serialized Tech node.
-        /// </summary>
-        private static string InjectPartLine(string nodeText, string partName)
-        {
-            if (string.IsNullOrEmpty(nodeText)) return nodeText;
-            var lastBrace = nodeText.LastIndexOf('}');
-            if (lastBrace < 0) return nodeText;
-            return nodeText.Substring(0, lastBrace)
-                   + "  part = " + partName + "\n"
-                   + nodeText.Substring(lastBrace);
-        }
+        public static bool ForceCompleteContract(Guid agencyId, string guid) => MoveContract(agencyId, guid, "Completed");
+        public static bool ForceCancelContract(Guid agencyId, string guid) => MoveContract(agencyId, guid, "Cancelled");
 
-        public static bool ForceCompleteContract(Guid agencyId, string guid) => MoveContract(agencyId, guid, "Completed", finished: true);
-        public static bool ForceCancelContract(Guid agencyId, string guid) => MoveContract(agencyId, guid, "Cancelled", finished: true);
-
-        private static bool MoveContract(Guid agencyId, string guid, string newState, bool finished)
+        private static bool MoveContract(Guid agencyId, string guid, string newState)
         {
             if (string.IsNullOrEmpty(guid)) return false;
 
@@ -192,19 +174,15 @@ namespace Server.Agency
                 var cs = AgencyScenarioStore.GetOrNull(agencyId, "ContractSystem");
                 if (cs == null) return false;
 
+                ScenarioDataUpdater.MigrateContractsScenario(cs);
                 var contracts = cs.GetNode("CONTRACTS")?.Value;
-                var finishedNode = cs.GetNode("CONTRACTS_FINISHED")?.Value;
-                if (contracts == null || finishedNode == null) return false;
+                if (contracts == null) return false;
 
                 var contract = contracts.GetNodes("CONTRACT").Select(e => e.Value).FirstOrDefault(c => c.GetValue("guid")?.Value == guid);
                 if (contract == null) return false;
 
                 contract.UpdateValue("state", newState);
-                if (finished)
-                {
-                    contracts.RemoveNode(contract);
-                    finishedNode.AddNode(contract);
-                }
+                ScenarioDataUpdater.ApplyContractUpdates(cs, new[] { contract });
                 LunaLog.Info($"[Agency] Contract {guid} state->{newState} in agency={agencyId}");
                 return true;
             }

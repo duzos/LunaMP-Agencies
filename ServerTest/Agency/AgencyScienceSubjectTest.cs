@@ -10,23 +10,22 @@ using System.Text;
 namespace ServerTest.Agency
 {
     [TestClass]
+    [DoNotParallelize]
     public class AgencyScienceSubjectTest
     {
+        private AgencyTestScope _scope;
+
         [TestInitialize]
         public void Setup()
         {
-            ServerContext.UniverseDirectory = Path.Combine(Path.GetTempPath(), "LMPTestUniverse_" + Guid.NewGuid());
-            Directory.CreateDirectory(ServerContext.UniverseDirectory);
-            AgencyStore.AgenciesPath = Path.Combine(ServerContext.UniverseDirectory, "Agencies");
-            Directory.CreateDirectory(AgencyStore.AgenciesPath);
+            _scope = new AgencyTestScope();
             AgencyStore.Agencies.Clear();
         }
 
         [TestCleanup]
         public void Cleanup()
         {
-            if (Directory.Exists(ServerContext.UniverseDirectory))
-                Directory.Delete(ServerContext.UniverseDirectory, true);
+            _scope.Dispose();
         }
 
         [TestMethod]

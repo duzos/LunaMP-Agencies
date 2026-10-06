@@ -20,12 +20,18 @@ namespace Server.System
         private static readonly object BackupLock = new object();
 
         /// <summary>
-        /// Returns a scenario in the standard KSP format
+        /// Returns a scenario as text for sending to clients.
+        /// Must NOT have outer { } braces — KSP's RecurseFormat treats bare lines as
+        /// root-level key-value pairs, which is what ProtoScenarioModule expects.
+        /// Wrapping in braces would nest everything in an unnamed child node,
+        /// causing node.GetValue("name") to return null on the client.
         /// </summary>
         public static string GetScenarioInConfigNodeFormat(string scenarioName)
         {
-            return CurrentScenarios.TryGetValue(scenarioName, out var scenario) ?
-                scenario.ToString() : null;
+            if (!CurrentScenarios.TryGetValue(scenarioName, out var scenario))
+                return null;
+
+            return scenario.ToString();
         }
 
         /// <summary>
@@ -38,7 +44,27 @@ namespace Server.System
             {
                 foreach (var file in Directory.GetFiles(ScenarioSystem.ScenariosPath).Where(f => Path.GetExtension(f) == ScenarioSystem.ScenarioFileFormat))
                 {
-                    CurrentScenarios.TryAdd(Path.GetFileNameWithoutExtension(file), new ConfigNode(File.ReadAllText(file)));
+                    var raw = File.ReadAllText(file).Trim();
+                    if (raw.StartsWith("{") && raw.EndsWith("}"))
+                        raw = raw.Substring(1, raw.Length - 2);
+
+                    CurrentScenarios.TryAdd(Path.GetFileNameWithoutExtension(file), new ConfigNode(raw) { Name = Path.GetFileNameWithoutExtension(file) });
+                }
+
+                // Repair any ContractSystem scenario produced by older LMP builds so
+                // that finished missions appear in Mission Control's Archived tab.
+                if (CurrentScenarios.TryGetValue("ContractSystem", out var contractsScenario))
+                {
+                    ScenarioDataUpdater.MigrateContractsScenario(contractsScenario);
+                }
+
+                // Strip duplicate crew item entries that older builds (or pre-dedupe
+                // sessions) accumulated under each Progress sub-node. Left in place these
+                // cause client scene transitions to take 20-30+ seconds because KSP saves
+                // the entire scenario on every transition (see issue #542).
+                if (CurrentScenarios.TryGetValue("ProgressTracking", out var progressTrackingScenario))
+                {
+                    ScenarioDataUpdater.MigrateProgressTrackingScenario(progressTrackingScenario);
                 }
 
                 if (createdFromScratch)

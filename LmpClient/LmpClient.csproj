@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -168,6 +168,8 @@
     <Compile Include="Harmony\EVAConstructionModeEditor_AttachPart.cs" />
     <Compile Include="Harmony\EVAConstructionModeEditor_DropAttachablePart.cs" />
     <Compile Include="Harmony\ModuleDockingNode_DockToVessel.cs" />
+    <Compile Include="Harmony\ModuleDockingNode_Undock.cs" />
+    <Compile Include="Harmony\ModuleDockingNode_UndockSameVessel.cs" />
     <Compile Include="Harmony\ContractPreLoader_Filter.cs" />
     <Compile Include="Harmony\ContractSystem_LoadContract.cs" />
     <Compile Include="Harmony\ContractSystem_OnAwake.cs" />
@@ -185,6 +187,8 @@
     <Compile Include="Harmony\Part_CheckPartPressure.cs" />
     <Compile Include="Harmony\Part_CheckPartTemp.cs" />
     <Compile Include="Harmony\Part_Couple.cs" />
+    <Compile Include="Harmony\Part_RegisterCrew.cs" />
+    <Compile Include="Harmony\KnowledgeBase_GetVesselCrewByAvailablePart.cs" />
     <Compile Include="Harmony\Part_Decouple.cs" />
     <Compile Include="Harmony\Part_Die.cs" />
     <Compile Include="Harmony\Part_Undock.cs" />
@@ -196,6 +200,7 @@
     <Compile Include="Harmony\ScenarioDiscoverableObjects_SpawnAsteroid.cs" />
     <Compile Include="Harmony\ScenarioDiscoverableObjects_SpawnComet.cs" />
     <Compile Include="Harmony\ScenarioDiscoverableObjects_UpdateSpaceObjects.cs" />
+    <Compile Include="Harmony\ScenarioNewGameIntro_OnLoad.cs" />
     <Compile Include="Harmony\ShipConstruction_AssembleForLaunch.cs" />
     <Compile Include="Harmony\SpaceTracking_StopTrackingObject.cs" />
     <Compile Include="Harmony\SpaceTracking_StartTrackingObject.cs" />
@@ -233,6 +238,7 @@
     <Compile Include="Harmony\Strategy_CanBeDeactivated.cs" />
     <Compile Include="Harmony\Strategy_Deactivate.cs" />
     <Compile Include="Harmony\Strategy_Activate.cs" />
+    <Compile Include="Harmony\DefaultDateTimeFormatter_ClampDateInputs.cs" />
     <Compile Include="Harmony\TimeWarp_setMode.cs" />
     <Compile Include="Harmony\TimeWarp_setRate.cs" />
     <Compile Include="Harmony\TrackingStationWidget_Update.cs" />
@@ -290,6 +296,8 @@
     <Compile Include="Systems\ShareAchievements\ShareAchievementsMessageSender.cs" />
     <Compile Include="Systems\ShareAchievements\ShareAchievementsSystem.cs" />
     <Compile Include="Systems\ShareCareer\ShareCareerSystem.cs" />
+    <Compile Include="Systems\ShareContracts\ContractPartReferenceChecker.cs" />
+    <Compile Include="Systems\ShareContracts\ContractsScenarioSanitizer.cs" />
     <Compile Include="Systems\ShareContracts\LmpUnavailableContract.cs" />
     <Compile Include="Systems\ShareContracts\ShareContractsEvents.cs" />
     <Compile Include="Systems\ShareContracts\ShareContractsMessageHandler.cs" />
@@ -411,6 +419,7 @@
     <Compile Include="Systems\VesselPositionSys\VesselPositionMessageSender.cs" />
     <Compile Include="Systems\VesselPositionSys\VesselPositionSystem.cs" />
     <Compile Include="Systems\VesselPositionSys\VesselPositionUpdate.cs" />
+    <Compile Include="Systems\VesselProtoSys\LocalTopologyTracker.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProto.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProtoQueue.cs" />
     <Compile Include="Systems\VesselResourceSys\VesselResourceMessageHandler.cs" />
@@ -445,6 +454,7 @@
     <Compile Include="Systems\VesselUpdateSys\VesselUpdateMessageHandler.cs" />
     <Compile Include="Systems\VesselUpdateSys\VesselUpdateMessageSender.cs" />
     <Compile Include="Systems\VesselUpdateSys\VesselUpdateSystem.cs" />
+    <Compile Include="VesselUtilities\DiscoveryInfoSanitizer.cs" />
     <Compile Include="VesselUtilities\OwnVesselReloader.cs" />
     <Compile Include="VesselUtilities\VesselSerializer.cs" />
     <Compile Include="Systems\VesselSwitcherSys\VesselSwitcherSystem.cs" />
@@ -471,6 +481,7 @@
     <Compile Include="Systems\Agency\AgencySystem.cs" />
     <Compile Include="Systems\Agency\AgencyMessageSender.cs" />
     <Compile Include="Systems\Agency\AgencyMessageHandler.cs" />
+    <Compile Include="Properties\TypeForwarding.cs" />
     <Compile Include="Systems\Chat\ChatMessageHandler.cs" />
     <Compile Include="Systems\Chat\ChatMessageSender.cs" />
     <Compile Include="Systems\Chat\ChatSystem.cs" />
@@ -500,6 +511,7 @@
     <Compile Include="Systems\VesselLockSys\VesselLockEvents.cs" />
     <Compile Include="Systems\VesselLockSys\VesselLockSystem.cs" />
     <Compile Include="VesselUtilities\VesselLoader.cs" />
+    <Compile Include="VesselUtilities\DockingPortUtil.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProtoMessageHandler.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProtoMessageSender.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProtoSystem.cs" />
@@ -520,6 +532,7 @@
     <Compile Include="Systems\Warp\WarpMessageHandler.cs" />
     <Compile Include="Systems\Warp\WarpMessageSender.cs" />
     <Compile Include="Systems\Warp\WarpStructures.cs" />
+    <Compile Include="Diagnostics\VesselSyncDiagnostics.cs" />
     <Compile Include="Utilities\CommonUtil.cs" />
     <Compile Include="Extensions\ConfigNodeSerializer.cs" />
     <Compile Include="Systems\AsteroidComet\AsteroidCometSystem.cs" />

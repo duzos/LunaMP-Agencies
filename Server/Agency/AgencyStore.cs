@@ -27,7 +27,7 @@ namespace Server.Agency
     /// </summary>
     public static class AgencyStore
     {
-        public static string AgenciesPath = Path.Combine(ServerContext.UniverseDirectory, "Agencies");
+        public static string AgenciesPath => ServerContext.AgenciesDirectory;
         public const string AgencyFileFormat = ".txt";
         public const string MetaFileName = "meta.txt";
 

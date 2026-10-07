@@ -8,6 +8,8 @@ try {
     function Assert-CleanSource {
         $changes = & git status --porcelain --untracked-files=no
         if ($LASTEXITCODE -ne 0 -or $changes) { throw 'Tracked source changes present; commit before packaging.' }
+        $untracked = & git ls-files --others --exclude-standard -- KspControl LmpClient
+        if ($LASTEXITCODE -ne 0 -or $untracked) { throw 'Untracked control/client source present; classify and commit before packaging.' }
     }
     Assert-CleanSource
     $commit = (& git rev-parse HEAD).Trim()
@@ -67,3 +69,4 @@ try {
     (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($zip) | Set-Content -LiteralPath (Join-Path $output 'SHA256SUMS.txt')
     Write-Output "Offline preview verified: $zip"
 } finally { Pop-Location }
+

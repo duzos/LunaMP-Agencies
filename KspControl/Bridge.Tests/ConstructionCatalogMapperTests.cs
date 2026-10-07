@@ -71,7 +71,7 @@ namespace KspControl.BridgeTests
             Assert.AreEqual(1, (int)nodes[1]["size"]);
             Assert.IsTrue((bool)pod["attachRules"]["allowStack"]);
             Assert.AreEqual(JTokenType.Null, pod["surfaceNode"].Type);
-            Assert.AreEqual("unverified", (string)parts[1]["constructionSupport"], "Decoupler.1 has no S0 evidence yet");
+            Assert.AreEqual("verified", (string)parts[1]["constructionSupport"], "Decoupler.1 loaded cleanly in S0-t2");
             Assert.IsFalse((bool)parts[2]["found"]); Assert.IsNull(parts[2]["stackNodes"]);
         }
 

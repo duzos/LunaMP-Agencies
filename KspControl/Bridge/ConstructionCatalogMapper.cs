@@ -58,8 +58,22 @@ namespace KspControl.Bridge
     /// <summary>Which stock parts have construction evidence (S0 twin comparison). Everything else is reported "unverified" and the planner refuses it.</summary>
     public sealed class ConstructionSupportPolicy
     {
-        /// <summary>Parts compared against a KSP-built twin in S0 (plan 37, 33-log): the T1 twin set. Extended only with live evidence.</summary>
-        public static readonly string[] DefaultVerified = { "mk1pod.v2", "fuelTankSmall", "liquidEngine.v2" };
+        /// <summary>
+        /// The one data table of parts with live structural-load evidence (plan 37 revision 5; 33-log S0-t1 and S0-t2, sandbox).
+        /// Add a row, with its evidence, when a part is verified live. Anything not listed is reported "unverified" and the planner refuses it.
+        /// </summary>
+        public static readonly KeyValuePair<string, string>[] VerifiedTable =
+        {
+            new KeyValuePair<string, string>("mk1pod.v2", "S0a twin, structural load"),
+            new KeyValuePair<string, string>("fuelTankSmall", "S0a twin, structural load"),
+            new KeyValuePair<string, string>("liquidEngine.v2", "S0a twin, structural load"),
+            new KeyValuePair<string, string>("probeCoreOcto.v2", "S0-t2 structural load"),
+            new KeyValuePair<string, string>("Decoupler.1", "S0-t2 structural load"),
+        };
+        public static string[] DefaultVerified
+        {
+            get { var names = new List<string>(); foreach (var row in VerifiedTable) names.Add(row.Key); return names.ToArray(); }
+        }
         public static readonly ConstructionSupportPolicy Default = new ConstructionSupportPolicy(DefaultVerified);
         private readonly HashSet<string> verified;
         public ConstructionSupportPolicy(IEnumerable<string> verifiedParts)

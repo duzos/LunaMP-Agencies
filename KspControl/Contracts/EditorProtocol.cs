@@ -1,9 +1,17 @@
 namespace KspControl.Contracts
 {
-    /// <summary>Queued, read-only editor observations. Neither takes a lease, and neither changes the game.</summary>
+    /// <summary>
+    /// Queued editor operations served on the main-thread observation queue. State and Engineering are read-only; the rest
+    /// need a lease and are executed as asynchronous jobs after admission (plan R3-section 6.4).
+    /// </summary>
     public static class EditorOperations
     {
         public const string State = "editor.state";
         public const string Engineering = "editor.engineering";
+        public const string ApplyCraft = "editor.apply_craft";
+        public const string RestoreSnapshot = "editor.restore_snapshot";
+        public const string OperationStatus = "editor.operation_status";
+        /// <summary>Operations that change the editor. They are reachable only through the host journal.</summary>
+        public static readonly string[] Mutations = { ApplyCraft, RestoreSnapshot };
     }
 }

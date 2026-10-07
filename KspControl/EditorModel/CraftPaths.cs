@@ -106,11 +106,43 @@ namespace KspControl.EditorModel
         public string ControlDirectory { get { return Path.Combine(kspRoot, "KspControlData", "control"); } }
         public string SuspensionsFile { get { return Path.Combine(ControlDirectory, "suspensions.json"); } }
         public string LedgerFile { get { return Path.Combine(WorkspaceRoot, "ledger.json"); } }
+        private static bool IsUnder(string full, string directory)
+        {
+            var dir = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(full, dir, StringComparison.OrdinalIgnoreCase) || full.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        /// <summary>
+        /// True when tool writes may use this save's workspace. KspControlData/control holds the persisted suspensions, so no tool
+        /// path may reach it, and a save literally named "control" would put its workspace there (carry-forward from P2.2).
+        /// </summary>
+        public bool WorkspaceAllowed { get { return !string.Equals(saveFolder, "control", StringComparison.OrdinalIgnoreCase); } }
         private PathCheck Workspace(string sub, string fileName)
         {
             var full = Path.GetFullPath(Path.Combine(WorkspaceRoot, sub, fileName));
             var root = Path.GetFullPath(Path.Combine(kspRoot, "KspControlData"));
+            if (!WorkspaceAllowed || IsUnder(full, ControlDirectory)) return PathCheck.Fail("path_outside_save");
             return CheckAncestors(full, root);
+        }
+        /// <summary>The recovery, staging or thumbs-backup directory of this save, or null when the workspace is denied or unsafe.</summary>
+        public string WorkspaceDirectory(string sub)
+        {
+            if (sub != "staging" && sub != "recovery" && sub != "thumbs-backup") return null;
+            var check = Workspace(sub, "x");
+            return check.Ok ? Path.GetDirectoryName(check.FullPath) : null;
+        }
+        /// <summary>Snapshot metadata beside the recovery craft: kc-snap-&lt;id&gt;.json.</summary>
+        public PathCheck RecoveryMetaPath(string snapshotId)
+        {
+            return IsId(snapshotId) ? Workspace("recovery", "kc-snap-" + snapshotId + ".json") : PathCheck.Fail("invalid_snapshot_id");
+        }
+        // ----- KSP thumbnails: <KSP root>/thumbs/<Save>_<facility>_<name>.png (read and removed by housekeeping only) -----
+        public string ThumbnailsDirectory { get { return Path.Combine(kspRoot, "thumbs"); } }
+        public string ThumbnailPrefix(string facility) { return saveFolder + "_" + facility + "_"; }
+        /// <summary>The thumbnail KSP writes for a ship file or ship name, or null when the facility or stem is not a plain name.</summary>
+        public string ThumbnailFile(string facility, string stem)
+        {
+            if ((facility != "VAB" && facility != "SPH") || string.IsNullOrEmpty(stem) || stem.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || stem.Contains("..")) return null;
+            return Path.Combine(ThumbnailsDirectory, ThumbnailPrefix(facility) + stem + ".png");
         }
         public PathCheck StagingPath(string requestId)
         {

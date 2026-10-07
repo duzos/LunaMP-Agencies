@@ -8,7 +8,8 @@ namespace KspControl.HostTests;
  {
   string root=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"../../../../Host/bin/Release/net10.0/KspControl.Host.dll"));
   var start=new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? @"C:\Users\james\.dotnet\dotnet.exe") { RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,UseShellExecute=false,CreateNoWindow=true };
-  start.ArgumentList.Add(root); start.Environment.Remove("KSP_CONTROL_TOKEN_FILE");
+  string journal=Path.Combine(Path.GetTempPath(),"ksp-smoke-journal",Guid.NewGuid().ToString("N"));
+  start.ArgumentList.Add(root); start.Environment.Remove("KSP_CONTROL_TOKEN_FILE"); start.Environment["KSP_CONTROL_JOURNAL_DIR"]=journal;
   using var process=Process.Start(start)!;
   var errors=process.StandardError.ReadToEndAsync();
   using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -27,9 +28,29 @@ namespace KspControl.HostTests;
    var list=await Request(new { jsonrpc="2.0",id=2,method="tools/list",@params=new {} },2);
    var names=list.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t=>t.GetProperty("name").GetString()).ToArray();
    CollectionAssert.Contains(names,"context");
+   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease"}) CollectionAssert.Contains(names,expected);
+   // Schema scan over the real tool list: nothing accepts grant payloads or key material.
+   foreach(var tool in list.GetProperty("result").GetProperty("tools").EnumerateArray())
+   {
+    string name=tool.GetProperty("name").GetString()!;
+    Assert.IsFalse(name.Contains("grant",StringComparison.OrdinalIgnoreCase),name);
+    if(tool.TryGetProperty("inputSchema",out var schema) && schema.TryGetProperty("properties",out var properties))
+     foreach(var property in properties.EnumerateObject())
+      foreach(var word in new[]{"grant","payload","mac","key","secret","token","password","envelope"})
+       Assert.IsFalse(property.Name.Contains(word,StringComparison.OrdinalIgnoreCase),$"{name}.{property.Name}");
+   }
+   var control=list.GetProperty("result").GetProperty("tools").EnumerateArray().Single(t=>t.GetProperty("name").GetString()=="control_acquire_lease").GetProperty("inputSchema").GetProperty("properties");
+   Assert.AreEqual(2,control.EnumerateObject().Count()); Assert.IsTrue(control.TryGetProperty("purpose",out _)); Assert.IsTrue(control.TryGetProperty("durationSeconds",out _));
    var call=await Request(new { jsonrpc="2.0",id=3,method="tools/call",@params=new { name="context",arguments=new {} } },3);
    string output=call.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
    using var failure=JsonDocument.Parse(output); Assert.AreEqual("credential_not_configured",failure.RootElement.GetProperty("ReasonCode").GetString());
+   var status=await Request(new { jsonrpc="2.0",id=4,method="tools/call",@params=new { name="control_status",arguments=new {} } },4);
+   using var statusFailure=JsonDocument.Parse(status.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("credential_not_configured",statusFailure.RootElement.GetProperty("ReasonCode").GetString());
+   Assert.AreEqual("available",statusFailure.RootElement.GetProperty("Data").GetProperty("host").GetProperty("journal").GetString());
+   var invalid=await Request(new { jsonrpc="2.0",id=5,method="tools/call",@params=new { name="control_acquire_lease",arguments=new { purpose="x",durationSeconds=5 } } },5);
+   using var invalidResult=JsonDocument.Parse(invalid.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("invalid_argument",invalidResult.RootElement.GetProperty("ReasonCode").GetString());
   } finally { process.StandardInput.Close(); if(!process.WaitForExit(1000)) process.Kill(true); await errors; }
  }
 }

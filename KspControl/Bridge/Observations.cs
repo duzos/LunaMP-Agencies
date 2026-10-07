@@ -21,6 +21,9 @@ namespace KspControl.Bridge
         {
             get { try { return (int?)facade?.GetField("ApiVersion", BindingFlags.Public | BindingFlags.Static)?.GetRawConstantValue() == 1; } catch { return false; } }
         }
+        internal const string BridgeVersion = "0.2.0";
+        internal string WorldEpoch => epoch;
+        internal Guid AgencyId => agency;
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -99,12 +102,14 @@ namespace KspControl.Bridge
         {
             ["scene"] = HighLogic.LoadedScene.ToString(), ["agencyId"] = agency == Guid.Empty ? null : agency.ToString(),
             ["agencyAdapterAvailable"] = FacadeCompatible, ["processId"] = Process.GetCurrentProcess().Id,
-            ["protocolVersion"] = 1, ["bridgeVersion"] = "0.1.0", ["universalTimeSeconds"] = game == null ? null : Finite(Planetarium.GetUniversalTime()),
+            ["protocolVersion"] = 1, ["bridgeVersion"] = BridgeVersion, ["universalTimeSeconds"] = game == null ? null : Finite(Planetarium.GetUniversalTime()),
             ["mutationAuthority"] = "unavailable", ["revisionSemantics"] = "observation_sequence_not_mutation_precondition"
         };
         private static JObject Capabilities() => new JObject
         {
+            ["bridgeVersion"] = BridgeVersion,
             ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", "parts.definition", "editor.snapshot", "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
+            ["inline"] = new JArray(ControlOperations.All),
             ["unavailable"] = new JObject { ["mutations"] = "authority_and_job_execution_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },
             ["maximumPageSize"] = ObservationLimits.MaxPage

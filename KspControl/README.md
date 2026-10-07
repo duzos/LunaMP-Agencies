@@ -20,9 +20,10 @@ checks; passing protocol tests is not proof of game operation.
   Stack node alignment and opposing normals use the separate StackGeometryValidator gate;
   graph validation alone is not permission to import.
 - `Host/ControlJournal`: unexposed authority/job primitive. Reservations and request
-  identities persist; in-flight work becomes indeterminate after restart. Grants
-  and leases must be re-established through a future trusted integration. Revoked
-  grant IDs cannot be reused. No mutation dispatch is wired to MCP.
+  identities persist; in-flight work becomes indeterminate after restart. It mirrors
+  the bridge's grant `(id, generation)` and lease id for audit; it never verifies a
+  grant and the world epoch lives on the lease. A revoked `(id, generation)` pair
+  cannot be reused. No mutation dispatch is wired to MCP.
 
 ## Build and test
 
@@ -32,7 +33,7 @@ From the repository root with the installed SDK:
 & C:/Users/james/.dotnet/dotnet.exe build KspControl/Host/KspControl.Host.csproj -c Release
 & C:/Users/james/.dotnet/dotnet.exe build KspControl/Bridge/KspControl.Bridge.csproj -c Release
 & C:/Users/james/.dotnet/dotnet.exe test KspControl/HostTests/KspControl.HostTests.csproj -c Release
-& C:/Users/james/.dotnet/dotnet.exe test KspControl/Bridge.Tests/KspControl.Bridge.Tests.csproj -c Release
+& C:/Users/james/.dotnet/dotnet.exe test KspControl/Bridge.Tests/KspControl.Bridge.Tests.csproj -c Release   # runs on net10.0 and net472
 & C:/Users/james/.dotnet/dotnet.exe test KspControl/EditorModel.Tests/KspControl.EditorModel.Tests.csproj -c Release
 ```
 
@@ -46,7 +47,7 @@ logs. `KSP_CONTROL_PORT` optionally overrides loopback TCP port 43819. Provision
 installation, game lifecycle and client configuration are orchestrator tasks, not
 MCP tools. An absent credential produces `credential_not_configured`.
 
-Current tools are `capabilities`, `context`, `parts`, `editor`, `vessel`,
+Current tools are `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
 `part_controls`, `science`, `part_definition` and `editor_snapshot`. The latter two provide bounded configured-part and native editor snapshots; they do not import or create craft. Part and vessel pages are bounded. Part controls
 and science require a part ID from an accessible craft observation. Controls are
 descriptors only; field values/invocation are not available. Flight inspection
@@ -71,6 +72,57 @@ block (`canSurfaceAttach`, `acceptsSurfaceAttach`, `stack`, `allowStack`,
 
 
 
+
+## Trust plumbing (grants, leases, inline control)
+
+Mutations remain unavailable. This layer only decides *whether* a future mutation may
+run, and it is exercised by `control_*` tools that change no game state.
+
+**Grant.** A human-issued file `{"payload":"<base64 UTF-8 JSON>","mac":"<base64 HMAC-SHA256>"}`.
+The MAC covers the exact decoded payload bytes (no canonicalisation) and the payload is
+parsed only after it verifies. Payload fields: `version`, `grantId`, `generation`,
+`issuedUtc`, `expiresUtc`, `binding{installId, saveFolder, agency}`, `operations[]`,
+`facilities[]`, `unsavedCraftPolicy`, `maxParts`, `spendLimitFunds`, `revoked`. `agency`
+is the LunaMP agency GUID, or `offline:<saveFolder>` for an isolated save (never valid
+while connected to an agency). `installId` is the first 16 hex characters of SHA-256 of
+the upper-cased full KSP root path.
+
+**CLI** (a human-run branch of the host executable; never an MCP tool):
+
+```powershell
+KspControl.Host.exe grant issue --ksp-root <KSP root> --save <SaveFolder> [--agency <guid>] [--ops a,b] [--facilities VAB] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]
+KspControl.Host.exe grant revoke | rearm [--hours H] | show
+```
+
+Key and grant live under `%LOCALAPPDATA%\KspControl	rust\` (`grant.key`: 32 random bytes,
+created on first `issue`, never printed; `grant.json`). Overrides: `--trust-dir`, `--grant-file`,
+`--key-file`, or env `KSP_CONTROL_TRUST_DIR`. `issue`, `revoke` and `rearm` always write
+`generation + 1`; `show` never prints the key, payload or MAC. Only KSP gets the key path:
+`KSP_CONTROL_GRANT_FILE` and `KSP_CONTROL_GRANT_KEY_FILE` go in KSP's environment, not the
+MCP host's. Without both, no grant is ever provisioned. The key file and trust directory are created user-only on Windows (inheritance off), with a warning if that fails. The host journal lives in `%LOCALAPPDATA%\KspControl\journal\<installId>` when `KSP_CONTROL_KSP_ROOT` names the KSP root, otherwise `...\journal\default`; `KSP_CONTROL_JOURNAL_DIR` overrides.
+
+**Bridge.** `GrantWatcher` polls the file at 1 Hz on the main thread (re-verifying on a stat
+change) and publishes an immutable status: `missing`, `malformed`, `invalid_mac`, `expired`,
+`revoked`, `suspended`, `binding_mismatch`, `not_yet_applicable` or `valid`. A scene change
+drops only the lease; a binding change drops the grant (re-provisioned when it matches again);
+the Stop button or `KSP_CONTROL_STOP_KEY` hotkey burns the current generation and persists it
+in `<KSP root>/KspControlData/control/suspensions.json`, so it survives a restart until
+`grant rearm` writes a higher generation. The highest generation seen per grant id is stored in the same file, so an older envelope cannot be replayed after a restart; a failed write shows as `stopPersistFailed` in `control_status` and a warning on the panel. A human edit takeover (wired in a later slice) revokes
+the lease and starts a 30 s cooldown.
+
+**Tools.** `control_status`, `control_acquire_lease(purpose 1..128, durationSeconds 30..300)`,
+`control_renew_lease(leaseId, durationSeconds)`, `control_release_lease(leaseId)`. None accepts
+or returns grant content or key material. The host keeps the lease alive with an
+inline `control.heartbeat` every 1000 ms on its own connection (800 ms timeout, in-flight
+beats skipped, `lease_unhealthy` after 3 failures); the bridge watchdog (2 s) is authoritative.
+
+**Transport.** One worker thread per connection (32-socket cap). `control.*` operations are
+answered inline from authority-held state and never queue; any other operation needs one of 3
+queue-wait slots, otherwise `bridge_busy`. `BridgeClient` keeps disjoint read, control and
+(empty) mutation allowlists. Bridge version is `0.2.0`.
+
+Not live-verified: the scene-ready definition, the OnGUI Stop button, the hotkey and the
+watchdog behaviour during a real long frame need a KSP run.
 
 ## Offline preview packaging
 

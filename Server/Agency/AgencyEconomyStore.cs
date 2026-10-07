@@ -29,6 +29,8 @@ namespace Server.Agency
     public sealed class EconomyLaunch
     {
         public Guid LaunchId, AgencyId, Token, VesselId;
+        /// <summary>The single-launch voucher this launch reserved or redeemed; empty for an ordinary launch.</summary>
+        public Guid VoucherId;
         public string ActorId;
         public long SessionTicks, ExpiresUtcTicks, CreatedSequence;
         public Guid SessionId;
@@ -61,7 +63,9 @@ namespace Server.Agency
     {
         public Dictionary<Guid, StoredTradeOffer> TradeOffers = new Dictionary<Guid, StoredTradeOffer>();
         public Dictionary<Guid, List<TradeEntitlement>> Entitlements = new Dictionary<Guid, List<TradeEntitlement>>();
-        public int Version = 1;
+        /// <summary>1 was written by agencies.4 and earlier. Every write by agencies.5 or later stores 2, which older servers refuse to load.</summary>
+        public int Version = CurrentVersion;
+        public const int CurrentVersion = 2;
         public long Revision;
         public Dictionary<Guid, EconomyAgency> Agencies = new Dictionary<Guid, EconomyAgency>();
         public Dictionary<Guid, EconomyLaunch> Launches = new Dictionary<Guid, EconomyLaunch>();
@@ -157,6 +161,7 @@ namespace Server.Agency
                         RefundPrepared(candidate, launch);
                         changed = true;
                     }
+                    if (ReleaseOrphanedVouchers(candidate)) changed = true;
                     RetireTerminalLaunches(candidate);
                     if (TradeNeedsMaintenance(candidate)) { PruneTrade(candidate); changed = true; }
                     if (changed) Commit(candidate);
@@ -168,7 +173,7 @@ namespace Server.Agency
 
         private static void Validate(EconomyDocument document)
         {
-            if (document.Version != 1 || document.Revision < 0 || document.Agencies == null || document.Launches == null || document.Vessels == null || document.Operations == null || document.Operations.Count > MaxOperations || document.Launches.Count > MaxLaunches)
+            if (document.Version != 1 && document.Version != EconomyDocument.CurrentVersion || document.Revision < 0 || document.Agencies == null || document.Launches == null || document.Vessels == null || document.Operations == null || document.Operations.Count > MaxOperations || document.Launches.Count > MaxLaunches)
                 throw new InvalidDataException("Invalid economy document.");
             foreach (var agency in document.Agencies.Values)
             {
@@ -194,7 +199,9 @@ namespace Server.Agency
 
         private static void Persist(EconomyDocument document)
         {
+            document.Version = EconomyDocument.CurrentVersion;
             Validate(document);
+            ValidateVoucherLinks(document);
             // The journal's ownership projection must be valid before it is durable, or the next boot could not apply it.
             if (document.Journal?.OwnershipAfter != null) AgencyVesselMap.Validate(document.Journal.OwnershipAfter);
             // The wire payload has a stricter bound than the ledger. Validate the actual
@@ -447,14 +454,29 @@ namespace Server.Agency
                         case EconomyOperation.PrepareLaunch:
                             if (command.LaunchId == Guid.Empty || candidate.Launches.ContainsKey(command.LaunchId) || candidate.Launches.Count >= MaxLaunches) throw new InvalidOperationException("Launch identity unavailable.");
                             result.Quote = Quote(agency, command.Manifest, command.ManifestHash);
-                            Charge(agency, result.Quote.LaunchCost);
+                            var launchCharge = result.Quote.LaunchCost;
+                            var launchMultiplier = result.Quote.AlreadyTooled ? Rates().TooledLaunch : Rates().UntooledLaunch;
+                            var reserved = Guid.Empty;
+                            if (command.VoucherId != Guid.Empty)
+                            {
+                                if (!TradeEnabled) throw new InvalidOperationException("Agency trade is unavailable.");
+                                var voucher = candidate.Entitlements.TryGetValue(client.AgencyId, out var held) ? held.SingleOrDefault(e => e.EntitlementId == command.VoucherId) : null;
+                                if (voucher == null || voucher.Kind != TradeEntitlementKind.SingleLaunch || voucher.Redeemed || voucher.LaunchId != Guid.Empty) throw new InvalidOperationException("Free launch voucher is unavailable.");
+                                if (voucher.Fingerprint != result.Quote.Fingerprint) throw new InvalidOperationException("Voucher does not match this design.");
+                                launchCharge = TradePolicy.VoucherLaunchCharge(result.Quote, voucher.PrepaidFunds, voucher.LaunchMultiplier);
+                                launchMultiplier = voucher.LaunchMultiplier;
+                                voucher.LaunchId = command.LaunchId;
+                                reserved = voucher.EntitlementId;
+                                result.Quote.LaunchCost = launchCharge;
+                            }
+                            Charge(agency, launchCharge);
                             var launch = new EconomyLaunch
                             {
                                 LaunchId = command.LaunchId, AgencyId = client.AgencyId, ActorId = client.UniqueIdentifier,
                                 SessionTicks = client.ConnectionTime.Ticks, SessionId = sessionId, CreatedSequence = command.Sequence, Token = Guid.NewGuid(), State = LaunchState.Prepared,
                                 ExpiresUtcTicks = UtcNow().AddSeconds(60).Ticks, Manifest = Copy(command.Manifest),
-                                Charge = UsesFunds ? result.Quote.LaunchCost : 0,
-                                Multiplier = result.Quote.AlreadyTooled ? Rates().TooledLaunch : Rates().UntooledLaunch
+                                Charge = UsesFunds ? launchCharge : 0,
+                                Multiplier = launchMultiplier, VoucherId = reserved
                             };
                             candidate.Launches[launch.LaunchId] = launch;
                             result.LaunchToken = launch.Token; result.ExpiresUtcTicks = launch.ExpiresUtcTicks;
@@ -510,6 +532,34 @@ namespace Server.Agency
         {
             Agency(document, launch.AgencyId).Funds += launch.Charge;
             launch.State = LaunchState.Cancelled;
+            // A launch that never registered gives its reserved voucher back; a redeemed one is never touched here.
+            var voucher = FindVoucher(document, launch);
+            if (voucher != null && !voucher.Redeemed && voucher.LaunchId == launch.LaunchId) voucher.LaunchId = Guid.Empty;
+        }
+
+        private static TradeEntitlement FindVoucher(EconomyDocument document, EconomyLaunch launch)
+            => launch.VoucherId != Guid.Empty && document.Entitlements.TryGetValue(launch.AgencyId, out var held) ? held.FirstOrDefault(e => e.EntitlementId == launch.VoucherId) : null;
+
+        /// <summary>A reserved voucher must point at the Prepared launch that holds it; anything else is a leftover and is released.</summary>
+        private static bool ReleaseOrphanedVouchers(EconomyDocument document)
+        {
+            var changed = false;
+            foreach (var held in document.Entitlements.Values)
+                foreach (var voucher in held.Where(e => e.Kind == TradeEntitlementKind.SingleLaunch && !e.Redeemed && e.LaunchId != Guid.Empty))
+                    if (!document.Launches.TryGetValue(voucher.LaunchId, out var launch) || launch.State != LaunchState.Prepared || launch.VoucherId != voucher.EntitlementId)
+                    {
+                        voucher.LaunchId = Guid.Empty;
+                        changed = true;
+                    }
+            return changed;
+        }
+
+        private static void ValidateVoucherLinks(EconomyDocument document)
+        {
+            foreach (var entry in document.Entitlements)
+                foreach (var voucher in entry.Value.Where(e => e.Kind == TradeEntitlementKind.SingleLaunch && !e.Redeemed && e.LaunchId != Guid.Empty))
+                    if (!document.Launches.TryGetValue(voucher.LaunchId, out var launch) || launch.State != LaunchState.Prepared || launch.VoucherId != voucher.EntitlementId || launch.AgencyId != entry.Key)
+                        throw new InvalidDataException("Reserved voucher does not match a prepared launch.");
         }
 
         public static void CancelPending(ClientStructure client = null)
@@ -564,6 +614,14 @@ namespace Server.Agency
                     var candidate = Copy(_document);
                     var launch = candidate.Launches[saved.LaunchId];
                     launch.State = LaunchState.Registered; launch.VesselId = message.VesselId; launch.OriginalProto = raw;
+                    if (launch.VoucherId != Guid.Empty)
+                    {
+                        var voucher = FindVoucher(candidate, launch);
+                        if (voucher == null || voucher.Redeemed || voucher.LaunchId != launch.LaunchId) throw new InvalidOperationException("Free launch voucher is no longer reserved.");
+                        voucher.Redeemed = true;
+                        // The buyer already holds the saved craft once it was delivered, so the spent voucher need not keep carrying the bytes.
+                        if (voucher.Delivered) voucher.BlueprintData = Array.Empty<byte>();
+                    }
                     var record = new PaidVesselRecord { VesselId = message.VesselId, Parts = paid, Cargo = Copy(launch.Manifest.Cargo) };
                     foreach (var cargo in record.Cargo)
                     {
@@ -856,6 +914,8 @@ namespace Server.Agency
             {
                 Agency(candidate, launch.AgencyId).Funds += launch.Charge;
                 launch.State = LaunchState.Reverted;
+                var spent = FindVoucher(candidate, launch);
+                if (spent != null && spent.Redeemed && spent.LaunchId == launch.LaunchId) { spent.Redeemed = false; spent.LaunchId = Guid.Empty; }
             }
             var ownership = AgencyVesselMap.ExportDocument();
             ownership.Revision++;
@@ -945,6 +1005,9 @@ namespace Server.Agency
             var liveSessions = new HashSet<Guid>(Sessions.Values);
             var referenced = new HashSet<Guid>(document.Vessels.Values.SelectMany(v => v.Parts).Select(p => p.LaunchId));
             foreach (var id in document.Launches.Where(p => !referenced.Contains(p.Key) && p.Value.State != LaunchState.Prepared && (!liveSessions.Contains(p.Value.SessionId) || document.SessionSequences.TryGetValue(p.Value.SessionId, out var last) && p.Value.CreatedSequence < last - MaxOperations)).Select(p => p.Key).ToArray()) document.Launches.Remove(id);
+            // Once its launch is gone the voucher can no longer be restored by a revert, so a spent one is just dead weight.
+            foreach (var held in document.Entitlements.Values)
+                held.RemoveAll(e => e.Kind == TradeEntitlementKind.SingleLaunch && e.Redeemed && !document.Launches.ContainsKey(e.LaunchId));
         }
 
         public static void SendTo(ClientStructure client)

@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The helper's install core is compiled here so it can be tested. Program.cs is NOT linked (its Main would collide
+         with the test SDK entry point, CS0017); HelperCommandLine comes from LmpCommon through the Server reference. -->
+    <Compile Include="..\Updater\LmpAgenciesUpdater\UpdateInstaller.cs" Link="Updater\UpdateInstaller.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="XmlExampleFiles\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

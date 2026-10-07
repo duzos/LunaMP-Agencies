@@ -16,19 +16,28 @@ namespace KspControl.EditorModel
         private static readonly string[] IgnoredHeader = { "version", "persistentId", "steamPublishedFileId", "size" };
         public static string Compute(ConfigNode craft, RoundtripVolatileKeys registry = null, string uiName = null, string uiDescription = null, string flagUrl = null)
         {
-            var text = Project(craft, registry ?? RoundtripVolatileKeys.Default(), uiName, uiDescription, flagUrl);
+            return HashProjection(Project(craft, registry ?? RoundtripVolatileKeys.Default(), uiName, uiDescription, flagUrl));
+        }
+        /// <summary>The fingerprint of an already built projection. Compute(c, r, ...) equals HashProjection(Project(c, r, ...)).</summary>
+        public static string HashProjection(string projection)
+        {
             using (var sha = SHA256.Create())
             {
                 var sb = new StringBuilder();
-                foreach (var b in sha.ComputeHash(Encoding.UTF8.GetBytes(text))) sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+                foreach (var b in sha.ComputeHash(Encoding.UTF8.GetBytes(projection ?? ""))) sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
                 return sb.ToString();
             }
+        }
+        /// <summary>The prefix Project puts in front of the craft body when any UI field is supplied, so a body can be reused when only the UI changes.</summary>
+        public static string UiPrefix(string uiName, string uiDescription, string flagUrl)
+        {
+            if (uiName == null && uiDescription == null && flagUrl == null) return "";
+            return "ui:" + uiName + "\u0001" + uiDescription + "\u0001" + flagUrl + "\n";
         }
         public static string Project(ConfigNode craft, RoundtripVolatileKeys registry, string uiName, string uiDescription, string flagUrl)
         {
             var sb = new StringBuilder();
-            if (uiName != null || uiDescription != null || flagUrl != null)
-                sb.Append("ui:").Append(uiName).Append('\u0001').Append(uiDescription).Append('\u0001').Append(flagUrl).Append('\n');
+            sb.Append(UiPrefix(uiName, uiDescription, flagUrl));
             var m = CraftModel.Build(craft);
                         var headerLines = new List<string>();
             foreach (var kv in craft.Values())
@@ -135,7 +144,13 @@ namespace KspControl.EditorModel
             foreach (var t in ValueRule.Tokens(value))
             {
                 double d;
-                if (ValueRule.TryNumber(t, out d)) sb.Append(d.ToString("G9", CultureInfo.InvariantCulture)); else sb.Append(t);
+                if (ValueRule.TryNumber(t, out d))
+                {
+                    // .NET Core prints negative zero as "-0" and .NET Framework (KSP's runtime) as "0": normalise so both agree.
+                    if (d == 0) d = 0;
+                    sb.Append(d.ToString("G9", CultureInfo.InvariantCulture));
+                }
+                else sb.Append(t);
                 sb.Append('\u0002');
             }
             return sb.ToString();

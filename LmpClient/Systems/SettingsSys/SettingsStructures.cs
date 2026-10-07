@@ -34,6 +34,11 @@ namespace LmpClient.Systems.SettingsSys
 
         public string CustomMasterServer { get; set; } = "";
 
+        public bool AgenciesAutoUpdate { get; set; } = false;
+        public bool AgenciesRelaunchAfterUpdate { get; set; } = true;
+        public int AgenciesSkippedBuild { get; set; } = 0;
+        public int AgenciesFailedBuild { get; set; } = 0;
+
         /// <summary>
         /// Master switch for the append-only vessel-sync trace at
         /// <c>{KspPath}/Logs/LMP/VesselSyncLog.txt</c> (see

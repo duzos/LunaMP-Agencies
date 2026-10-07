@@ -1,20 +1,20 @@
-﻿using LmpClient.Base;
-using LmpClient.Localization;
+using LmpClient.Base;
 using LmpClient.Systems.SettingsSys;
-using System;
+using LmpCommon.Agency;
 using UnityEngine;
 
 namespace LmpClient.Windows.Update
 {
     /// <summary>
-    /// Here we should only display the statistics for systems that contain ROUTINES or code that executes on every fixedupdate/update/lateupdate
+    /// Prompt for new agencies releases: update on exit, skip this version, later (and retry after a failed install).
     /// </summary>
     public partial class UpdateWindow : Window<UpdateWindow>
     {
         #region Fields & properties
 
-        public static Version LatestVersion;
-        public static string Changelog;
+        public static AgenciesReleaseInfo Info;
+        public static string Failure;
+        public static string Status = string.Empty;
 
         private static bool _display;
         public override bool Display
@@ -23,14 +23,31 @@ namespace LmpClient.Windows.Update
             set => base.Display = _display = value;
         }
 
-        private const float WindowHeight = 250;
-        private const float WindowWidth = 400;
+        private Vector2 _scrollPos;
+
+        private const float WindowHeight = 330;
+        private const float WindowWidth = 420;
 
         #endregion
 
+        public static void Show(AgenciesReleaseInfo info, string failure)
+        {
+            Info = info;
+            Failure = failure;
+            Singleton.Display = true;
+        }
+
+        public static void ShowStatusOnly(string status)
+        {
+            Status = status;
+            Singleton.Display = true;
+        }
+
+        public static void ClearFailure() => Failure = null;
+
         protected override void DrawGui()
         {
-            WindowRect = FixWindowPos(GUILayout.Window(6724 + MainSystem.WindowOffset, WindowRect, DrawContent, LocalizationContainer.UpdateWindowText.Title, LayoutOptions));
+            WindowRect = FixWindowPos(GUILayout.Window(6724 + MainSystem.WindowOffset, WindowRect, DrawContent, "LMP Agencies update", LayoutOptions));
         }
 
         public override void SetStyles()

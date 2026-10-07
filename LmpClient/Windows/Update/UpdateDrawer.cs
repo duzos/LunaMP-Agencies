@@ -1,6 +1,6 @@
-﻿using LmpClient.Localization;
-using LmpCommon;
-using LmpGlobal;
+using LmpClient.Systems.AgenciesUpdate;
+using LmpClient.Systems.SettingsSys;
+using LmpCommon.Agency;
 using UnityEngine;
 
 namespace LmpClient.Windows.Update
@@ -12,33 +12,53 @@ namespace LmpClient.Windows.Update
             GUILayout.BeginVertical();
             GUI.DragWindow(MoveRect);
 
-            GUILayout.Label($"{LocalizationContainer.UpdateWindowText.Text}", LmpVersioning.IsCompatible(LatestVersion) ? BoldGreenLabelStyle : BoldRedLabelStyle);
-
-            GUILayout.BeginVertical();
-            GUILayout.Label($"{LocalizationContainer.UpdateWindowText.CurrentVersion} {LmpVersioning.CurrentVersion}");
-            GUILayout.Label($"{LocalizationContainer.UpdateWindowText.LatestVersion} {LatestVersion}");
-            GUILayout.EndVertical();
-
-            GUILayout.BeginVertical();
-            if (LmpVersioning.IsCompatible(LatestVersion))
-                GUILayout.Label($"{LocalizationContainer.UpdateWindowText.StillCompatible}", BoldGreenLabelStyle);
-            else
-                GUILayout.Label($"{LocalizationContainer.UpdateWindowText.NotCompatible}", BoldRedLabelStyle);
-            GUILayout.EndVertical();
-
-            GUILayout.Label(LocalizationContainer.UpdateWindowText.Changelog);
-
-            GUILayout.BeginVertical();
-            ScrollPos = GUILayout.BeginScrollView(ScrollPos, GUILayout.Width(WindowWidth - 5), GUILayout.Height(WindowHeight - 100));
-            GUILayout.Label(Changelog);
-            GUILayout.EndScrollView();
-            GUILayout.EndVertical();
-
-            if (GUILayout.Button(DownloadBigIcon))
+            var info = Info;
+            if (info != null)
             {
-                Application.OpenURL(RepoConstants.LatestGithubReleaseUrl);
-                Display = false;
+                GUILayout.Label($"Current: agencies.{AgenciesBuild.Number}");
+                GUILayout.Label($"Latest: agencies.{info.Build}", BoldGreenLabelStyle);
+
+                if (!string.IsNullOrEmpty(Failure))
+                    GUILayout.Label(Failure, BoldRedLabelStyle);
+
+                GUILayout.Label("Changelog");
+                _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.Width(WindowWidth - 5), GUILayout.Height(WindowHeight - 190));
+                GUILayout.Label(info.Changelog ?? string.Empty);
+                GUILayout.EndScrollView();
+
+                var settings = SettingsSystem.CurrentSettings;
+                var auto = GUILayout.Toggle(settings.AgenciesAutoUpdate, "Always update automatically");
+                var relaunch = GUILayout.Toggle(settings.AgenciesRelaunchAfterUpdate, "Relaunch KSP after updating");
+                if (auto != settings.AgenciesAutoUpdate || relaunch != settings.AgenciesRelaunchAfterUpdate)
+                {
+                    settings.AgenciesAutoUpdate = auto;
+                    settings.AgenciesRelaunchAfterUpdate = relaunch;
+                    SettingsSystem.SaveSettings();
+                }
+
+                GUILayout.BeginHorizontal();
+                if (!string.IsNullOrEmpty(Failure))
+                {
+                    if (GUILayout.Button("Retry"))
+                        AgenciesUpdateClient.Retry(info);
+                }
+                else if (GUILayout.Button("Update on exit"))
+                    AgenciesUpdateClient.StartDownload(info);
+
+                if (GUILayout.Button("Skip this version"))
+                {
+                    settings.AgenciesSkippedBuild = info.Build;
+                    SettingsSystem.SaveSettings();
+                    Display = false;
+                }
+                if (GUILayout.Button("Later"))
+                    Display = false;
+                GUILayout.EndHorizontal();
             }
+            else if (GUILayout.Button("Close"))
+                Display = false;
+
+            GUILayout.Label($"Status: {Status}");
 
             GUILayout.EndVertical();
         }

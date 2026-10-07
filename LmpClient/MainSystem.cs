@@ -1,4 +1,5 @@
-﻿using CommNet;
+﻿using LmpClient.Systems.AgenciesUpdate;
+using CommNet;
 using HarmonyLib;
 using KSP.UI.Screens;
 using LmpClient.Base;
@@ -274,7 +275,7 @@ namespace LmpClient
             }
             else
             {
-                StartCoroutine(UpdateHandler.CheckForUpdates());
+                StartCoroutine(AgenciesUpdateClient.CheckOnBoot(false));
             }
         }
 

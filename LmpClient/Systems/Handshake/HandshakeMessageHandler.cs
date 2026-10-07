@@ -3,8 +3,10 @@ using System.Collections.Concurrent;
 using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpClient.Network;
+using LmpClient.Systems.AgenciesUpdate;
 using LmpClient.Systems.Mod;
 using LmpClient.Systems.TimeSync;
+using LmpCommon.Agency;
 using LmpCommon.Enums;
 using LmpCommon.Message.Data.Handshake;
 using LmpCommon.Message.Interface;
@@ -61,6 +63,12 @@ namespace LmpClient.Systems.Handshake
                         MainSystem.NetworkState = ClientState.Handshaked;
                     }
                     break;
+                case HandshakeReply.AgenciesBuildMismatch:
+                    if (data.ServerAgenciesBuild > AgenciesBuild.Number)
+                        MainSystem.Singleton.StartCoroutine(AgenciesUpdateClient.CheckOnBoot(true));
+                    else
+                        AgenciesUpdateClient.ShowServerReason(data.Reason);
+                    goto default;
                 default:
                     var disconnectReason = $"Handshake failure: {data.Reason}";
                     LunaLog.Log(disconnectReason);

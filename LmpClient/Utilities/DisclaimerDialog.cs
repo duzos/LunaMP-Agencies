@@ -1,4 +1,5 @@
-﻿using LmpClient.Localization;
+﻿using LmpClient.Systems.AgenciesUpdate;
+using LmpClient.Localization;
 using LmpClient.Systems.SettingsSys;
 using UnityEngine;
 
@@ -21,7 +22,7 @@ namespace LmpClient.Utilities
                                     SettingsSystem.CurrentSettings.DisclaimerAccepted = true;
                                     MainSystem.Singleton.Enabled = true;
                                     SettingsSystem.SaveSettings();
-                                    MainSystem.Singleton.StartCoroutine(UpdateHandler.CheckForUpdates());
+                                    MainSystem.Singleton.StartCoroutine(AgenciesUpdateClient.CheckOnBoot(false));
                                 }
                             ),
                             new DialogGUIFlexibleSpace(),

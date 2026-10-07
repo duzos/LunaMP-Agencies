@@ -50,7 +50,11 @@ namespace KspControl.Bridge
             return new JObject { ["name"] = Text(ship.shipName), ["parts"] = parts, ["partsTotal"] = ship.Parts.Count,
                 ["offset"] = offset, ["nextOffset"] = offset + limit < ship.Parts.Count ? (JToken)new JValue(offset + limit) : JValue.CreateNull(),
                 ["editorGeneration"] = editorGeneration, ["generationSemantics"] = "ShipConstruct_object_identity_only_not_edit_revision",
-                ["mutationPreconditionSupported"] = false, ["coordinateFrame"] = "root_part_local_metres",
+                ["mutationPreconditionSupported"] = false, ["coordinateFrame"] = "root_transform_local_units_scale_reported",
+                ["snapshotConsistency"] = "per_call_only_not_frozen_across_pages", ["importSupported"] = false,
+                ["rootLocalScale"] = root == null ? null : Vector(root.transform.localScale),
+                ["rootLossyScale"] = root == null ? null : Vector(root.transform.lossyScale),
+                ["nativeSaveHookBehaviorValidated"] = false,
                 ["rootPartId"] = root?.persistentId.ToString(), ["nativeConfig"] = native,
                 ["nativeConfigProvenance"] = "ShipConstruct.SaveShip_current_editor_full_craft_not_part_prefab",
                 ["provenance"] = "configured_editor_instances_current_observation" };
@@ -70,11 +74,13 @@ namespace KspControl.Bridge
             foreach (var name in (part.variants?.GetVariantNames() ?? new List<string>()).Take(16)) variants.Add(Text(name));
             return new JObject { ["name"] = Text(part.partInfo?.name), ["partId"] = instance ? part.persistentId.ToString() : null,
                 ["attachNodes"] = nodes, ["surfaceAttachNode"] = part.srfAttachNode == null ? null : Node(part.srfAttachNode, instance),
-                ["nodeCoordinateFrame"] = "part_local_metres", ["resources"] = resources, ["variants"] = variants,
+                ["nodeCoordinateFrame"] = "part_local_units_scale_reported", ["resources"] = resources, ["variants"] = variants,
+                ["localScale"] = Vector(part.transform.localScale), ["lossyScale"] = Vector(part.transform.lossyScale),
+                ["geometryVerifiedForConstruction"] = false,
                 ["selectedVariant"] = part.variants == null ? (JToken)JValue.CreateNull() : new JValue(part.variants.GetCurrentVariantIndex()),
                 ["nodeCount"] = part.attachNodes?.Count ?? 0, ["resourceCount"] = part.Resources.Count,
                 ["nodeLimit"] = 32, ["resourceLimit"] = 32, ["variantLimit"] = 16,
-                ["complete"] = (part.attachNodes?.Count ?? 0) <= 32 && part.Resources.Count <= 32 && (part.variants?.variantList?.Count ?? 0) <= 16,
+                ["collectionCoverageComplete"] = (part.attachNodes?.Count ?? 0) <= 32 && part.Resources.Count <= 32 && (part.variants?.variantList?.Count ?? 0) <= 16,
                 ["moduleConfiguration"] = "native_snapshot_required_unknown_modules_preserved_no_field_defaults_inferred" };
         }
         private static JObject Node(AttachNode node, bool instance) => new JObject

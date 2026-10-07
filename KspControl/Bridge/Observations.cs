@@ -30,6 +30,8 @@ namespace KspControl.Bridge
         internal EditorRevisionTracker EditorTracker { get; set; }
         /// <summary>Admission and status for the mutation operations. Null leaves them unavailable.</summary>
         internal EditorOperationService Operations { get; set; }
+        /// <summary>craft.list. Null leaves it unavailable.</summary>
+        internal CraftListService CraftList { get; set; }
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -76,7 +78,17 @@ namespace KspControl.Bridge
                         return failed;
                     }
                     data = editorResult.Data; break;
-                case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.OperationStatus:
+                case CraftOperations.List:
+                    if (CraftList == null) return Fail(request, "operation_unavailable");
+                    var listed = CraftList.List(request.Arguments);
+                    if (listed.Reason != null)
+                    {
+                        var listFailed = Fail(request, listed.Reason);
+                        if (listed.Detail != null) listFailed.Data = new JObject { ["detail"] = listed.Detail };
+                        return listFailed;
+                    }
+                    data = listed.Data; break;
+                case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.SaveCraft: case EditorOperations.OperationStatus:
                     // Mutations answer with their own envelope: not an observation, so no readOnly marker and no size cap.
                     if (Operations == null) return Fail(request, "operation_unavailable");
                     var operation = Operations.Handle(request);
@@ -132,10 +144,10 @@ namespace KspControl.Bridge
         {
             ["bridgeVersion"] = BridgeVersion,
             ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", ConstructionOperations.Catalog, "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect",
-                EditorOperations.OperationStatus),
+                EditorOperations.OperationStatus, CraftOperations.List),
             ["mutations"] = new JArray(Operations == null ? new string[0] : EditorOperations.Mutations),
             ["inline"] = new JArray(ControlOperations.All),
-            ["unavailable"] = new JObject { ["mutations"] = Operations == null ? "operation_layer_not_wired" : "editor_load_craft_editor_save_craft_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
+            ["unavailable"] = new JObject { ["mutations"] = Operations == null ? "operation_layer_not_wired" : "editor_load_craft_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },
             ["maximumPageSize"] = ObservationLimits.MaxPage
         };

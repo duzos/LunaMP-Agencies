@@ -77,6 +77,9 @@ namespace KspControl.Bridge
             new KeyValuePair<string, string>("liquidEngine.v2", "S0a twin, structural load"),
             new KeyValuePair<string, string>("probeCoreOcto.v2", "S0-t2 structural load"),
             new KeyValuePair<string, string>("Decoupler.1", "S0-t2 structural load"),
+            // TODO(P3 crewed flight): parachuteSingle (Mk16) stays UNVERIFIED until a live structural load of a craft carrying it is recorded.
+            // The staging rule is reproduced from stock Orbiter One (EditorModel StagingRules), but a staging oracle is not structural-load evidence.
+            // Add the row, with its evidence reference, only after that load has been observed.
         };
         public static string[] DefaultVerified
         {
@@ -94,8 +97,8 @@ namespace KspControl.Bridge
     /// <summary>Pure mapping from loaded-part primitives to the construction catalog wire shape. No Unity or KSP types.</summary>
     public static class ConstructionCatalogMapper
     {
-        // Category vocabulary is the EditorModel one (PartCategories). nosecone and parachute are not supported there, so they map to "other"; a solid booster is an engine.
-        public const string Command = "command", Tank = "tank", Engine = "engine", Decoupler = "decoupler", Other = "other";
+        // Category vocabulary is the EditorModel one (PartCategories). A nosecone is "other"; a solid booster is an engine; a ModuleParachute part is "parachute".
+        public const string Command = "command", Tank = "tank", Engine = "engine", Decoupler = "decoupler", Parachute = "parachute", Other = "other";
         public const int MaxNodes = 32;
 
         public static string MapCategory(IEnumerable<string> modules, IEnumerable<string> resources)
@@ -105,6 +108,7 @@ namespace KspControl.Bridge
             if (m.Contains("ModuleCommand")) return Command;
             if (m.Contains("ModuleDecouple") || m.Contains("ModuleAnchoredDecoupler")) return Decoupler;
             if (m.Contains("ModuleEngines") || m.Contains("ModuleEnginesFX")) return Engine;
+            if (m.Contains("ModuleParachute")) return Parachute;
             if (!m.Contains("ModuleRCS") && !m.Contains("ModuleRCSFX")
                 && (r.Contains("LiquidFuel") || r.Contains("Oxidizer") || r.Contains("MonoPropellant") || r.Contains("XenonGas"))) return Tank;
             return Other;

@@ -155,6 +155,8 @@ namespace KspControl.BridgeTests
         public int Frames;
         public string KspRoot = Path.Combine(Path.GetTempPath(), "kc-fake-ksp");
         public bool Heartbeats = true;
+        /// <summary>The construction-support policy admission applies; null means the production default.</summary>
+        public ConstructionSupportPolicy Policy;
 
         public OperationRig(bool lease = true, string policy = "snapshot_then_replace", string[] operations = null, string saveFolder = "TestSave")
         {
@@ -167,7 +169,7 @@ namespace KspControl.BridgeTests
             Paths = new Pure.CraftPaths(KspRoot, saveFolder, p => Files.IsReparsePoint(p));
             Runner = new EditorOperationRunner(Port, Tracker, Authority, Context, Files, () => Paths, Jobs, () => Clock.Milliseconds, () => "epoch1", () => Utc,
                 () => "snap" + (++SnapshotCounter).ToString("D6"), Options);
-            Service = new EditorOperationService(Port, Tracker, Authority, Runner, Jobs, () => Reader, () => Paths, Files, () => "epoch1", () => Utc, () => "snap" + (++SnapshotCounter).ToString("D6"));
+            Service = new EditorOperationService(Port, Tracker, Authority, Runner, Jobs, () => Reader, () => Paths, Files, () => "epoch1", () => Utc, () => "snap" + (++SnapshotCounter).ToString("D6"), () => Policy);
             Observation = new EditorObservationService(Port, Tracker, () => "epoch1") { Operations = Service };
             // Adopt the baseline, publish the context, then provision a grant and take the lease the way the loopback worker would.
             Frame(0); Frame(300); Frame(300);
@@ -206,7 +208,7 @@ namespace KspControl.BridgeTests
 
         public string PlanHash(string graph)
         {
-            var plan = ApplyPlanner.Prepare(graph, Reader, Port.Header, Port.ReadUi(), () => 1, "VAB");
+            var plan = ApplyPlanner.Prepare(graph, Reader, Port.Header, Port.ReadUi(), () => 1, "VAB", Policy);
             if (!plan.Ok) throw new InvalidOperationException(plan.Reason + " " + plan.Detail + " " + string.Join(";", plan.Issues.Select(i => i.ToString())));
             return plan.PlanHash;
         }

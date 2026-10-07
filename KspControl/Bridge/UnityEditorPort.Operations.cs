@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using UnityEngine;
+using Pure = KspControl.EditorModel;
 
 namespace KspControl.Bridge
 {
@@ -121,6 +123,83 @@ namespace KspControl.Bridge
                         if (crew[seat] != null) seats.Add(partManifest.PartID.ToString(CultureInfo.InvariantCulture) + "|" + seat.ToString(CultureInfo.InvariantCulture) + "|" + crew[seat].name);
                 }
                 return seats;
+            }
+            catch (Exception) { return null; }
+        }
+
+        // ---- surface placement (plan R1-section 6.5, P2.8): reads of the live craft only ----
+
+        private static Part FindPart(uint craftId)
+        {
+            var ship = Ship;
+            if (ship == null || ship.Parts == null) return null;
+            foreach (var part in ship.Parts) if (part != null && part.craftID == craftId) return part;
+            return null;
+        }
+
+        /// <summary>
+        /// The part's own mesh vertices in its local frame: every MeshRenderer or SkinnedMeshRenderer under the part but not under a child part,
+        /// each vertex taken through the full transform chain.
+        /// </summary>
+        private static List<Pure.Vector> MeshVertices(Part part)
+        {
+            var vertices = new List<Pure.Vector>();
+            foreach (var renderer in part.GetComponentsInChildren<Renderer>(false))
+            {
+                if (renderer == null || !renderer.enabled || renderer.GetComponentInParent<Part>() != part) continue;
+                Mesh mesh;
+                var skinned = renderer as SkinnedMeshRenderer;
+                if (skinned != null) mesh = skinned.sharedMesh;
+                else if (renderer is MeshRenderer)
+                {
+                    var filter = renderer.GetComponent<MeshFilter>();
+                    mesh = filter == null ? null : filter.sharedMesh;
+                }
+                else continue;
+                if (mesh == null || !mesh.isReadable) continue;
+                foreach (var vertex in mesh.vertices)
+                {
+                    var inPart = part.transform.InverseTransformPoint(renderer.transform.TransformPoint(vertex));
+                    vertices.Add(new Pure.Vector(inPart.x, inPart.y, inPart.z));
+                }
+            }
+            return vertices;
+        }
+
+        public double? MeasureSurfaceRadius(uint parentCraftId, double localHeight, double angleDegrees)
+        {
+            try
+            {
+                var part = FindPart(parentCraftId);
+                return part == null ? null : Pure.SurfaceCalibration.SupportAlong(MeshVertices(part), localHeight, angleDegrees);
+            }
+            catch (Exception) { return null; }
+        }
+
+        public Pure.Vector? ReadAttachPoint(uint parentCraftId, uint childCraftId)
+        {
+            try
+            {
+                var parent = FindPart(parentCraftId); var child = FindPart(childCraftId);
+                if (parent == null || child == null || child.srfAttachNode == null) return null;
+                var p = parent.transform.InverseTransformPoint(child.transform.TransformPoint(child.srfAttachNode.position));
+                return new Pure.Vector(p.x, p.y, p.z);
+            }
+            catch (Exception) { return null; }
+        }
+
+        public Pure.SurfaceNodeDefinition ReadSurfaceNode(uint craftId)
+        {
+            try
+            {
+                var part = FindPart(craftId);
+                var node = part == null ? null : part.srfAttachNode;
+                if (node == null) return null;
+                return new Pure.SurfaceNodeDefinition
+                {
+                    Position = new Pure.Vector(node.position.x, node.position.y, node.position.z),
+                    Orientation = new Pure.Vector(node.orientation.x, node.orientation.y, node.orientation.z)
+                };
             }
             catch (Exception) { return null; }
         }

@@ -8,7 +8,8 @@ namespace KspControl.EditorModel
     /// Classifies the placed layout into the topologies the staging rules cover.
     /// T1: command, tank(s), engine in one stack chain. T2: a stack chain whose sections are separated by stack decouplers.
     /// T3: a T1 core with a radially symmetric group (pair, quad, ...) of radial decoupler -> booster (-> optional nose cone) on a core tank.
-    /// Everything else (parachutes, fins, fairings, struts, other staged parts, radial parts on a T2 core) is Unsupported.
+    /// Each shape may also carry one parachute (Mk16 parachuteSingle) on the command pod's top node; it is the last stage group (number 0).
+    /// Everything else (other parachute placements, fins, fairings, struts, other staged parts, radial parts on a T2 core) is Unsupported.
     /// </summary>
     public static class TopologyClassifier
     {
@@ -17,7 +18,10 @@ namespace KspControl.EditorModel
             reason = null;
             if (layout == null || layout.Parts.Count == 0) { reason = "empty layout"; return TopologyKind.Unsupported; }
             if (layout.Parts[0].Definition.Category != PartCategories.Command) { reason = "root is not a command part"; return TopologyKind.Unsupported; }
-            var core = layout.Parts.Where(p => !InSurfaceSubtree(layout, p)).ToList();
+            var chute = StagingMath.Chute(layout);
+            if (layout.Parts.Count(p => p.Definition.Category == PartCategories.Parachute) > 1) { reason = "more than one parachute"; return TopologyKind.Unsupported; }
+            if (chute != null && !ChuteOnTopNode(layout, chute)) { reason = "a parachute is supported only on the command pod's top node"; return TopologyKind.Unsupported; }
+            var core = layout.Parts.Where(p => p != chute && !InSurfaceSubtree(layout, p)).ToList();
             var surface = layout.Parts.Where(p => InSurfaceSubtree(layout, p)).ToList();
             if (!IsChain(core)) { reason = "core is not a single stack chain"; return TopologyKind.Unsupported; }
             var cats = core.Select(p => p.Definition.Category).ToList();
@@ -30,6 +34,14 @@ namespace KspControl.EditorModel
             if (!RadialGroup(layout, surface, out reason)) return TopologyKind.Unsupported;
             return TopologyKind.T3;
         }
+        /// <summary>The parachute is a stack child of the root command part, on a node that points up, and has nothing attached.</summary>
+        private static bool ChuteOnTopNode(StructuralLayout layout, LayoutPart chute)
+        {
+            if (chute.Kind != AttachKind.Stack || chute.ParentIndex != 0 || Children(layout, chute.Index).Count != 0) return false;
+            var node = layout.Parts[0].Definition.FindNode(chute.ParentNodeId);
+            return node != null && node.Orientation.Y > 0.5;
+        }
+
         /// <summary>
         /// Parses the core category sequence. Returns the number of decouplers (0 for a T1 chain: command, tank+, engine).
         /// With decouplers: the command section is tank* then an optional engine, and every later section is tank* then exactly one engine.
@@ -129,7 +141,7 @@ namespace KspControl.EditorModel
     /// Shared field derivation. Evidence: T1 hand twin S0a-manual, stock Orbiter One (stack decouplers) and GDLV3 (4 radial decoupler+booster),
     /// both staged in the KSP editor. Rules:
     ///  * Stage groups are numbered so the last group to fire is 0 and the first is the highest. A group's number is its istg.
-    ///  * istg: a stageable part (engine, decoupler) takes its group number; any other part takes its parent's istg (the root is -1).
+    ///  * istg: a stageable part (engine, decoupler, parachute) takes its group number; any other part takes its parent's istg (the root is -1).
     ///  * dstg = parent.dstg + (child is decoupler ? 1 : 0) + (parent is decoupler ? 1 : 0), root 0.
     ///  * sepI: a decoupler's sepI is its own istg; every other part takes its parent's sepI (-1 above any decoupler).
     ///  * sidx: index of a stageable part inside its group (counterparts of a symmetric part share one index); -1 otherwise.
@@ -140,7 +152,18 @@ namespace KspControl.EditorModel
     internal static class StagingMath
     {
         public sealed class Group { public List<List<LayoutPart>> Slots = new List<List<LayoutPart>>(); }
-        public static bool IsStageable(LayoutPart p) { var c = p.Definition.Category; return c == PartCategories.Engine || c == PartCategories.Decoupler; }
+        public static bool IsStageable(LayoutPart p) { var c = p.Definition.Category; return c == PartCategories.Engine || c == PartCategories.Decoupler || c == PartCategories.Parachute; }
+        /// <summary>The parachute part, or null. The classifier guarantees at most one, on the command pod's top node.</summary>
+        public static LayoutPart Chute(StructuralLayout layout) { return layout.Parts.FirstOrDefault(p => p.Definition.Category == PartCategories.Parachute); }
+        /// <summary>
+        /// Adds the parachute as the last group to fire. Evidence: stock Orbiter One, staged in the KSP editor: parachuteSingle istg=0 dstg=0 sidx=0
+        /// sqor=0 sepI=-1 attm=0, every other group numbered one higher than it would be without the parachute.
+        /// </summary>
+        public static void AppendChute(StructuralLayout layout, List<List<List<LayoutPart>>> groups)
+        {
+            var chute = Chute(layout);
+            if (chute != null) groups.Add(new List<List<LayoutPart>> { new List<LayoutPart> { chute } });
+        }
         public static bool IsDecoupler(LayoutPart p) { return p.Definition.Category == PartCategories.Decoupler; }
         /// <param name="groups">Firing order, first to fire first; within a group, parts in sidx order (a list per sidx).</param>
         public static bool Build(StructuralLayout layout, List<List<List<LayoutPart>>> groups, out List<StagingFields> fields, out string reason)
@@ -194,6 +217,7 @@ namespace KspControl.EditorModel
                 if (sectionEngine[s] != null) groups.Add(new List<List<LayoutPart>> { new List<LayoutPart> { sectionEngine[s] } });
                 if (s >= 1) groups.Add(new List<List<LayoutPart>> { new List<LayoutPart> { decouplers[s - 1] } });
             }
+            StagingMath.AppendChute(layout, groups);
             return StagingMath.Build(layout, groups, out fields, out reason);
         }
     }
@@ -212,6 +236,7 @@ namespace KspControl.EditorModel
                 new List<List<LayoutPart>> { boosters, new List<LayoutPart> { engine } },
                 new List<List<LayoutPart>> { radials },
             };
+            StagingMath.AppendChute(layout, groups);
             return StagingMath.Build(layout, groups, out fields, out reason);
         }
         private static bool HasSurfaceAncestor(StructuralLayout layout, LayoutPart p)

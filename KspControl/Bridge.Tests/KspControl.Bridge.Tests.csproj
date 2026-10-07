@@ -35,6 +35,7 @@
     <Compile Include="../EditorModel/PlanHasher.cs" Link="EditorModel/PlanHasher.cs" />
     <Compile Include="../EditorModel/StackGeometryValidator.cs" Link="EditorModel/StackGeometryValidator.cs" />
     <Compile Include="../EditorModel/StagingRules.cs" Link="EditorModel/StagingRules.cs" />
+    <Compile Include="../EditorModel/SurfaceCalibration.cs" Link="EditorModel/SurfaceCalibration.cs" />
     <Compile Include="../EditorModel/StructuralCraft.cs" Link="EditorModel/StructuralCraft.cs" />
     <Compile Include="../EditorModel/StructuralCraftValidator.cs" Link="EditorModel/StructuralCraftValidator.cs" />
     <Compile Include="../Bridge/ConstructionCatalogMapper.cs" Link="ConstructionCatalogMapper.cs" />

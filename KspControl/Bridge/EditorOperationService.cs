@@ -34,10 +34,13 @@ namespace KspControl.Bridge
         private readonly Func<string> worldEpoch;
         private readonly Func<DateTime> utcNow;
         private readonly Func<string> newSnapshotId;
+        private readonly Func<ConstructionSupportPolicy> policyFactory;
 
         public EditorOperationService(IEditorPort port, EditorRevisionTracker tracker, ExecutionAuthority authority, EditorOperationRunner runner, OperationJobs jobs,
-            Func<ICatalogPartReader> readerFactory, Func<Pure.CraftPaths> pathsFactory, IOperationFiles files, Func<string> worldEpoch, Func<DateTime> utcNow = null, Func<string> newSnapshotId = null)
+            Func<ICatalogPartReader> readerFactory, Func<Pure.CraftPaths> pathsFactory, IOperationFiles files, Func<string> worldEpoch, Func<DateTime> utcNow = null, Func<string> newSnapshotId = null,
+            Func<ConstructionSupportPolicy> policyFactory = null)
         {
+            this.policyFactory = policyFactory;
             this.port = port; this.tracker = tracker; this.authority = authority; this.runner = runner; this.jobs = jobs;
             this.readerFactory = readerFactory; this.pathsFactory = pathsFactory; this.files = files; this.worldEpoch = worldEpoch;
             this.utcNow = utcNow ?? (() => DateTime.UtcNow); this.newSnapshotId = newSnapshotId;
@@ -90,7 +93,7 @@ namespace KspControl.Bridge
                 return Refuse(request, OperationReasons.NameCollisionUnguarded, "a ship file with this name exists and the save-name guard is unavailable");
 
             var header = tracker.Guarded(() => port.ReadHeader());
-            var plan = ApplyPlanner.Prepare(graph, readerFactory(), header, port.ReadUi(), () => port.NextPersistentId(), port.Facility);
+            var plan = ApplyPlanner.Prepare(graph, readerFactory(), header, port.ReadUi(), () => port.NextPersistentId(), port.Facility, policyFactory == null ? null : policyFactory());
             if (!plan.Ok)
             {
                 var data = new JObject { ["issues"] = ApplyPlanner.IssuesJson(plan.Issues) };

@@ -20,7 +20,9 @@ namespace KspControl.Bridge
         RestoreStaging, RestoreDispatch, RestoreSettle, RestoreVerify,
         GraceStart, Grace, Thumbnails, Finalize, Done,
         /// <summary>The single synchronous step of editor_save_craft: capture, write, verify, record, sync the save-name fields.</summary>
-        SaveWrite
+        SaveWrite,
+        /// <summary>P2.8: between the two loads of a surface placement, locks held: measure the live parents, re-plan, rewrite the staging file.</summary>
+        SurfaceMeasure
     }
 
     internal sealed class DeclaredOutput
@@ -103,6 +105,10 @@ namespace KspControl.Bridge
         internal bool ThumbObserved;
         internal long ThumbObservedAt;
         internal bool KeepStaging;
+        /// <summary>P2.8 surface placement: 0 none, 1 loaded with the provisional radius (measure next), 2 recalibrated and reloaded.</summary>
+        internal int SurfacePass;
+        /// <summary>The surface placements of the plan the editor currently holds (pass 2 once recalibrated); the clearance gate measures these.</summary>
+        internal List<Pure.SurfaceSite> SurfaceSites;
         /// <summary>Which undo steps Finalize owes: the authority operation mark, the tracker window and the editor lock.</summary>
         internal bool AuthorityOperation, TrackerOperation, LockSet;
 
@@ -123,6 +129,7 @@ namespace KspControl.Bridge
                 case OperationPhase.GraceStart: case OperationPhase.Grace: return "post_unlock_grace";
                 case OperationPhase.Thumbnails: return "thumbnail_settle";
                 case OperationPhase.SaveWrite: return "save";
+                case OperationPhase.SurfaceMeasure: return "surface_measure";
                 case OperationPhase.Finalize: return "finalizing";
                 default: return "done";
             }

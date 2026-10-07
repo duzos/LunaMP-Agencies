@@ -12,6 +12,8 @@ namespace KspControl.EditorModel
         public const string Tank = "tank";
         public const string Engine = "engine";
         public const string Decoupler = "decoupler";
+        /// <summary>ModuleParachute. Supported only as the single parachute on the command pod's top node (stage group 0).</summary>
+        public const string Parachute = "parachute";
         public const string Other = "other";
     }
     public sealed class ConstructionNode

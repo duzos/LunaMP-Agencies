@@ -18,7 +18,13 @@ namespace KspControl.EditorModel
         public bool VectorLessAttN { get; set; }
         /// <summary>Provisional surface radius in metres. Bridge-side calibration replaces it later (R1-section 6.5).</summary>
         public double SurfaceRadius { get; set; } = 0.625;
+        /// <summary>
+        /// Per-site surface support, in metres, from the live parent (P2.8 pass 2): parent craft id, attach height and outward angle (degrees) to the distance of the parent surface along that direction, or null for "use
+        /// <see cref="SurfaceRadius"/>". Null provider means the provisional radius everywhere.
+        /// </summary>
+        public Func<uint, double, double, double?> SurfaceRadiusProvider { get; set; }
         public double RootHeight { get; set; } = 15;
+        public PlannerOptions Clone() { return (PlannerOptions)MemberwiseClone(); }
     }
     public enum AttachKind { Root, Stack, Surface }
     /// <summary>One placed part instance (a symmetric graph part yields several).</summary>
@@ -38,6 +44,10 @@ namespace KspControl.EditorModel
         public Vector AttPos0 { get; set; }
         public Rotation AttRot0 { get; set; } = RotationMath.Identity;
         public uint Cid { get; set; }
+        /// <summary>Surface parts only: the parent surface radius, in metres, this instance was placed at.</summary>
+        public double SurfaceRadius { get; set; }
+        /// <summary>Surface parts only: the outward direction angle in degrees (0 = +Z, 90 = +X) in the parent's frame, normalised to [0,360).</summary>
+        public double SurfaceAngleDegrees { get; set; }
     }
     public sealed class StructuralLayout
     {
@@ -198,7 +208,9 @@ namespace KspControl.EditorModel
                 var alpha = dto.Surface.AngleDegrees + (dto.Symmetry.HasValue ? 360.0 * k / count : 0.0);
                 var a = alpha * Math.PI / 180.0;
                 var outward = new Vector(Math.Sin(a), 0, Math.Cos(a));
-                var local = new Vector(options.SurfaceRadius * outward.X, dto.Surface.HeightOffset, options.SurfaceRadius * outward.Z);
+                var radius = (options.SurfaceRadiusProvider == null ? null : options.SurfaceRadiusProvider(parent.Cid, dto.Surface.HeightOffset, SurfaceCalibration.NormaliseAngle(alpha))) ?? options.SurfaceRadius;
+                part.SurfaceRadius = radius; part.SurfaceAngleDegrees = SurfaceCalibration.NormaliseAngle(alpha);
+                var local = new Vector(radius * outward.X, dto.Surface.HeightOffset, radius * outward.Z);
                 var worldOutward = RotationMath.Rotate(outward, parent.Rotation);
                 var srf = part.Definition.SurfaceNode;
                 rot = RotationMath.FromTo(srf.Orientation, RotationMath.Neg(worldOutward), RotationMath.Rotate(new Vector(0, 1, 0), parent.Rotation));

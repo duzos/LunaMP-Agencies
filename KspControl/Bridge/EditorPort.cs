@@ -183,6 +183,19 @@ namespace KspControl.Bridge
         bool TrySetBackup();
         /// <summary>Crew seats as "craftId|seat|name", or null when the manifest cannot be read. Best effort.</summary>
         IReadOnlyList<string> ReadCrew();
+
+        // ---- surface placement (plan R1-section 6.5, P2.8). Main thread only; both read the live editor craft and change nothing. ----
+
+        /// <summary>
+        /// The live surface support, in metres, of the part with craft id <paramref name="parentCraftId"/> along the outward direction
+        /// <paramref name="angleDegrees"/> (0 = +Z, 90 = +X, in the part's frame) at <paramref name="localHeight"/>, from the vertices of its own meshes
+        /// (never prefab bounds). Null when the part is absent or has no mesh vertices.
+        /// </summary>
+        double? MeasureSurfaceRadius(uint parentCraftId, double localHeight, double angleDegrees);
+        /// <summary>The child's live attach point (its srfAttachNode position) expressed in the parent's frame, or null when either part is absent.</summary>
+        Pure.Vector? ReadAttachPoint(uint parentCraftId, uint childCraftId);
+        /// <summary>The live srfAttachNode (part-local position and orientation) of the part with craft id <paramref name="craftId"/>, or null.</summary>
+        Pure.SurfaceNodeDefinition ReadSurfaceNode(uint craftId);
     }
 
     /// <summary>The facts of a live native-save header that the renderer copies.</summary>

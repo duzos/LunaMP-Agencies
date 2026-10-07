@@ -261,7 +261,7 @@ public static class CatalogWire
 
  private static string Category(string? c) => c switch
  {
-  PartCategories.Command or PartCategories.Tank or PartCategories.Engine or PartCategories.Decoupler => c,
+  PartCategories.Command or PartCategories.Tank or PartCategories.Engine or PartCategories.Decoupler or PartCategories.Parachute => c,
   _ => PartCategories.Other
  };
 

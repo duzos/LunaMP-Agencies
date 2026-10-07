@@ -20,6 +20,8 @@ namespace LmpAgenciesUpdater
         public string Message;
         public int Build;
         public int PreviousBuild;
+        /// <summary>True when the game or server was still running when the wait timed out.</summary>
+        public bool TimedOut;
     }
 
     public static class UpdateInstaller
@@ -49,9 +51,15 @@ namespace LmpAgenciesUpdater
         private static readonly Regex LeadingDigits = new Regex("^\\s*v?(\\d+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         /// <summary>A failure whose message is shown to the user as it is.</summary>
-        private sealed class InstallException : Exception
+        private class InstallException : Exception
         {
             public InstallException(string message) : base(message) { }
+        }
+
+        /// <summary>The game or server was still running when the wait ran out.</summary>
+        private sealed class TimedOutException : InstallException
+        {
+            public TimedOutException(string message) : base(message) { }
         }
 
         private sealed class State
@@ -154,6 +162,12 @@ namespace LmpAgenciesUpdater
                 var message = Install(o, waitForExit, faultInjector, state);
                 return new InstallResult { Success = true, Build = o.Build, PreviousBuild = state.Previous, Message = message };
             }
+            catch (TimedOutException e)
+            {
+                var timedOut = Failed(o, state, e.Message);
+                timedOut.TimedOut = true;
+                return timedOut;
+            }
             catch (InstallException e)
             {
                 return Failed(o, state, e.Message);
@@ -180,7 +194,7 @@ namespace LmpAgenciesUpdater
             // 1. wait for the game or server to release its files
             var exited = waitForExit(o.Pid, o.WaitTimeoutSeconds == 0 ? (TimeSpan?)null : TimeSpan.FromSeconds(o.WaitTimeoutSeconds));
             state.Previous = InstalledBuild(o);
-            if (!exited) throw new InstallException("Timed out waiting for exit.");
+            if (!exited) throw new TimedOutException("Timed out waiting for exit.");
 
             // 2. never install over the same or a newer build
             if (o.Build <= state.Previous)

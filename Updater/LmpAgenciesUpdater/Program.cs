@@ -12,6 +12,19 @@ namespace LmpAgenciesUpdater
     {
         private static int Main(string[] args)
         {
+            try
+            {
+                return Run(args);
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("LmpAgenciesUpdater: " + e.Message);
+                return 1;
+            }
+        }
+
+        private static int Run(string[] args)
+        {
             HelperOptions options;
             try
             {
@@ -23,25 +36,38 @@ namespace LmpAgenciesUpdater
                 return 1;
             }
 
-            Mutex mutex;
-            if (!UpdateInstaller.TryAcquire(options.Target, out mutex)) return 2;
-
             InstallResult result;
             try
             {
-                result = UpdateInstaller.Run(options, WaitForExit);
+                Mutex mutex;
+                if (!UpdateInstaller.TryAcquire(options.Target, out mutex)) return 2;
+
+                try
+                {
+                    result = UpdateInstaller.Run(options, WaitForExit);
+                }
+                finally
+                {
+                    // released before the relaunch: a restarted server may start its own updater straight away
+                    try { mutex.ReleaseMutex(); } catch (Exception) { /* nothing more to do */ }
+                    mutex.Dispose();
+                }
             }
-            finally
+            catch (Exception e)
             {
-                // released before the relaunch: a restarted server may start its own updater straight away
-                mutex.ReleaseMutex();
-                mutex.Dispose();
+                result = new InstallResult { Success = false, Build = options.Build, Message = "Update failed: " + e.Message };
+                if (!string.IsNullOrEmpty(options.Result))
+                {
+                    try { HelperCommandLine.WriteResult(options.Result, false, options.Build, 0, result.Message); }
+                    catch (Exception) { /* the outcome is still logged below */ }
+                }
             }
 
             Console.WriteLine(result.Message);
 
             // A server must come back whatever happened (it is unattended); a client only relaunches after an install.
-            if (!string.IsNullOrEmpty(options.Relaunch) && (result.Success || options.Mode == HelperMode.Server))
+            // Never after a wait timeout: the old process is still running and a second copy would fight it.
+            if (!string.IsNullOrEmpty(options.Relaunch) && !result.TimedOut && (result.Success || options.Mode == HelperMode.Server))
                 Relaunch(options);
 
             return result.Success ? 0 : 1;

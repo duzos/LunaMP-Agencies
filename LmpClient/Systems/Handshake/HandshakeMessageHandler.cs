@@ -64,10 +64,8 @@ namespace LmpClient.Systems.Handshake
                     }
                     break;
                 case HandshakeReply.AgenciesBuildMismatch:
-                    if (data.ServerAgenciesBuild > AgenciesBuild.Number)
-                        MainSystem.Singleton.StartCoroutine(AgenciesUpdateClient.CheckOnBoot(true));
-                    else
-                        AgenciesUpdateClient.ShowServerReason(data.Reason);
+                    // This runs on a network worker thread: only enqueue, the main thread does the Unity work.
+                    AgenciesUpdateClient.QueueServerMismatch(data.ServerAgenciesBuild, data.Reason);
                     goto default;
                 default:
                     var disconnectReason = $"Handshake failure: {data.Reason}";

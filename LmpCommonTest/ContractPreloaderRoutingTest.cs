@@ -4,7 +4,7 @@ using LmpClient.Harmony;
 using LmpCommon.Enums;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-public static class LunaLog { public static void Log(string message) { } public static void LogWarning(string message) { } }
+public static class LunaLog { public static void Log(string message) { } public static void LogWarning(string message) { } public static void LogError(string message) { } }
 namespace Contracts
 {
     public class ContractSystem

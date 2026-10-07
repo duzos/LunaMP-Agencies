@@ -331,6 +331,7 @@ namespace ServerTest.Updater
             var result = UpdateInstaller.Run(o, (pid, timeout) => false);
 
             AssertRejected(o, result, "Timed out waiting for exit.");
+            Assert.IsTrue(result.TimedOut, "a wait timeout is flagged so the helper does not relaunch");
             AssertSame(before, Snapshot(_gameData), "the install");
         }
 

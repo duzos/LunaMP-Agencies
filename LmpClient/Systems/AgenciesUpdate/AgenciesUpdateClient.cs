@@ -70,6 +70,10 @@ namespace LmpClient.Systems.AgenciesUpdate
                 settings.AgenciesAutoUpdate, last, settings.AgenciesFailedBuild, forced);
             LunaLog.Log($"[LMP]: Agencies latest build {info.Build}, current {AgenciesBuild.Number}, action {action}");
 
+            // set before the switch so the AutoDownload status ("will install when KSP closes") is not overwritten
+            if (last != null)
+                UpdateWindow.Status = ResultText(last);
+
             switch (action)
             {
                 case AgenciesUpdateAction.Prompt:
@@ -87,11 +91,29 @@ namespace LmpClient.Systems.AgenciesUpdate
                     break;
             }
 
-            if (last != null)
-                UpdateWindow.Status = ResultText(last);
             if (last != null && action == AgenciesUpdateAction.None)
                 UpdateWindow.ShowStatusOnly(ResultText(last));
         }
+
+        private static readonly MainThreadQueue Pending = new MainThreadQueue();
+
+        /// <summary>
+        /// Safe from any thread (the handshake handler runs on a network worker). Only enqueues; <see cref="DrainQueued"/>
+        /// does the Unity work on the main thread.
+        /// </summary>
+        public static void QueueServerMismatch(int serverBuild, string reason)
+        {
+            Pending.Enqueue(() =>
+            {
+                if (serverBuild > AgenciesBuild.Number)
+                    MainSystem.Singleton.StartCoroutine(CheckOnBoot(true));
+                else
+                    ShowServerReason(reason);
+            });
+        }
+
+        /// <summary>Runs the queued work. Call from the Unity main thread (MainSystem.Update).</summary>
+        public static void DrainQueued() => Pending.Drain();
 
         /// <summary>Called on the main thread when the server says its agencies build differs from ours.</summary>
         public static void ShowServerReason(string reason)
@@ -124,11 +146,20 @@ namespace LmpClient.Systems.AgenciesUpdate
             _busy = true;
             UpdateWindow.Status = $"Downloading agencies.{info.Build}...";
 
+            string stagingDir = null, zipPath = null;
             try
             {
-                var stagingDir = AgenciesUpdatePaths.StagingDir(Root, info.Build);
-                var zipPath = Path.Combine(stagingDir, info.ClientZipName);
-                Directory.CreateDirectory(stagingDir);
+                try
+                {
+                    stagingDir = AgenciesUpdatePaths.StagingDir(Root, info.Build);
+                    zipPath = Path.Combine(stagingDir, info.ClientZipName);
+                    Directory.CreateDirectory(stagingDir);
+                }
+                catch (Exception e)
+                {
+                    Fail("Update failed: " + e.Message);
+                    yield break;
+                }
 
                 string sums;
                 using (var www = NewGet(info.SumsUrl))
@@ -155,6 +186,29 @@ namespace LmpClient.Systems.AgenciesUpdate
                     }
                 }
 
+                // a yield cannot sit inside a try with a catch, so everything after the download is one helper
+                var error = VerifyAndStartHelper(info, stagingDir, zipPath, sums);
+                if (error != null)
+                {
+                    Fail(error);
+                    yield break;
+                }
+
+                _staged = info.Build;
+                UpdateWindow.Status = $"agencies.{info.Build} will install when KSP closes.";
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+
+        /// <summary>Verifies the zip, extracts the helper and starts it. Returns an error message, or null on success.</summary>
+        private static string VerifyAndStartHelper(AgenciesReleaseInfo info, string stagingDir, string zipPath, string sums)
+        {
+            var helperExe = Path.Combine(stagingDir, "LmpAgenciesUpdater.exe");
+            try
+            {
                 var expected = AgenciesRelease.ExpectedSha256(info, info.ClientZipName, sums);
                 string actual;
                 using (var fs = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -163,15 +217,13 @@ namespace LmpClient.Systems.AgenciesUpdate
                 if (expected == null || !string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
                 {
                     TryDelete(zipPath);
-                    Fail("Update download failed verification.");
-                    yield break;
+                    return "Update download failed verification.";
                 }
 
-                var helperExe = Path.Combine(stagingDir, "LmpAgenciesUpdater.exe");
                 if (!ExtractHelper(zipPath, helperExe))
                 {
-                    Fail("Invalid update package.");
-                    yield break;
+                    TryDelete(helperExe);
+                    return "Invalid update package.";
                 }
 
                 var current = Process.GetCurrentProcess();
@@ -198,13 +250,13 @@ namespace LmpClient.Systems.AgenciesUpdate
                     UseShellExecute = false,
                     CreateNoWindow = true
                 });
-
-                _staged = info.Build;
-                UpdateWindow.Status = $"agencies.{info.Build} will install when KSP closes.";
+                return null;
             }
-            finally
+            catch (Exception e)
             {
-                _busy = false;
+                TryDelete(zipPath);
+                TryDelete(helperExe);
+                return "Update failed: " + e.Message;
             }
         }
 

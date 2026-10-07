@@ -160,6 +160,7 @@ namespace LmpClient
                     SetupBlankGameIfNeeded();
                 }
 
+                AgenciesUpdateClient.DrainQueued();
                 HandleWindowEvents();
                 SystemsHandler.Update();
                 WindowsHandler.Update();

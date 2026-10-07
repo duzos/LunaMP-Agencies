@@ -75,9 +75,15 @@ namespace Server.Agency
             }
         }
 
-        private static bool IsFetchable(string url) =>
-            string.Equals(url, AgenciesBuild.LatestReleaseApi, StringComparison.Ordinal) ||
-            url.StartsWith(AgenciesBuild.DownloadPrefix, StringComparison.Ordinal);
+        internal static bool IsFetchable(string url)
+        {
+            if (string.Equals(url, AgenciesBuild.LatestReleaseApi, StringComparison.Ordinal)) return true;
+            if (!url.StartsWith(AgenciesBuild.DownloadPrefix, StringComparison.Ordinal)) return false;
+
+            // nothing that could climb out of the release path or smuggle in a query, fragment, escape or backslash
+            var rest = url.Substring(AgenciesBuild.DownloadPrefix.Length);
+            return rest.IndexOf("..", StringComparison.Ordinal) < 0 && rest.IndexOfAny(new[] { '?', '#', '%', '\\' }) < 0;
+        }
 
         /// <summary>
         /// The latest stable fork release, or null when the latest release is not a valid agencies release (see

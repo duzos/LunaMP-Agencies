@@ -54,6 +54,26 @@ namespace ServerTest.Agency
             try { Directory.Delete(_binaries, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
 
+        [DataTestMethod]
+        [DataRow("v1/agencies.1.zip", true)]
+        [DataRow("v1/../../evil/x.zip", false)]
+        [DataRow("v1/a..b.zip", false)]
+        [DataRow("v1/x.zip?token=1", false)]
+        [DataRow("v1/x.zip#frag", false)]
+        [DataRow("v1/%2e%2e/x.zip", false)]
+        [DataRow("v1\\x.zip", false)]
+        public void IsFetchable_RejectsTraversalAndEscapes(string rest, bool expected)
+        {
+            Assert.AreEqual(expected, AgenciesServerUpdater.IsFetchable(AgenciesBuild.DownloadPrefix + rest));
+        }
+
+        [TestMethod]
+        public void IsFetchable_AllowsLatestApi_RejectsOtherHosts()
+        {
+            Assert.IsTrue(AgenciesServerUpdater.IsFetchable(AgenciesBuild.LatestReleaseApi));
+            Assert.IsFalse(AgenciesServerUpdater.IsFetchable("https://example.com/x.zip"));
+        }
+
         // ---- Fake release host ----
 
         private sealed class Fake

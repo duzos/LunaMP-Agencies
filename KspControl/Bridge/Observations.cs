@@ -44,12 +44,18 @@ namespace KspControl.Bridge
             if (!string.IsNullOrEmpty(request.ExpectedWorldEpoch) && request.ExpectedWorldEpoch != epoch)
                 return Fail(request, "stale_world");
             JObject data;
+            try {
             switch (request.Operation)
             {
                 case "bridge.capabilities": data = Capabilities(); break;
                 case "game.context": data = Context(); break;
                 case "parts.list": data = Catalog(request.Arguments); break;
-                case "parts.definition": data = PartDefinition(request.Arguments); break;
+                case "parts.definition":
+                    var partName = ArgString(request.Arguments, "partName");
+                    if (string.IsNullOrWhiteSpace(partName) || partName.Length > ObservationLimits.MaxPartName) return Fail(request, "invalid_part_name");
+                    var definition = PartLoader.LoadedPartsList?.FirstOrDefault(p => p != null && p.name == partName);
+                    if (definition?.partPrefab == null) return Fail(request, "definition_unavailable");
+                    data = PartDefinition(definition, request.Arguments); break;
                 case "editor.snapshot":
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) return Fail(request, "editor_unavailable");
                     data = EditorSnapshot(EditorLogic.fetch.ship, request.Arguments); break;
@@ -73,12 +79,14 @@ namespace KspControl.Bridge
                 case "part.controls": case "science.inspect":
                     var parts = AccessibleParts();
                     if (parts == null) return Fail(request, "craft_unavailable");
-                    var requested = (string)request.Arguments?["partId"];
+                    var requested = ArgString(request.Arguments, "partId");
                     var selected = parts.FirstOrDefault(p => p != null && p.persistentId.ToString() == requested);
                     if (selected == null) return Fail(request, "part_unavailable");
                     data = request.Operation == "part.controls" ? Controls(selected, request.Arguments) : Science(selected); break;
                 default: return Fail(request, "operation_unavailable");
             }
+            }
+            catch (InvalidArgumentException) { return Fail(request, "invalid_argument"); }
             data["observedAtUtc"] = DateTime.UtcNow.ToString("O");
             data["readOnly"] = true;
             if (Encoding.UTF8.GetByteCount(data.ToString(Newtonsoft.Json.Formatting.None)) > 524288)
@@ -99,22 +107,23 @@ namespace KspControl.Bridge
             ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", "parts.definition", "editor.snapshot", "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
             ["unavailable"] = new JObject { ["mutations"] = "authority_and_job_execution_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },
-            ["maximumPageSize"] = 50
+            ["maximumPageSize"] = ObservationLimits.MaxPage
         };
         private static JObject Catalog(JObject args)
         {
-            var query = Text((string)args?["query"] ?? "");
-            var offset = Offset(args); var limit = Limit(args);
-            var source = (PartLoader.LoadedPartsList ?? new List<AvailablePart>()).Where(p => p != null &&
+            var query = Text(ArgString(args, "query") ?? "");
+            var offset = Offset(args); var limit = Limit(args); var all = ArgBool(args, "includeNonBuildable");
+            var source = (PartLoader.LoadedPartsList ?? new List<AvailablePart>()).Where(p => p != null && (all || Buildable(p)) &&
                 (query.Length == 0 || (p.name ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 || (p.title ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0));
             var page = source.Skip(offset).Take(limit + 1).ToArray();
             var items = new JArray();
             foreach (var part in page.Take(limit)) items.Add(new JObject { ["name"] = Text(part.name), ["title"] = Text(part.title),
-                ["costFunds"] = Finite(part.cost), ["techRequired"] = Text(part.TechRequired),
+                ["category"] = part.category.ToString(), ["buildable"] = Buildable(part), ["costFunds"] = Finite(part.cost), ["techRequired"] = Text(part.TechRequired),
                 ["unlocked"] = ResearchAndDevelopment.Instance == null ? (JToken)JValue.CreateNull() : new JValue(ResearchAndDevelopment.PartTechAvailable(part)),
                 ["massTonnes"] = part.partPrefab == null ? null : Finite(part.partPrefab.mass) });
             return new JObject { ["parts"] = items, ["offset"] = offset, ["nextOffset"] = page.Length > limit ? (JToken)new JValue(offset + limit) : JValue.CreateNull() };
         }
+        private static bool Buildable(AvailablePart part) => PartFilters.IsBuildable(part.category == PartCategories.none, part.TechRequired, part.TechHidden);
         private List<Part> AccessibleParts()
         {
             if (HighLogic.LoadedSceneIsEditor) return EditorLogic.fetch?.ship?.Parts;
@@ -146,7 +155,7 @@ namespace KspControl.Bridge
         private static JObject Controls(Part part, JObject args)
         {
             var modules = new JArray();
-            var offset = Offset(args); var end = Math.Min(part.Modules.Count, offset + 4);
+            var offset = Offset(args); var end = Math.Min(part.Modules.Count, offset + ObservationLimits.PartControlsPage);
             for (var i = offset; i < end; i++)
             {
                 var module = part.Modules[i]; var events = new JArray(); var fields = new JArray(); var actions = new JArray();
@@ -188,8 +197,33 @@ namespace KspControl.Bridge
             }
             return new JObject { ["partId"] = part.persistentId.ToString(), ["experiments"] = experiments, ["coverage"] = "stock_ModuleScienceExperiment_and_subclasses" };
         }
-        private static int Offset(JObject args) => Math.Max(0, Math.Min(100000, (int?)args?["offset"] ?? 0));
-        private static int Limit(JObject args) => Math.Max(1, Math.Min(50, (int?)args?["limit"] ?? 20));
+        private sealed class InvalidArgumentException : Exception { }
+        private static JToken Arg(JObject args, string name) => args == null ? null : args[name];
+        private static int ArgInt(JObject args, string name, int fallback)
+        {
+            var token = Arg(args, name);
+            if (token == null || token.Type == JTokenType.Null) return fallback;
+            if (token.Type != JTokenType.Integer) throw new InvalidArgumentException();
+            var value = (long)token;
+            if (value < int.MinValue || value > int.MaxValue) throw new InvalidArgumentException();
+            return (int)value;
+        }
+        private static bool ArgBool(JObject args, string name)
+        {
+            var token = Arg(args, name);
+            if (token == null || token.Type == JTokenType.Null) return false;
+            if (token.Type != JTokenType.Boolean) throw new InvalidArgumentException();
+            return (bool)token;
+        }
+        private static string ArgString(JObject args, string name)
+        {
+            var token = Arg(args, name);
+            if (token == null || token.Type == JTokenType.Null) return null;
+            if (token.Type != JTokenType.String) throw new InvalidArgumentException();
+            return (string)token;
+        }
+        private static int Offset(JObject args) => Math.Max(0, Math.Min(ObservationLimits.MaxOffset, ArgInt(args, "offset", 0)));
+        private static int Limit(JObject args) => Math.Max(1, Math.Min(ObservationLimits.MaxPage, ArgInt(args, "limit", ObservationLimits.DefaultPage)));
         private static JToken NextOffset(int total, JObject args)
         { var next = Offset(args) + Limit(args); return next < total ? (JToken)new JValue(next) : JValue.CreateNull(); }
         private static string Text(string value) => value == null ? null : value.Substring(0, Math.Min(256, value.Length));

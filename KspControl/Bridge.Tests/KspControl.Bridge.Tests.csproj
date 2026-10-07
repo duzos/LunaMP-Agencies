@@ -8,5 +8,6 @@
     <Compile Include="../Bridge/ObservationQueue.cs" Link="ObservationQueue.cs" />
     <Compile Include="../Bridge/LoopbackServer.cs" Link="LoopbackServer.cs" />
     <Compile Include="../Bridge/ExecutionAuthority.cs" Link="ExecutionAuthority.cs" />
+    <Compile Include="../Bridge/PartFilters.cs" Link="PartFilters.cs" />
   </ItemGroup>
 </Project>

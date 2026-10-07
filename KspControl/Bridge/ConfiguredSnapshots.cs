@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using KspControl.Contracts;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -10,23 +11,19 @@ namespace KspControl.Bridge
     {
         private ShipConstruct observedEditorShip;
         private string editorGeneration;
-        private static JObject PartDefinition(JObject args)
+        private static JObject PartDefinition(AvailablePart definition, JObject args)
         {
-            var name = (string)args?["partName"];
-            if (string.IsNullOrEmpty(name) || name.Length > 256) throw new ArgumentException("invalid_part_name");
-            var definition = PartLoader.LoadedPartsList?.FirstOrDefault(p => p != null && p.name == name);
-            if (definition?.partPrefab == null) throw new InvalidOperationException("definition_unavailable");
             var result = ConfiguredPart(definition.partPrefab, false);
             result["provenance"] = "loaded_prefab_configuration_not_editor_instance";
             result["configurationVerifiedForConstruction"] = false;
             result["nativeConfigProvenance"] = "AvailablePart.partConfig_raw_definition_not_runtime_module_save";
-            result["nativeConfig"] = (bool?)args?["includeNative"] == true ? NativeConfig(definition.partConfig) : Omitted();
+            result["nativeConfig"] = ArgBool(args, "includeNative") ? NativeConfig(definition.partConfig) : Omitted();
             return result;
         }
         private JObject EditorSnapshot(ShipConstruct ship, JObject args)
         {
             if (!ReferenceEquals(ship, observedEditorShip)) { observedEditorShip = ship; editorGeneration = Guid.NewGuid().ToString("N"); }
-            var offset = Offset(args); var limit = Math.Min(20, Limit(args));
+            var offset = Offset(args); var limit = Math.Min(ObservationLimits.MaxSnapshotPage, Limit(args));
             var parts = new JArray(); var root = ship.Parts.FirstOrDefault(p => p != null && p.parent == null);
             foreach (var part in ship.Parts.Skip(offset).Take(limit))
             {
@@ -42,7 +39,7 @@ namespace KspControl.Bridge
                 value["stage"] = part.inverseStage;
                 parts.Add(value);
             }
-            var includeNative = (bool?)args?["includeNative"] == true;
+            var includeNative = ArgBool(args, "includeNative");
             JObject native;
             if (!includeNative) native = Omitted();
             else if (ship.Parts.Count > 250) native = Unavailable("native_snapshot_part_limit");
@@ -73,7 +70,10 @@ namespace KspControl.Bridge
             var variants = new JArray();
             foreach (var name in (part.variants?.GetVariantNames() ?? new List<string>()).Take(16)) variants.Add(Text(name));
             return new JObject { ["name"] = Text(part.partInfo?.name), ["partId"] = instance ? part.persistentId.ToString() : null,
-                ["attachNodes"] = nodes, ["surfaceAttachNode"] = part.srfAttachNode == null ? null : Node(part.srfAttachNode, instance),
+                ["attachNodes"] = nodes, ["surfaceAttachNode"] = part.srfAttachNode == null ? null : SurfaceNode(part, instance),
+                ["attachRules"] = part.attachRules == null ? null : new JObject { ["canSurfaceAttach"] = part.attachRules.srfAttach,
+                    ["acceptsSurfaceAttach"] = part.attachRules.allowSrfAttach, ["stack"] = part.attachRules.stack,
+                    ["allowStack"] = part.attachRules.allowStack, ["allowCollision"] = part.attachRules.allowCollision },
                 ["nodeCoordinateFrame"] = "part_local_units_scale_reported", ["resources"] = resources, ["variants"] = variants,
                 ["localScale"] = Vector(part.transform.localScale), ["lossyScale"] = Vector(part.transform.lossyScale),
                 ["geometryVerifiedForConstruction"] = false,
@@ -85,10 +85,23 @@ namespace KspControl.Bridge
         }
         private static JObject Node(AttachNode node, bool instance) => new JObject
         {
-            ["id"] = Text(node.id), ["type"] = node.nodeType.ToString(), ["position"] = Vector(node.position),
+            ["id"] = Text(node.id), ["kind"] = Kind(node.nodeType), ["type"] = node.nodeType.ToString(), ["position"] = Vector(node.position),
             ["orientation"] = Vector(node.orientation), ["size"] = node.size,
             ["attachedPartId"] = instance && node.attachedPart != null ? node.attachedPart.persistentId.ToString() : null
         };
+        private static string Kind(AttachNode.NodeType type)
+        {
+            switch (type) { case AttachNode.NodeType.Stack: return "stack"; case AttachNode.NodeType.Surface: return "surface"; case AttachNode.NodeType.Dock: return "dock"; default: return "unknown"; }
+        }
+        // The prefab srfAttachNode keeps a default nodeType; real capability lives in attachRules.srfAttach.
+        private static JObject SurfaceNode(Part part, bool instance)
+        {
+            var node = Node(part.srfAttachNode, instance);
+            node["rawNodeType"] = node["type"]; node["kind"] = "surface"; node["type"] = "Surface";
+            if (string.IsNullOrEmpty((string)node["id"])) node["id"] = "srfAttach";
+            node["usable"] = part.attachRules != null && part.attachRules.srfAttach;
+            return node;
+        }
         private static JArray Vector(Vector3 value) => new JArray(Finite(value.x), Finite(value.y), Finite(value.z));
         private static JObject Omitted() => Unavailable("not_requested");
         private static JObject Unavailable(string reason) => new JObject { ["available"] = false, ["reason"] = reason };

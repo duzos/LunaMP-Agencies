@@ -16,7 +16,7 @@ namespace KspControl.BridgeTests
         {
             var queue = new ObservationQueue(); var now = DateTime.UtcNow;
             var task = queue.Enqueue(Request(), now); var called = false;
-            queue.Drain(r => { called = true; return new BridgeResponse(); }, now);
+            queue.Drain(r => { called = true; return new BridgeResponse(); });
             Assert.IsFalse(called); Assert.AreEqual("expired", task.Result.ReasonCode);
         }
         [TestMethod] public void FullQueueFailsWithoutUnboundedAccumulation()
@@ -33,13 +33,13 @@ namespace KspControl.BridgeTests
         {
             var queue = new ObservationQueue(); var first = queue.Enqueue(Request("first"), DateTime.MaxValue);
             var second = queue.Enqueue(Request("second"), DateTime.MaxValue);
-            queue.Drain(r => new BridgeResponse { RequestId = r.RequestId }, DateTime.UtcNow, 1);
+            queue.Drain(r => new BridgeResponse { RequestId = r.RequestId }, 1);
             Assert.AreEqual("first", first.Result.RequestId); Assert.IsFalse(second.IsCompleted);
         }
         [TestMethod] public void ObservationExceptionNeverReturnsPrivateExceptionMessage()
         {
             var queue = new ObservationQueue(); var task = queue.Enqueue(Request(), DateTime.MaxValue);
-            queue.Drain(r => throw new Exception("hidden foreign vessel name"), DateTime.UtcNow);
+            queue.Drain(r => throw new Exception("hidden foreign vessel name"));
             Assert.AreEqual("observation_unavailable", task.Result.ReasonCode);
             Assert.AreEqual(0, task.Result.Data.Count);
         }
@@ -65,9 +65,23 @@ namespace KspControl.BridgeTests
                     Assert.AreEqual("unauthorized", BridgeFrames.Read<BridgeResponse>(stream).ReasonCode);
                 }
                 var observed = false;
-                queue.Drain(r => { observed = true; return new BridgeResponse(); }, DateTime.UtcNow);
+                queue.Drain(r => { observed = true; return new BridgeResponse(); });
                 Assert.IsFalse(observed);
             }
+        }
+        [TestMethod] public void PostStopRequestsImmediatelyFail()
+        {
+            var queue = new ObservationQueue(); queue.Stop();
+            Assert.AreEqual("bridge_stopped", queue.Enqueue(Request(), DateTime.MaxValue).Result.ReasonCode);
+        }
+        [TestMethod] public void DeadlineIsRecheckedAfterPreviousObservation()
+        {
+            var now = DateTime.UtcNow; var queue = new ObservationQueue(clock: () => now);
+            queue.Enqueue(Request("first"), now.AddSeconds(1));
+            var second = queue.Enqueue(Request("second"), now.AddSeconds(1));
+            var calls = 0;
+            queue.Drain(r => { calls++; now = now.AddSeconds(2); return new BridgeResponse(); });
+            Assert.AreEqual(1, calls); Assert.AreEqual("expired", second.Result.ReasonCode);
         }
     }
 }

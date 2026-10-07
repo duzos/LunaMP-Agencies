@@ -30,7 +30,13 @@ namespace KspControl.Bridge
             }
             catch { Debug.LogWarning("[KspControl] Bridge unavailable; no control enabled."); }
         }
-        public void Update() { observations.RefreshContext(); queue.Drain(observations.Execute, DateTime.UtcNow); }
+        public void Update()
+        {
+            if (server == null) return;
+            try { observations.RefreshContext(); }
+            catch { return; } // Scene teardown can invalidate game objects; pending requests expire without disclosure.
+            queue.Drain(observations.Execute);
+        }
         public void OnDestroy() { server?.Dispose(); queue.Stop(); }
     }
 }

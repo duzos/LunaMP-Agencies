@@ -55,6 +55,20 @@ foreign-vessel enumeration is exposed. Revision values are observation sequences
 not mutation preconditions. Screenshots, MechJeb, contacts and write operations are
 explicitly unavailable pending their implementations and acceptance gates.
 
+Argument bounds (shared `ObservationLimits`, advertised in tool schemas): `offset`
+0..100000, `limit` 1..50 (`editor_snapshot` 1..20), `filter` up to 128 characters,
+`part_controls` pages 4 modules, `partName` up to 256 characters, numeric `partId`.
+Out-of-range input returns a normal failed envelope with `reasonCode`
+`invalid_argument` and `data.detail` naming the field, without contacting the game.
+`part_definition` also reports `invalid_part_name` and `definition_unavailable`.
+`parts` lists buildable parts only by default; each item has `category` and
+`buildable`, and `includeNonBuildable=true` adds pseudo-parts (kerbalEVA, flag),
+hidden and unresearchable parts. Offsets are positions in the filtered list.
+Attach nodes carry `kind` (`stack`, `surface`, `dock`); `surfaceAttachNode` has
+`kind: "surface"`, `rawNodeType` and `usable`, and each part has an `attachRules`
+block (`canSurfaceAttach`, `acceptsSurfaceAttach`, `stack`, `allowStack`,
+`allowCollision`).
+
 
 
 

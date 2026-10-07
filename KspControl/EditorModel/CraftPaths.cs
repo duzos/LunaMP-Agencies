@@ -144,6 +144,8 @@ namespace KspControl.EditorModel
             if ((facility != "VAB" && facility != "SPH") || string.IsNullOrEmpty(stem) || stem.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || stem.Contains("..")) return null;
             return Path.Combine(ThumbnailsDirectory, ThumbnailPrefix(facility) + stem + ".png");
         }
+        /// <summary>The ownership ledger of this save (<c>KspControlData/&lt;save&gt;/ledger.json</c>), confined like every other workspace file.</summary>
+        public PathCheck LedgerPath() { return Workspace("", "ledger.json"); }
         public PathCheck StagingPath(string requestId)
         {
             return IsId(requestId) ? Workspace("staging", "kc-" + requestId + CraftExtension) : PathCheck.Fail("invalid_request_id");

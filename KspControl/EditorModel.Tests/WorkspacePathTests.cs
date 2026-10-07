@@ -84,4 +84,67 @@ public class WorkspacePathTests
         foreach (var stem in new[] { null, "", "../x", "a/b", "a\\b", "..", "x..y" }) Assert.IsNull(p.ThumbnailFile("VAB", stem!), stem);
         Assert.IsNull(p.ThumbnailFile("LAUNCHPAD", "ok"));
     }
+
+    // ---- the ownership ledger (P2.6) ----
+
+    [TestMethod] public void TheLedgerLivesAtTheRootOfTheSaveWorkspace()
+    {
+        var p = Make();
+        var ledger = p.LedgerPath();
+        Assert.IsTrue(ledger.Ok, ledger.ReasonCode);
+        Assert.AreEqual(Path.GetFullPath(Path.Combine(Root, "KspControlData", "Sandbox", "ledger.json")), ledger.FullPath);
+        Assert.AreEqual(p.LedgerFile, ledger.FullPath);
+    }
+
+    [TestMethod] public void ASaveNamedControlHasNoLedgerBecauseItWouldSitInTheSuspensionDirectory()
+    {
+        foreach (var save in new[] { "control", "CONTROL" })
+        { var check = Make(save).LedgerPath(); Assert.IsFalse(check.Ok); Assert.AreEqual("path_outside_save", check.ReasonCode); }
+    }
+
+    [TestMethod] public void ALinkedWorkspaceDeniesTheLedger()
+    {
+        var workspace = Path.GetFullPath(Path.Combine(Root, "KspControlData", "Sandbox"));
+        var p = Make(reparse: path => string.Equals(path.TrimEnd(Path.DirectorySeparatorChar), workspace, StringComparison.OrdinalIgnoreCase));
+        Assert.AreEqual("reparse_point", p.LedgerPath().ReasonCode);
+        var file = Path.GetFullPath(Path.Combine(workspace, "ledger.json"));
+        var q = Make(reparse: path => string.Equals(path, file, StringComparison.OrdinalIgnoreCase));
+        Assert.AreEqual("reparse_point", q.LedgerPath().ReasonCode, "the ledger file itself being a link is denied too");
+    }
+
+    // ---- save targets (P2.6): create-only resolution stays flat inside Ships/<facility> ----
+
+    [DataTestMethod]
+    [DataRow("Probe One")] [DataRow("a.b-c_d")] [DataRow("x")]
+    public void SaveTargetsAreFlatCraftFilesInTheShipsFolder(string name)
+    {
+        var check = Make().ResolveNewShip("VAB", name);
+        Assert.IsTrue(check.Ok, check.ReasonCode);
+        Assert.AreEqual(Path.GetFullPath(Path.Combine(Root, "saves", "Sandbox", "Ships", "VAB", name + ".craft")), check.FullPath);
+    }
+
+    [DataTestMethod]
+    [DataRow("..\evil")] [DataRow("../evil")] [DataRow("a/b")] [DataRow("C:evil")] [DataRow("evil.craft")] [DataRow(".hidden")] [DataRow("trail.")] [DataRow("NUL")] [DataRow("")] [DataRow("name:stream")]
+    public void SaveTargetsRefuseEscapesAndOddNames(string name)
+    {
+        var check = Make().ResolveNewShip("VAB", name);
+        Assert.IsFalse(check.Ok, name);
+        Assert.IsTrue(check.ReasonCode == "invalid_file_name" || check.ReasonCode == "path_outside_save", check.ReasonCode);
+    }
+
+    [TestMethod] public void ALinkedShipsFolderOrFileDeniesTheSaveTarget()
+    {
+        var ships = Path.GetFullPath(Path.Combine(Root, "saves", "Sandbox", "Ships", "VAB"));
+        var linkedFolder = Make(reparse: path => string.Equals(path.TrimEnd(Path.DirectorySeparatorChar), ships, StringComparison.OrdinalIgnoreCase));
+        Assert.AreEqual("reparse_point", linkedFolder.ResolveNewShip("VAB", "Probe").ReasonCode);
+        var linkedFile = Make(reparse: path => path.EndsWith("Probe.craft", StringComparison.OrdinalIgnoreCase));
+        Assert.AreEqual("reparse_point", linkedFile.ResolveNewShip("VAB", "Probe").ReasonCode);
+        Assert.IsTrue(linkedFile.ResolveNewShip("VAB", "Other").Ok);
+    }
+
+    [TestMethod] public void OnlyTheTwoShipFacilitiesAreWritable()
+    {
+        Assert.AreEqual("facility_mismatch", Make().ResolveNewShip("LAUNCHPAD", "Probe").ReasonCode);
+        Assert.AreEqual("facility_mismatch", Make().ResolveNewShip(null!, "Probe").ReasonCode);
+    }
 }

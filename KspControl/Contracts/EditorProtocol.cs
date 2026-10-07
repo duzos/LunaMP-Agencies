@@ -10,8 +10,16 @@ namespace KspControl.Contracts
         public const string Engineering = "editor.engineering";
         public const string ApplyCraft = "editor.apply_craft";
         public const string RestoreSnapshot = "editor.restore_snapshot";
+        public const string SaveCraft = "editor.save_craft";
         public const string OperationStatus = "editor.operation_status";
         /// <summary>Operations that change the editor. They are reachable only through the host journal.</summary>
-        public static readonly string[] Mutations = { ApplyCraft, RestoreSnapshot };
+        public static readonly string[] Mutations = { ApplyCraft, RestoreSnapshot, SaveCraft };
+    }
+
+    /// <summary>Read-only craft-file operations served on the main-thread observation queue.</summary>
+    public static class CraftOperations
+    {
+        /// <summary>The ship files of the current save's Ships folder, with size, write time, hash and ledger ownership.</summary>
+        public const string List = "craft.list";
     }
 }

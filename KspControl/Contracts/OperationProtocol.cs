@@ -8,6 +8,8 @@ namespace KspControl.Contracts
     {
         public const string ReplaceCraft = "editor.replace_craft";
         public const string RestoreSnapshot = "editor.restore_snapshot";
+        /// <summary>Writes a ship file into the save's Ships folder. Its recipient is "ships:&lt;facility&gt;", not the editor.</summary>
+        public const string WriteCraft = "craft.write";
     }
 
     /// <summary>Job envelope status values (plan R1-section 4.3).</summary>
@@ -36,6 +38,9 @@ namespace KspControl.Contracts
         private static readonly Regex RequestId = new Regex("^[A-Za-z0-9_-]{8,128}$", RegexOptions.CultureInvariant);
         public static bool IsRequestId(string value) { return value != null && RequestId.IsMatch(value); }
         public static bool IsSnapshotId(string value) { return IsRequestId(value); }
+        public const int Sha256Length = 64;
+        /// <summary>A SHA-256 as 64 lower-case hex characters, the form craft_list reports and replaceExpectedSha256 must use.</summary>
+        public static bool IsSha256(string value) { return IsPlanHash(value); }
         public static bool IsPlanHash(string value)
         {
             if (value == null || value.Length != PlanHashLength) return false;
@@ -81,5 +86,15 @@ namespace KspControl.Contracts
         public const string OperationError = "operation_error";
         public const string StagingFailed = "staging_failed";
         public const string CraftPartsMissing = "craft_parts_missing";
+        // ---- save (P2.6) ----
+        public const string FileExists = "file_exists";
+        public const string FileChanged = "file_changed";
+        public const string FileNotKspControlOwned = "file_not_kspcontrol_owned";
+        public const string LedgerUnavailable = "ledger_unavailable";
+        public const string CraftEmpty = "craft_empty";
+        public const string CraftIdentifiersInvalid = "craft_identifiers_invalid";
+        public const string CaptureUnavailable = "capture_unavailable";
+        public const string WriteFailed = "write_failed";
+        public const string SaveVerifyFailed = "save_verify_failed";
     }
 }

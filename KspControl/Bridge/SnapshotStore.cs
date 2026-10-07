@@ -239,12 +239,13 @@ namespace KspControl.Bridge
         /// Keeps the newest <paramref name="keep"/>. A snapshot of an unsaved craft is never pruned while it is the latest one for
         /// that craft name. Returns the ids deleted.
         /// </summary>
-        public List<string> Prune(int keep)
+        public List<string> Prune(int keep, string alsoKeep = null)
         {
             var removed = new List<string>();
             var all = Recent(int.MaxValue);
             var protectedIds = new HashSet<string>(StringComparer.Ordinal);
             var seenNames = new HashSet<string>(StringComparer.Ordinal);
+            if (alsoKeep != null) protectedIds.Add(alsoKeep); // a restore's own source must survive the snapshot taken just before it
             foreach (var record in all)
                 if (record.CountsAsUnsaved && seenNames.Add(record.UiName ?? "")) protectedIds.Add(record.SnapshotId);
             for (var i = keep; i < all.Count; i++)

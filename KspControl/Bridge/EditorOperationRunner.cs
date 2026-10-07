@@ -153,10 +153,13 @@ namespace KspControl.Bridge
             Validate(job);
             authority.BeginOperation(job.Ticket, job.RequestId); job.AuthorityOperation = true;
             tracker.BeginOperation(); job.TrackerOperation = true;
-            port.SetOperationLock(); job.LockSet = true;
+            job.LockSet = true; // before the call: a throw after the lock went on must still be cleaned up
+            port.SetOperationLock();
             job.OldShip = port.ShipIdentity;
-            if (job.Kind == OperationKind.Restore) { job.ExpectedParts = job.RestoreSource.PartCount; SetPhase(job, OperationPhase.RestoreStaging, now); }
-            else SetPhase(job, port.PartCount > 0 ? OperationPhase.Snapshot : OperationPhase.Staging, now);
+            if (job.Kind == OperationKind.Restore) job.ExpectedParts = job.RestoreSource.PartCount;
+            // Anything that replaces a non-empty editor is snapshotted first, a restore included: the new snapshot is the fallback.
+            var next = job.Kind == OperationKind.Restore ? OperationPhase.RestoreStaging : OperationPhase.Staging;
+            SetPhase(job, port.PartCount > 0 ? OperationPhase.Snapshot : next, now);
         }
 
         private void DoSnapshot(OperationJob job, long now)
@@ -170,9 +173,9 @@ namespace KspControl.Bridge
             job.Snapshot = outcome.Record;
             job.EffectsApplied.Add("snapshot_taken");
             job.Declared.Add(new DeclaredOutput { Path = outcome.Record.CraftPath, Class = "recovery", Action = "created", Detail = "snapshot " + outcome.Record.SnapshotId });
-            foreach (var id in store.Prune(options.SnapshotRetention))
+            foreach (var id in store.Prune(options.SnapshotRetention, job.RestoreSource == null ? null : job.RestoreSource.SnapshotId))
                 job.Declared.Add(new DeclaredOutput { Path = id, Class = "recovery", Action = "deleted", Detail = "pruned beyond retention" });
-            SetPhase(job, OperationPhase.Staging, now);
+            SetPhase(job, job.Kind == OperationKind.Restore ? OperationPhase.RestoreStaging : OperationPhase.Staging, now);
         }
 
         private void DoStaging(OperationJob job, long now)
@@ -301,7 +304,7 @@ namespace KspControl.Bridge
             port.WriteUi(snapshot.Ui);
             if (!port.ReadUi().Equals(snapshot.Ui)) { FailRestore(job, "ui_fields_not_restored"); return; }
             WriteBackSaveState(job, snapshot);
-            job.Restore.Result = "restored";
+            job.Restore.Result = job.InRecovery && job.Kind == OperationKind.Restore ? "reverted_to_pre_restore_snapshot" : "restored";
             job.EffectsApplied.Add("snapshot_restored");
             SetPhase(job, OperationPhase.GraceStart, now);
         }
@@ -392,7 +395,8 @@ namespace KspControl.Bridge
         /// <summary>A failure after dispatch (settle, verify, guard): reload the verified snapshot when one exists.</summary>
         private void LoadFailure(OperationJob job, string reason, string detail)
         {
-            if (job.InRecovery || job.Kind == OperationKind.Restore) { FailRestore(job, reason + (detail == null ? "" : ": " + detail)); return; }
+            // A recovery load that fails, or a restore with no snapshot of its own to go back to (the editor was empty), has nowhere left to go.
+            if (job.InRecovery || (job.Kind == OperationKind.Restore && job.Snapshot == null)) { FailRestore(job, reason + (detail == null ? "" : ": " + detail)); return; }
             job.PendingStatus = JobStatuses.Failed; job.PendingReason = reason; job.PendingDetail = detail;
             var now = clock();
             if (job.Snapshot != null)
@@ -415,6 +419,14 @@ namespace KspControl.Bridge
             if (!job.Dispatched) { Fail(job, OperationReasons.SnapshotUnverified, detail); return; }
             job.PendingStatus = JobStatuses.Failed; job.PendingReason = OperationReasons.RestoreFailed;
             job.PendingDetail = (job.PendingDetail == null ? "" : job.PendingDetail + "; ") + detail;
+            if (!job.InRecovery && job.Kind == OperationKind.Restore && job.Snapshot != null)
+            {
+                // The requested snapshot did not load cleanly: go back to the craft that was in the editor before this job.
+                job.InRecovery = true;
+                job.Restore = new RestoreInfo { Attempted = true, Result = "in_progress" };
+                SetPhase(job, OperationPhase.RestoreStaging, clock());
+                return;
+            }
             if (job.Restore == null) job.Restore = new RestoreInfo();
             job.Restore.Attempted = true; job.Restore.Result = detail;
             SetPhase(job, OperationPhase.GraceStart, clock());
@@ -495,6 +507,8 @@ namespace KspControl.Bridge
 
         private void FinalizeCore(OperationJob job)
         {
+            GuardLeftoverCraft(job);
+            if (job.Restore != null && job.Restore.Result == "in_progress") job.Restore.Result = "interrupted_" + (job.PendingReason ?? "unknown");
             try { if (job.LockSet) port.ClearOperationLock(); } catch (Exception) { /* the lock stack is global: never let a scene teardown strand the job */ }
             job.LockSet = false;
             long revision = 0;
@@ -528,6 +542,21 @@ namespace KspControl.Bridge
             job.Phase = OperationPhase.Done;
             job.CompletedUtc = utcNow(); job.UpdatedUtc = job.CompletedUtc.Value;
             jobs.NoteFinished(job);
+        }
+
+        /// <summary>
+        /// An apply that ended without the verified overwrite guard and without putting the previous craft back leaves a generated craft
+        /// that KSP considers saved: a human Save could silently overwrite a same-named ship. Best effort, before the lock comes off.
+        /// </summary>
+        private void GuardLeftoverCraft(OperationJob job)
+        {
+            if (job.Kind != OperationKind.Apply || !job.Dispatched || job.OverwriteGuard != null) return;
+            if (job.Restore != null && job.Restore.Result == "restored") return;
+            try
+            {
+                if (port.EditorScene && port.InEditor && port.PartCount > 0) ApplyOverwriteGuard(job);
+            }
+            catch (Exception) { job.OverwriteGuard = "write_failed"; }
         }
 
         /// <summary>Staging files go at the terminal state unless the job is indeterminate (plan R3-section 9). Recovery files stay.</summary>

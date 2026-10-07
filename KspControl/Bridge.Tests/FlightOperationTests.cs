@@ -105,15 +105,15 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void AGroupBoundToAnUnknownModActionRefusesTheWholeRequestIncludingTheThrottle()
+        public void AGroupBoundToAnUnknownModActionIsReportedAndTheRequestStillCompletes()
         {
             flight.Bindings["Gear"].Add(FakeFlight.Act("ModuleLandingGear", "1"));
             flight.Bindings["Gear"].Add(FakeFlight.Act("SomeModBomb", "2", "Drop"));
             var r = rig.SetControls("req-unknown-01", "throttle", 1.0, "gear", true);
-            AssertRefused(r, FlightReasons.UnclassifiedEffect);
+            Assert.AreEqual(JobStatuses.Completed, r.Status, r.Data.ToString());
             Assert.AreEqual("2/SomeModBomb.Drop", (string)r.Data["unclassified"][0]);
-            Assert.AreEqual(0, flight.Calls.Count, "no callback ran for any part of the request");
-            Assert.IsFalse(rig.Guard.Engaged);
+            CollectionAssert.Contains(r.Data["consequential"].Select(x => (string)x).ToArray(), "unclassified:2/SomeModBomb.Drop");
+            Assert.IsTrue(flight.Calls.Count > 0, "the callbacks ran");
         }
 
         [TestMethod]
@@ -250,15 +250,16 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void AnUnknownModuleThatActsOnStagingRefusesTheStageButAnInertOneDoesNot()
+        public void AnUnknownModuleThatActsOnStagingIsReportedAndAnInertOneIsNot()
         {
             flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleInertMod", "5", null, false) };
             Assert.AreEqual(JobStatuses.Completed, rig.Stage("req-inert-0001", 3).Status);
             flight.Snap.Controls.CurrentStage = 3;
             flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleNukeMod", "6", null, true) };
             var r = rig.Stage("req-nuke-00001", 3);
-            AssertRefused(r, FlightReasons.UnclassifiedEffect);
-            Assert.AreEqual(1, flight.Count("stage"), "only the first, inert stage ran");
+            Assert.AreEqual(JobStatuses.Completed, r.Status, r.Data.ToString());
+            CollectionAssert.Contains(r.Data["unclassified"].Select(x => (string)x).ToArray(), "6/ModuleNukeMod");
+            Assert.AreEqual(2, flight.Count("stage"), "both stages ran");
         }
 
         [TestMethod]
@@ -291,20 +292,25 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void AnUnknownModuleOnTheNextStageRefusesEvenWhenTheCurrentOneIsClean()
+        public void AnUnknownModuleOnTheNextStageIsReportedAndTheStageRuns()
         {
             flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleNukeMod", "6", null, true) };
-            AssertRefused(rig.Stage("req-next-00002", 3), FlightReasons.UnclassifiedEffect);
-            Assert.AreEqual(0, flight.Count("stage"));
+            var r = rig.Stage("req-next-00002", 3);
+            Assert.AreEqual(JobStatuses.Completed, r.Status, r.Data.ToString());
+            CollectionAssert.Contains(r.Data["unclassified"].Select(x => (string)x).ToArray(), "6/ModuleNukeMod");
+            Assert.AreEqual(1, flight.Count("stage"));
         }
 
         [TestMethod]
-        public void StagingAlsoClassifiesTheStageActionGroupBindings()
+        public void StagingAlsoReportsUnknownModulesOnTheStageActionGroupBindings()
         {
             flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction>();
             flight.Bindings["Stage"].Add(FakeFlight.Act("ModuleMysteryMod", "8", "Fire"));
-            AssertRefused(rig.Stage("req-grpstage-01", 3), FlightReasons.UnclassifiedEffect);
-            Assert.AreEqual(0, flight.Count("stage"));
+            var first = rig.Stage("req-grpstage-01", 3);
+            Assert.AreEqual(JobStatuses.Completed, first.Status, first.Data.ToString());
+            CollectionAssert.Contains(first.Data["unclassified"].Select(x => (string)x).ToArray(), "8/ModuleMysteryMod.Fire");
+            Assert.AreEqual(1, flight.Count("stage"));
+            flight.Snap.Controls.CurrentStage = 3;
             flight.Bindings["Stage"].Clear(); flight.Bindings["Stage"].Add(FakeFlight.Act("ModuleParachute", "9", "Deploy"));
             var ok = rig.Stage("req-grpstage-02", 3);
             Assert.AreEqual(JobStatuses.Completed, ok.Status);
@@ -369,11 +375,13 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void ADenialOfOneBoundActionRefusesTheWholeGroupBeforeAnyCallback()
+        public void AnUnknownBoundActionIsReportedAndTheGroupStillRuns()
         {
             flight.Bindings["Custom03"].Add(FakeFlight.Act("ModuleAnimateGeneric", "1")); flight.Bindings["Custom03"].Add(FakeFlight.Act("ModuleMysteryWeapon", "2", "Fire"));
-            AssertRefused(rig.Group("req-mixed-0001", "Custom03", true), FlightReasons.UnclassifiedEffect);
-            Assert.AreEqual(0, flight.Calls.Count);
+            var r = rig.Group("req-mixed-0001", "Custom03", true);
+            Assert.AreEqual(JobStatuses.Completed, r.Status, r.Data.ToString());
+            Assert.AreEqual("2/ModuleMysteryWeapon.Fire", (string)r.Data["unclassified"][0]);
+            Assert.IsTrue(flight.Calls.Count > 0);
         }
 
         [TestMethod]
@@ -407,11 +415,13 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void AbortWithAnUnclassifiedBoundActionIsRefusedBeforeFiring()
+        public void AbortWithAnUnclassifiedBoundActionIsReportedAndStillFires()
         {
             flight.Bindings["Abort"].Add(FakeFlight.Act("ModuleSelfDestruct", "7", "Boom"));
-            AssertRefused(rig.Abort("req-abort-0002"), FlightReasons.UnclassifiedEffect);
-            Assert.AreEqual(0, flight.Count("abort"));
+            var r = rig.Abort("req-abort-0002");
+            Assert.AreEqual(JobStatuses.Completed, r.Status, r.Data.ToString());
+            Assert.AreEqual("7/ModuleSelfDestruct.Boom", (string)r.Data["unclassified"][0]);
+            Assert.AreEqual(1, flight.Count("abort"));
         }
 
         [TestMethod]

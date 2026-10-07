@@ -301,8 +301,8 @@ confirm is `indeterminate` and the request id stays reserved (the bridge and the
 
 Classification: every part action a stage or group would trigger is named by its module. Known benign modules (lights, gear, brakes, panels,
 animations) and known consequential ones (engines, RCS, decouplers, fairings, docking, parachutes, clamps, science, robotics; reported in
-`consequential[]`) pass. A module in neither table, including any mod action, makes the whole request `unclassified_effect` before any callback
-runs, and its effect (`flight.unclassified`) is not in the authority's effect map either. Add modules to `FlightEffectClassifier` deliberately.
+`consequential[]`) pass. A module in neither table, including any mod action, is reported in `unclassified[]` and `consequential[]` (`unclassified:<part>/<label>`) but does
+not refuse the request; its effect uses the flight family effect. Only an oversized plan is refused (`too_many_effects`). Add modules to `FlightEffectClassifier` deliberately.
 
 Control ownership: `FlightControlGuard` owns the one fly-by-wire callback (`Vessel.OnFlyByWire`) only while a lease is held. Stop (hotkey or
 panel), expiry, the heartbeat watchdog, a context change, a failed grant and `OnDestroy` all end it: the throttle is zeroed first, then the

@@ -11,9 +11,11 @@ namespace KspControl.Bridge
         public ClassifiedEffect[] Effects { get; set; }
         /// <summary>Human-readable names of effects that cannot be undone or that thrust, separate, deploy or release: "decouple:123/ModuleDecouple".</summary>
         public List<string> Consequential { get; } = new List<string>();
-        /// <summary>Modules the classifier does not know. A non-empty list refuses the whole request: unknown effects are blocked, never assumed harmless.</summary>
+        /// <summary>Modules the classifier does not know. Reported for the caller, never a refusal (user decision 2026-10-07: no blocking verification gates).</summary>
         public List<string> Unclassified { get; } = new List<string>();
-        public bool Allowed { get { return Unclassified.Count == 0; } }
+        /// <summary>Only an oversized plan is refused.</summary>
+        public bool TooMany { get; set; }
+        public bool Allowed { get { return !TooMany; } }
     }
 
     /// <summary>
@@ -35,7 +37,7 @@ namespace KspControl.Bridge
         private static readonly Dictionary<string, string> Consequential = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             { "ModuleEngines", "engine" }, { "ModuleEnginesFX", "engine" }, { "ModuleRCS", "thruster" }, { "ModuleRCSFX", "thruster" },
-            { "ModuleDecouple", "decouple" }, { "ModuleAnchoredDecoupler", "decouple" }, { "ModuleProceduralFairing", "decouple" },
+            { "ModuleDecouple", "decouple" }, { "ModuleJettison", "jettison" }, { "ModuleAnchoredDecoupler", "decouple" }, { "ModuleProceduralFairing", "decouple" },
             { "ModuleDockingNode", "dock" }, { "ModuleGrappleNode", "dock" }, { "ModuleParachute", "chute" }, { "LaunchClamp", "release" },
             { "ModuleScienceExperiment", "science" }, { "ModuleRoboticServoRotor", "robotics" }, { "ModuleRoboticServoHinge", "robotics" },
             { "ModuleRoboticServoPiston", "robotics" }, { "ModuleRoboticRotationServo", "robotics" }, { "ModuleRoboticServoHinge2", "robotics" }
@@ -67,11 +69,12 @@ namespace KspControl.Bridge
                 }
                 else
                 {
-                    // Not in any table: the effect name is deliberately not a known effect, so the authority refuses it as well.
-                    effects.Add(new ClassifiedEffect(FlightEffects.Unclassified, Clip(EntityOf(vesselId) + "/part:" + part + "/" + (module.Length == 0 ? "unknown" : module)), 0));
+                    // Not in any table: reported (and treated as consequential for the caller's information), but allowed.
+                    effects.Add(new ClassifiedEffect(FlightEffects.Family, Clip(EntityOf(vesselId) + "/part:" + part + "/" + (module.Length == 0 ? "unknown" : module)), 0));
                     plan.Unclassified.Add(part + "/" + (label.Length == 0 ? "unknown" : label));
+                    plan.Consequential.Add("unclassified:" + part + "/" + (label.Length == 0 ? "unknown" : label));
                 }
-                if (effects.Count > 1000) { plan.Unclassified.Add("too_many_effects"); break; }
+                if (effects.Count > 1000) { plan.Unclassified.Add("too_many_effects"); plan.TooMany = true; break; }
             }
             plan.Effects = effects.ToArray();
             return plan;
@@ -82,7 +85,7 @@ namespace KspControl.Bridge
         {
             var merged = new FlightEffectPlan { Effects = first.Effects.Concat(second.Effects.Skip(1)).ToArray() };
             merged.Consequential.AddRange(first.Consequential); merged.Consequential.AddRange(second.Consequential);
-            merged.Unclassified.AddRange(first.Unclassified); merged.Unclassified.AddRange(second.Unclassified);
+            merged.Unclassified.AddRange(first.Unclassified); merged.Unclassified.AddRange(second.Unclassified); merged.TooMany = first.TooMany || second.TooMany;
             return merged;
         }
 

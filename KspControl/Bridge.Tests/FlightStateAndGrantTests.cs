@@ -40,32 +40,33 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void AnUnknownModuleIsUnclassifiedAndItsEffectIsNotAKnownEffect()
+        public void AnUnknownModuleIsReportedAsUnclassifiedAndConsequentialButAllowed()
         {
             var plan = FlightEffectClassifier.Plan(Vessel, new[] { FakeFlight.Act("ModuleLight", "1"), FakeFlight.Act("ModMissileLauncher", "2", "Fire") }, false);
-            Assert.IsFalse(plan.Allowed);
+            Assert.IsTrue(plan.Allowed);
             Assert.AreEqual("2/ModMissileLauncher.Fire", plan.Unclassified.Single());
-            Assert.AreEqual(FlightEffects.Unclassified, plan.Effects.Last().Operation);
-            Assert.AreEqual(-1, Array.IndexOf(GrantMapping.KnownEffects, FlightEffects.Unclassified), "the authority must refuse it too");
+            Assert.AreEqual("unclassified:2/ModMissileLauncher.Fire", plan.Consequential.Single());
+            Assert.AreEqual(FlightEffects.Family, plan.Effects.Last().Operation);
         }
 
         [TestMethod]
-        public void StagingOnlyCountsModulesThatActOnActivationOrAreNamedConsequential()
+        public void StagingOnlyReportsUnknownModulesThatActOnActivationOrAreNamedConsequential()
         {
             var plan = FlightEffectClassifier.Plan(Vessel, new[]
             {
                 FakeFlight.Act("ModuleSomethingInert", "1", null, false), FakeFlight.Act("ModuleDecouple", "2", null, false), FakeFlight.Act("ModuleModThing", "3", null, true)
             }, true);
-            Assert.IsFalse(plan.Allowed);
+            Assert.IsTrue(plan.Allowed);
             Assert.AreEqual("3/ModuleModThing", plan.Unclassified.Single());
-            Assert.AreEqual("decouple:2/ModuleDecouple", plan.Consequential.Single());
+            CollectionAssert.AreEqual(new[] { "decouple:2/ModuleDecouple", "unclassified:3/ModuleModThing" }, plan.Consequential.ToArray());
         }
 
         [TestMethod]
-        public void AnActionGroupCountsEveryBoundActionRegardlessOfTheStagingFlag()
+        public void AnActionGroupReportsEveryUnknownBoundActionRegardlessOfTheStagingFlag()
         {
             var plan = FlightEffectClassifier.Plan(Vessel, new[] { FakeFlight.Act("ModuleSomethingInert", "1", "Do", false) }, false);
-            Assert.IsFalse(plan.Allowed);
+            Assert.IsTrue(plan.Allowed);
+            Assert.AreEqual("1/ModuleSomethingInert.Do", plan.Unclassified.Single());
         }
 
         [TestMethod]
@@ -73,7 +74,7 @@ namespace KspControl.BridgeTests
         {
             var many = Enumerable.Range(0, 1200).Select(i => FakeFlight.Act("ModuleLight", i.ToString())).ToArray();
             var plan = FlightEffectClassifier.Plan(Vessel, many, false);
-            Assert.IsFalse(plan.Allowed); CollectionAssert.Contains(plan.Unclassified, "too_many_effects");
+            Assert.IsFalse(plan.Allowed); Assert.IsTrue(plan.TooMany); CollectionAssert.Contains(plan.Unclassified, "too_many_effects");
         }
 
         [TestMethod]

@@ -90,7 +90,7 @@ namespace KspControl.Bridge
 
             run.Plan = Classify(intent, snapshot);
             if (!run.Plan.Allowed)
-                return Refuse(request, intent.RequestId, FlightReasons.UnclassifiedEffect, "an effect is not classified, so the whole request is refused before any callback runs",
+                return Refuse(request, intent.RequestId, FlightReasons.TooManyEffects, "the request would produce too many effects, so it is refused before any callback runs",
                     new JObject { ["unclassified"] = new JArray(run.Plan.Unclassified.Take(32)) });
             try { run.Ticket = authority.Admit(run.LeaseId, authority.PublishedRevision, run.Plan.Effects); }
             catch (InvalidOperationException error) { return Refuse(request, intent.RequestId, MapAdmission(error.Message, run.LeaseId), error.Message == "authority_unavailable" ? null : error.Message, null); }
@@ -324,7 +324,7 @@ namespace KspControl.Bridge
             { Fail(run, run.Dispatched ? JobStatuses.Indeterminate : JobStatuses.Failed, OperationReasons.SceneChanged, "the active vessel changed before the callback"); return false; }
             var plan = Classify(run.Intent, fresh);
             if (!plan.Allowed)
-            { Fail(run, run.Dispatched ? JobStatuses.Indeterminate : JobStatuses.Failed, FlightReasons.UnclassifiedEffect, "an effect became unclassified"); return false; }
+            { Fail(run, run.Dispatched ? JobStatuses.Indeterminate : JobStatuses.Failed, FlightReasons.TooManyEffects, "the request now produces too many effects"); return false; }
             try { authority.ValidateForDispatch(run.Ticket, source.CurrentContext(), source.CurrentBinding(), plan.Effects); }
             catch (InvalidOperationException error)
             { Fail(run, run.Dispatched ? JobStatuses.Indeterminate : JobStatuses.Failed, MapAdmission(error.Message, run.LeaseId), error.Message); return false; }
@@ -449,7 +449,7 @@ namespace KspControl.Bridge
                 ["notDispatched"] = !run.Dispatched, ["dispatched"] = run.Dispatched, ["noop"] = run.Noop,
                 ["entity"] = FlightEffectClassifier.EntityOf(run.Before.VesselId), ["requested"] = intent.Requested,
                 ["effects"] = new JArray(run.Plan.Effects.Take(32).Select(e => (JToken)(e.Operation + " " + e.Recipient))), ["effectCount"] = run.Plan.Effects.Length,
-                ["consequential"] = new JArray(run.Plan.Consequential.Take(32)), ["applied"] = run.Applied,
+                ["consequential"] = new JArray(run.Plan.Consequential.Take(32)), ["unclassified"] = new JArray(run.Plan.Unclassified.Take(32)), ["applied"] = run.Applied,
                 ["observed"] = Observed(), ["completedUtc"] = utcNow().ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)
             };
             if (run.Detail != null) data["detail"] = run.Detail;

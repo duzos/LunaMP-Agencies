@@ -58,6 +58,7 @@ namespace KspControl.Contracts
         public const string NoStageToActivate = "no_stage_to_activate";
         public const string StagingLocked = "staging_locked";
         public const string UnclassifiedEffect = "unclassified_effect";
+        public const string TooManyEffects = "too_many_effects";
         public const string WarpDenied = "warp_denied";
         public const string WarpAboveCap = "warp_above_cap";
         public const string WarpThrottleActive = "warp_while_thrusting";

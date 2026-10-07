@@ -133,5 +133,9 @@ namespace Server.Settings.Definition
                             "agency's relay sats can connect your probes. If false (default), every " +
                             "player's relays cooperate (vanilla behaviour). Agencies-feature only.")]
         public bool AgencyCommNetPerAgency { get; set; } = false;
+
+        [XmlComment(Value = "If true, the server checks duzos/LunaMP-Agencies releases at startup on Windows and installs a newer agencies build before accepting players. " +
+                            "Only files in the release package are replaced; Universe/Config/logs/Plugins are never touched; replaced files are backed up in update-staging/backup.")]
+        public bool AgencyAutoUpdate { get; set; } = false;
     }
 }

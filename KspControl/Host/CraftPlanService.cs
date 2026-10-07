@@ -236,7 +236,7 @@ public static class CatalogWire
     var part=new ConstructionPart
     {
      Name=name,Category=Category((string?)o["category"]),Buildable=(bool?)o["buildable"]??false,
-     ConstructionSupport=(string?)o["constructionSupport"]=="verified" ? "verified" : "unverified",
+     ConstructionSupport=(string?)o["constructionSupport"]=="verified" ? "verified" : "unverified", Stageable=(bool?)o["stageable"]??false,
      AttachRules=new AttachRulesDefinition
      {
       Stack=(bool?)rules["stack"]??false,Srf=(bool?)rules["srf"]??false,AllowStack=(bool?)rules["allowStack"]??false,
@@ -261,7 +261,7 @@ public static class CatalogWire
 
  private static string Category(string? c) => c switch
  {
-  PartCategories.Command or PartCategories.Tank or PartCategories.Engine or PartCategories.Decoupler or PartCategories.Parachute or PartCategories.HeatShield => c,
+  PartCategories.Command or PartCategories.Tank or PartCategories.Engine or PartCategories.Decoupler or PartCategories.Parachute or PartCategories.HeatShield or PartCategories.Unsupported => c,
   _ => PartCategories.Other
  };
 

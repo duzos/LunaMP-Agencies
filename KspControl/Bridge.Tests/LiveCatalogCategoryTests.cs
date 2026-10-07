@@ -35,6 +35,20 @@ namespace KspControl.BridgeTests
             Assert.AreEqual("tank", ConstructionCatalogMapper.MapCategory(new string[0], new[] { "LiquidFuel", "Oxidizer" }, "Propulsion"));
         }
 
+        [TestMethod] public void AStageableAblatorDecouplerIsADecouplerNotAHeatShield()
+        {
+            Assert.AreEqual("decoupler", ConstructionCatalogMapper.MapCategory(HeatShieldModules, new[] { "Ablator" }, "Thermal", true));
+            Assert.AreEqual("heatshield", ConstructionCatalogMapper.MapCategory(HeatShieldModules, new[] { "Ablator" }, "Thermal", false));
+        }
+
+        [DataTestMethod]
+        [DataRow("ModuleProceduralFairing")] [DataRow("ModuleNFLVFairing")] [DataRow("SimpleAdjustableFairingBase")] [DataRow("RealChuteModule")]
+        [DataRow("LaunchClamp")] [DataRow("ModuleStagedAnimation")]
+        public void KnownStagedModulesMapToTheRefusedCategory(string module)
+        {
+            Assert.AreEqual("unsupported", ConstructionCatalogMapper.MapCategory(new[] { module }, new string[0], "Aero"));
+        }
+
         [TestMethod] public void AnAblativeDecouplerIsAHeatShieldNotAStagedDecoupler()
         {
             Assert.AreEqual("heatshield", ConstructionCatalogMapper.MapCategory(HeatShieldModules, new[] { "Ablator" }, "Thermal"));

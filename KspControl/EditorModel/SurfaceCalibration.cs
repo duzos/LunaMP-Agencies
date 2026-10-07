@@ -169,7 +169,7 @@ namespace KspControl.EditorModel
         {
             return new ConstructionPart
             {
-                Name = p.Name, Category = p.Category, Buildable = p.Buildable, ConstructionSupport = p.ConstructionSupport,
+                Name = p.Name, Category = p.Category, Buildable = p.Buildable, ConstructionSupport = p.ConstructionSupport, Stageable = p.Stageable,
                 StackNodes = p.StackNodes, AttachRules = p.AttachRules, SurfaceNode = node
             };
         }

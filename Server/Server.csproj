@@ -50,7 +50,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Lidgren.Core\Lidgren.Core.csproj" />
-    <ProjectReference Include="..\LmpUpdater\LmpUpdater.csproj" />
     <ProjectReference Include="..\uhttpsharp\uhttpsharp.csproj" />
     <ProjectReference Include="..\LmpCommon\LmpCommon.csproj" />
   </ItemGroup>

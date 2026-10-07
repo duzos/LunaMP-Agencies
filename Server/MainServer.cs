@@ -21,6 +21,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
@@ -139,6 +140,12 @@ namespace Server
 
                 Universe.CheckUniverse();
                 LoadSettingsAndGroups();
+
+                // Opt-in self-update, before anything is loaded or listened on. When the helper has been started this process
+                // must leave at once: the helper waits for it to exit, swaps the files and relaunches the server.
+                if (await AgenciesServerUpdater.TryUpdateAtBootAsync(AgenciesServerUpdater.HttpFetch, AppContext.BaseDirectory, Environment.GetCommandLineArgs().Skip(1).ToArray(), Environment.CurrentDirectory, psi => Process.Start(psi)))
+                    Environment.Exit(0);
+
                 PlaytestDiagnostics.Configure(VerboseDiagnosticsEnabled);
                 VesselStoreSystem.LoadExistingVessels();
                 var scenariosCreated = ScenarioSystem.GenerateDefaultScenarios();

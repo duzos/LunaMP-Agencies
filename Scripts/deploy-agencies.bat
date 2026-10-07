@@ -20,6 +20,8 @@ set ARTIFACTS=%REPO%\Artifacts
 set CLIENT_STAGE=%ARTIFACTS%\LMPClient\GameData
 set SERVER_STAGE=%ARTIFACTS%\LMPServer
 set CLIENT_ZIP=%ARTIFACTS%\LunaMultiplayer-Agencies-Client.zip
+set HELPER_BIN=%REPO%\Updater\LmpAgenciesUpdater\bin\Release\net48
+set BUILD_FILE=%REPO%\LmpCommon\Agency\AgenciesBuild.cs
 
 echo.
 echo === Luna Multiplayer Agencies deploy ===
@@ -46,12 +48,26 @@ if not exist "%SERVER_DIR%" (
 )
 
 echo.
+echo === Reading agencies build number ===
+set BUILD_NUM=
+for /f "usebackq delims=" %%N in (`powershell -NoProfile -Command "if ((Get-Content -Raw '%BUILD_FILE%') -match 'const\s+int\s+Number\s*=\s*(\d+)') { $Matches[1] }"`) do set BUILD_NUM=%%N
+if "%BUILD_NUM%"=="" (
+    echo [!] Could not read Number from %BUILD_FILE%.
+    goto :fail
+)
+echo Build number: %BUILD_NUM%
+
+echo.
 echo === 1/5 Building Server (Release) ===
 "%DOTNET%" build "%REPO%\Server\Server.csproj" -c Release || goto :fail
 
 echo.
 echo === 2/5 Building LmpClient (Release) ===
 "%DOTNET%" build "%REPO%\LmpClient\LmpClient.csproj" -c Release || goto :fail
+
+echo.
+echo === 2b/5 Building updater helper (Release) ===
+"%DOTNET%" build "%REPO%\Updater\LmpAgenciesUpdater\LmpAgenciesUpdater.csproj" -c Release || goto :fail
 
 echo.
 echo === 3/5 Staging client artifacts into %CLIENT_STAGE% ===
@@ -72,6 +88,10 @@ if exist "%REPO%\LmpClient\Localization\XML" xcopy /Y /E "%REPO%\LmpClient\Local
 if exist "%REPO%\LmpClient\ModuleStore\XML" xcopy /Y /E "%REPO%\LmpClient\ModuleStore\XML\*.xml" "%CLIENT_STAGE%\LunaMultiplayer\PartSync\" >nul
 if exist "%REPO%\LmpClient\Resources\Icons" xcopy /Y "%REPO%\LmpClient\Resources\Icons\*" "%CLIENT_STAGE%\LunaMultiplayer\Icons\" >nul
 if exist "%REPO%\LmpClient\Resources\Flags" xcopy /Y "%REPO%\LmpClient\Resources\Flags\*" "%CLIENT_STAGE%\LunaMultiplayer\Flags\" >nul
+mkdir "%CLIENT_STAGE%\LunaMultiplayer\Updater"
+copy /Y "%HELPER_BIN%\LmpAgenciesUpdater.exe" "%CLIENT_STAGE%\LunaMultiplayer\Updater\" >nul || goto :fail
+copy /Y "%HELPER_BIN%\LmpAgenciesUpdater.exe.config" "%CLIENT_STAGE%\LunaMultiplayer\Updater\" >nul || goto :fail
+<nul set /p "=%BUILD_NUM%" > "%CLIENT_STAGE%\LunaMultiplayer\Updater\build.txt"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO%\Scripts\Assert-ClientPackageLayout.ps1" -GameData "%CLIENT_STAGE%" || goto :fail
 
 echo.
@@ -86,6 +106,8 @@ echo [ok] Client installed at %KSP_DIR%\GameData
 REM Server: overwrite binaries only; Universe / Config / logs untouched
 REM because they are not present in the release output.
 xcopy /Y /E "%REPO%\Server\bin\Release\net10.0\*" "%SERVER_DIR%\" >nul || goto :fail
+if not exist "%SERVER_DIR%\Updater" mkdir "%SERVER_DIR%\Updater"
+copy /Y "%CLIENT_STAGE%\LunaMultiplayer\Updater\*" "%SERVER_DIR%\Updater\" >nul || goto :fail
 echo [ok] Server binaries replaced at %SERVER_DIR%
 echo     Universe / Config / logs preserved in place.
 

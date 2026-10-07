@@ -46,7 +46,9 @@ public sealed class JournalAccess : IDisposable
    var operations=(grantInfo?["operations"] as JArray)?.Select(t=>(string)t!).ToArray() ?? Array.Empty<string>();
    var entities=(grantInfo?["facilities"] as JArray)?.Select(t=>"editor:"+(string)t!).ToArray() ?? Array.Empty<string>();
    DateTimeOffset expires=DateTimeOffset.TryParse((string?)grantInfo?["expiresUtc"],out var parsed) ? parsed : DateTimeOffset.UtcNow.AddMinutes(5);
-   var reported=new MissionGrant(grantId,generation,"bridge_reported",expires,0,operations,entities);
+   // The cap is the human's: the bridge verified the signed grant and reports its spendLimitFunds. Absent means no spend is authorised.
+   decimal spendLimit=Math.Max(0,(long?)grantInfo?["spendLimitFunds"] ?? 0L);
+   var reported=new MissionGrant(grantId,generation,"bridge_reported",expires,spendLimit,operations,entities);
    try { j.ProvisionGrant(reported); } catch(InvalidOperationException) { /* already mirrored in this run, or revoked here */ }
    lock(gate) currentGrant=reported;
    j.Revoke();

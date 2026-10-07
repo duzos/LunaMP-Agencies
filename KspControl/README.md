@@ -92,7 +92,7 @@ the upper-cased full KSP root path.
 **CLI** (a human-run branch of the host executable; never an MCP tool):
 
 ```powershell
-KspControl.Host.exe grant issue --ksp-root <KSP root> --save <SaveFolder> [--agency <guid>] [--ops a,b] [--facilities VAB] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]
+KspControl.Host.exe grant issue --ksp-root <KSP root> --save <SaveFolder> [--agency <guid>] [--ops a,b] [--facilities VAB] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H] [--spend FUNDS]
 KspControl.Host.exe grant revoke | rearm [--hours H] | show
 ```
 
@@ -204,6 +204,32 @@ Not live-verified: that `EditorLogic.LoadShipFromFile` from the staging path lea
 settle and grace timings, whether the control locks (and the separate `EditorLogic.Lock` id) survive the load, that the unsaved marker
 and sentinel produce the stock overwrite prompt, the thumbnail naming (staging path or ship name), that `SaveShip` on an empty editor
 still carries `_modVersions`, and the crew and `ShipConstruct.SaveShip` header facts the snapshot records.
+
+## Launch (editor_launch)
+
+`editor_launch(requestId, leaseId, expectedRevision, launchSite, maxSpendFunds)` launches the editor craft through the normal editor path:
+the LunaMP facade (`ControlObservation`, `ApiVersion` 2) selects the site and runs `EditorLogic`'s own launch routine, so stock pre-flight, the
+crew manifest and the agency tooling reservation (`ToolingClient.BeginLaunch`, `PrepareLaunch`, `RegisterLaunch`, `CancelLaunch`) stay in charge.
+Nothing here uses `AssembleForLaunch` or writes a balance.
+
+A human arms it: `grant issue ... --ops launch --spend <funds>` (`launch` is the family name of the `editor.launch` effect; the spend limit is
+signed into the grant, defaults to 0 and is never raised by retries or income). The host journal keeps the cap per grant id:
+gross charged funds plus every held reservation plus the new `maxSpendFunds` must stay within `spendLimitFunds`, else `spend_cap_exceeded`
+before the bridge is asked. A completed launch records the charge the bridge confirmed (tooling result, or the quote if none) and releases the
+rest; a cancelled or failed one releases it all; an indeterminate one keeps it held.
+
+Bridge job: admission quotes the craft (`launchCost` above `maxSpendFunds` is `spend_exceeds_max`), checks the launch allowance
+(`AgencyTradeResearch.ValidateLive`), no pending reservation and a confirmed balance; then `begin_launch` invokes the editor routine and
+`await_flight` waits for the reservation, the FLIGHT scene, a new pad vessel with an ownership record of this agency, and `LaunchPending`
+false (registered). Success returns `vesselId`, `charge`, `chargeSource`, and `leaseContinues`: the lease moves to `vessel:<guid>` only if
+the grant lists a `flight.*` operation, otherwise it is released. An abort before the flight scene loads (authority lost, Stop, timeout, server
+refusal) is cancelled through the existing cancel command and ends only once the refund shows in the confirmed balance; a flight scene that is already
+loading, a disconnect, or an unconfirmed refund ends `indeterminate`.
+
+Not live-verified: that `EditorDriver.setLaunchSite` plus `EditorLogic.launchVessel` is the exact routine the Launch button runs in this KSP
+build (and which of the two carries the site), what a failing stock pre-flight check does to a launch started this way (a prompt would end the job
+`launch_not_started`), the crew dialog for crewed craft, that `RegisterLaunch` clears `LaunchPending` before the ownership record arrives, and the
+refund timing after a cancel.
 
 ## Offline preview packaging
 

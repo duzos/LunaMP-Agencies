@@ -29,7 +29,7 @@ public sealed class BridgeClient
    return JsonConvert.SerializeObject(reply);
   },timeout.Token);
  }
- private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect" };
+ private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect" };
 }
 [McpServerToolType]
 public sealed class ObservationTools(BridgeClient bridge)
@@ -46,6 +46,11 @@ public sealed class ObservationTools(BridgeClient bridge)
  }
  [McpServerTool, Description("Inspect the current editor craft without changing it.")]
  public Task<string> Editor(CancellationToken cancellationToken) => bridge.ReadAsync("editor.inspect",null,cancellationToken);
+ [McpServerTool, Description("Inspect available part right-click controls. Discovery only; no invocation.")]
+ public Task<string> PartControls(CancellationToken cancellationToken) => bridge.ReadAsync("part.controls",null,cancellationToken);
+ [McpServerTool, Description("Inspect science experiment state without running or transmitting experiments.")]
+ public Task<string> Science(CancellationToken cancellationToken) => bridge.ReadAsync("science.inspect",null,cancellationToken);
  [McpServerTool, Description("Inspect the active vessel through bridge disclosure policy. No foreign vessel lookup.")]
  public Task<string> Vessel(CancellationToken cancellationToken) => bridge.ReadAsync("vessel.inspect",null,cancellationToken);
 }
+

@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using LmpCommon.Agency;
 using Server.Agency;
 using Server.Context;
 using System;
@@ -23,6 +24,30 @@ namespace ServerTest.Agency
         public void Cleanup()
         {
             _scope.Dispose();
+        }
+
+        [TestMethod]
+        public void FirstDetailsRoundTripAndDuplicateClaimsNeverBackfill()
+        {
+            var (_, _, agency) = AgencySystem.CreateAgency("Details", "details-user", "User");
+            AgencyAchievementRegistry.RebuildFromAgencies();
+            var details = new AchievementDetails { UniversalTime = 42.25, VesselId = Guid.NewGuid(), VesselName = "\u754c { craft } // = \n", CrewNames = new[] { "Jeb { = //", "Val" } };
+            Assert.IsTrue(AgencyAchievementRegistry.ClaimIfFirst(agency, "Orbit:Mun", details));
+            var date = agency.FirstAchievements["Orbit:Mun"];
+            details.VesselName = "mutated";
+            Assert.IsFalse(AgencyAchievementRegistry.ClaimIfFirst(agency, "Orbit:Mun", details));
+            agency.FirstAchievements["Legacy"] = 12345;
+            AgencyStore.PersistAgency(agency);
+            AgencyStore.Agencies.Clear(); AgencyStore.LoadExistingAgencies();
+            var loaded = AgencyStore.Agencies[agency.Id];
+            Assert.AreEqual(date, loaded.FirstAchievements["Orbit:Mun"]);
+            Assert.AreEqual("\u754c { craft } // = \n", loaded.FirstAchievementDetails["Orbit:Mun"].VesselName);
+            CollectionAssert.AreEqual(details.CrewNames, loaded.FirstAchievementDetails["Orbit:Mun"].CrewNames);
+            Assert.AreEqual(12345L, loaded.FirstAchievements["Legacy"]);
+            Assert.IsFalse(loaded.FirstAchievementDetails.ContainsKey("Legacy"));
+            AgencyAchievementRegistry.RebuildFromAgencies();
+            Assert.IsFalse(AgencyAchievementRegistry.ClaimIfFirst(loaded, "Legacy", details));
+            Assert.IsFalse(loaded.FirstAchievementDetails.ContainsKey("Legacy"));
         }
 
         [TestMethod]

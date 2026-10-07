@@ -95,10 +95,7 @@ namespace LmpCommon.Message.Data.Agency
             var size = 16 + sizeof(int) + 1;
             foreach (var agency in Agencies ?? Array.Empty<AgencyInfo>())
             {
-                size += 69 + StringSize(agency.Name) + StringSize(agency.OwnerUniqueId) + StringSize(agency.OwnerDisplayName);
-                var ids = agency.MemberUniqueIds ?? Array.Empty<string>();
-                var names = agency.MemberDisplayNames ?? Array.Empty<string>();
-                for (var i = 0; i < ids.Length; i++) size += StringSize(ids[i]) + StringSize(i < names.Length ? names[i] : null);
+                size += AgencyWireHelpers.AgencyInfoSize(agency);
             }
             if (LaunchSitesSnapshotPresent)
             {

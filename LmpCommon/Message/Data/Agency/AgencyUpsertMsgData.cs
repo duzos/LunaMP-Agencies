@@ -23,6 +23,6 @@ namespace LmpCommon.Message.Data.Agency
             Agency = AgencyWireHelpers.ReadAgencyInfo(lidgrenMsg);
         }
 
-        internal override int InternalGetMessageSize() => 128;
+        internal override int InternalGetMessageSize() => AgencyWireHelpers.AgencyInfoSize(Agency);
     }
 }

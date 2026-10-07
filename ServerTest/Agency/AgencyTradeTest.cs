@@ -106,6 +106,59 @@ namespace ServerTest.Agency
 
         private static string Proto(Guid id, params uint[] parts) => "pid = " + id.ToString("N") + "\nname = Offered\nroot = 0\n" + string.Concat(parts.Select(uid => "PART\n{\nname = probe\nuid = " + uid + "\n}\n")) + string.Concat(new[] { "ORBIT", "ACTIONGROUPS", "DISCOVERY", "FLIGHTPLAN", "CTRLSTATE", "VESSELMODULES" }.Select(n => n + "\n{\n}\n"));
 
+        [DataTestMethod]
+        [DataRow("VAB")]
+        [DataRow("SPH")]
+        public void FlatCraftBlueprintIsTransferredWithoutChangingBytes(string editor)
+        {
+            using (var fixture = new Fixture())
+            {
+                var offer = fixture.Offer(true);
+                // Exact installed KSP WriteNode output for a minimal node with a nested module (102 bytes for VAB).
+                // ToString adds an outer wrapper instead, which is not the craft-file format.
+                offer.Trade.Editor = editor;
+                offer.Trade.BlueprintData = Encoding.UTF8.GetBytes("ship = Probe\r\ntype = " + editor + "\r\nPART\r\n{\r\n\tpart = probe_4292669534\r\n\tMODULE\r\n\t{\r\n\t\tname = ModuleTest\r\n\t}\r\n}\r\n");
+                var created = fixture.Economy.Execute(offer);
+                Assert.IsTrue(created.Success, created.Reason);
+                var accepted = fixture.Buy(new EconomyCommand { Operation = EconomyOperation.TradeAccept, Trade = new TradeCommand { OfferId = offer.Trade.OfferId, ExpectedRevision = 1 } });
+                Assert.IsTrue(accepted.Success, accepted.Reason);
+                var delivered = AgencyEconomyStore.Snapshot(fixture.Buyer.AgencyId).Entitlements.Single();
+                Assert.AreEqual(editor, delivered.Editor);
+                CollectionAssert.AreEqual(offer.Trade.BlueprintData, delivered.BlueprintData);
+                Assert.AreEqual(offer.Trade.DesignFingerprint, delivered.Fingerprint);
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow("wrapper")]
+        [DataRow("named-wrapper")]
+        [DataRow("wrong-editor")]
+        [DataRow("invalid-part")]
+        [DataRow("different-design")]
+        [DataRow("oversized")]
+        public void InvalidBlueprintCannotCreateOffer(string kind)
+        {
+            using (var fixture = new Fixture())
+            {
+                var offer = fixture.Offer(true);
+                var text = Encoding.UTF8.GetString(offer.Trade.BlueprintData);
+                switch (kind)
+                {
+                    case "wrapper": text = "\n{\n" + text + "}\n"; break;
+                    case "named-wrapper": text = "SHIP\n{\n" + text + "}\n"; break;
+                    case "wrong-editor": text = text.Replace("type = VAB", "type = SPH"); break;
+                    case "invalid-part": text = text.Replace("probe_1", "probe_not-an-id"); break;
+                    case "different-design": text = text.Replace("probe_1", "other_1"); break;
+                    case "oversized": text += new string('x', TradeLimits.MaxBlueprintBytes); break;
+                }
+                offer.Trade.BlueprintData = Encoding.UTF8.GetBytes(text);
+                var result = fixture.Economy.Execute(offer);
+                Assert.IsFalse(result.Success, kind);
+                Assert.AreEqual(0, fixture.Economy.Snapshot.Offers.Length);
+                Assert.AreEqual(0, AgencyEconomyStore.Snapshot(fixture.Buyer.AgencyId).Entitlements.Length);
+            }
+        }
+
         [TestMethod]
         public void TradeOnlyCouplingRecoveryFlattensOwnershipJournalBeforeReadiness()
         {

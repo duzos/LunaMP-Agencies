@@ -374,13 +374,24 @@ namespace Server.Agency
             lock (TransactionGate) return !_document.PendingSplits.TryGetValue(child, out var pending) || pending.Requester == requester && pending.ConnectionTicks == connectionTicks;
         }
 
-        public static void CancelPendingSplits(string requester = null, long connectionTicks = 0, Guid? child = null)
+        public static void CancelPendingSplits(string requester, long connectionTicks = 0, Guid? child = null)
+        {
+            if (string.IsNullOrEmpty(requester)) return;
+            RemovePendingSplits(p => (!child.HasValue || p.Key == child.Value) && p.Value.Requester == requester && p.Value.ConnectionTicks == connectionTicks);
+        }
+
+        public static void ClearPendingSplits()
+        {
+            RemovePendingSplits(p => true);
+        }
+
+        private static void RemovePendingSplits(Func<KeyValuePair<Guid, PendingVesselSplit>, bool> matches)
         {
             lock (TransactionGate)
             {
                 // An irreversible topology journal must replay before pending cleanup.
                 if (!Ready || AgencyEconomyStore.Enabled && !AgencyEconomyStore.Ready) return;
-                var cancelled = _document.PendingSplits.Where(p => (!child.HasValue || p.Key == child.Value) && (requester == null || p.Value.Requester == requester && p.Value.ConnectionTicks == connectionTicks)).Select(p => p.Key).ToArray();
+                var cancelled = _document.PendingSplits.Where(matches).Select(p => p.Key).ToArray();
                 if (cancelled.Length == 0) return;
                 var next = Copy();
                 foreach (var id in cancelled) next.PendingSplits.Remove(id);

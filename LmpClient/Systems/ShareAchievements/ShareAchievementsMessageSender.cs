@@ -1,4 +1,6 @@
 ﻿using HarmonyLib;
+using LmpCommon.Agency;
+using System.Linq;
 using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpClient.Extensions;
@@ -40,12 +42,28 @@ namespace LmpClient.Systems.ShareAchievements
 
                 //Build the packet and send it.
                 var msgData = NetworkMain.CliMsgFactory.CreateNewMessageData<ShareProgressAchievementsMsgData>();
+                var ut = Planetarium.GetUniversalTime();
+                msgData.Details = new AchievementDetails
+                {
+                    UniversalTime = !double.IsNaN(ut) && !double.IsInfinity(ut) && ut >= 0 ? (double?)ut : null
+                };
+                var vessel = FlightGlobals.ActiveVessel;
+                if (vessel != null)
+                {
+                    var crew = vessel.GetVesselCrew();
+                    msgData.Details.VesselId = vessel.id;
+                    msgData.Details.VesselName = BoundName(vessel.vesselName);
+                    msgData.Details.CrewNames = crew.Take(AchievementWire.MaxCrew).Select(c => BoundName(c.name)).ToArray();
+                    msgData.Details.CrewTruncated = crew.Count > AchievementWire.MaxCrew;
+                }
                 msgData.Id = foundNode.Id;
                 msgData.Data = configNode.Serialize();
                 msgData.NumBytes = msgData.Data.Length;
                 System.MessageSender.SendMessage(msgData);
             }
         }
+
+        private static string BoundName(string value) => (value ?? string.Empty).Length <= AchievementWire.MaxName ? value ?? string.Empty : value.Substring(0, AchievementWire.MaxName);
 
         private static ConfigNode ConvertAchievementToConfigNode(ProgressNode achievement)
         {

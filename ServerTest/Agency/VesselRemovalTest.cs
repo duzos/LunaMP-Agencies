@@ -584,7 +584,7 @@ namespace ServerTest.Agency
                 var split = AgencyVesselMap.ExportDocument(); split.Revision++;
                 Assert.ThrowsException<InvalidOperationException>(() => AgencyEconomyStore.CommitSplit(split, live, child, new uint[] { 5602 }));
                 Doc.Deleted.Remove(child);
-                AgencyVesselMap.CancelPendingSplits();
+                AgencyVesselMap.ClearPendingSplits();
 
                 // A launch registration or an EVA registration for a deleted id fails before anything is written.
                 var manifest = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "probe", UnitCost = 100 } } };

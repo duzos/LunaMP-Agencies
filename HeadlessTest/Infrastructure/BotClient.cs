@@ -36,7 +36,7 @@ internal sealed record VisibilityResultBot(int Generation, Guid RequestId, bool 
 internal abstract record BotSnapshot(int Generation);
 internal sealed record StatusSnapshot(int Generation, NetConnectionStatus Status, string Reason) : BotSnapshot(Generation);
 internal sealed record HandshakeSnapshot(int Generation, HandshakeReply Response, string Reason) : BotSnapshot(Generation);
-internal sealed record AgencySnapshot(Guid Id, string Name, bool IsSolo, IReadOnlyList<string> Members);
+internal sealed record AgencySnapshot(Guid Id, string Name, bool IsSolo, IReadOnlyList<string> Members, double Funds, float Science);
 internal sealed record SiteAssignmentSnapshot(string SiteId, Guid AgencyId);
 internal sealed record AgencySyncSnapshot(int Generation, Guid MyAgencyId, IReadOnlyList<AgencySnapshot> Agencies,
     bool LaunchSitesReady, long LaunchSitesRevision, IReadOnlyList<SiteAssignmentSnapshot> LaunchSites) : BotSnapshot(Generation);
@@ -373,7 +373,7 @@ internal sealed class BotClient : IAsyncDisposable
     }
 
     private static AgencySnapshot CopyAgency(AgencyInfo agency)
-        => new(agency.Id, agency.Name, agency.IsSolo, Array.AsReadOnly(agency.MemberUniqueIds.ToArray()));
+        => new(agency.Id, agency.Name, agency.IsSolo, Array.AsReadOnly(agency.MemberUniqueIds.ToArray()), agency.Funds, agency.Science);
     private static VesselOwnerSnapshot CopyOwnership(VesselOwnershipRecord record)
         => new(record.VesselId, record.OwnerAgencyId, Array.AsReadOnly(record.CoOwnerAgencyIds.ToArray()), record.DockingPolicy);
     private static KerbalSnapshot CopyKerbal(KerbalInfo kerbal)

@@ -13,9 +13,10 @@ public class AgencyTradeTest
 {
     public TestContext TestContext { get; set; }
     [DataTestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task AtomicTradeTransfersTitleAndEntitlementAndSurvivesReconnectAsync(bool tooling)
+    [DataRow(false, false)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public async Task AtomicTradeTransfersTitleAndEntitlementAndSurvivesReconnectAsync(bool tooling, bool blueprintOnly)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         var token = deadline.Token;
@@ -37,15 +38,18 @@ public class AgencyTradeTest
             if (tooling)
             {
                 Assert.IsTrue((await Command(a, new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) }, token)).Success);
-                var launch = await Command(a, new EconomyCommand { Operation = EconomyOperation.PrepareLaunch, LaunchId = Guid.NewGuid(), Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) }, token);
-                Assert.IsTrue(launch.Success, launch.Reason);
-                a.UploadPaidVessel(vessel, raw, launch.LaunchId, launch.LaunchToken, new[] { 0 });
-                var registered = await a.WaitForAsync<EconomyResultBot>(s => s.Result.RequestId == launch.LaunchId && s.Result.Operation == EconomyOperation.RegisterLaunch, token);
-                Assert.IsTrue(registered.Result.Success, registered.Result.Reason);
+                if (!blueprintOnly)
+                {
+                    var launch = await Command(a, new EconomyCommand { Operation = EconomyOperation.PrepareLaunch, LaunchId = Guid.NewGuid(), Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) }, token);
+                    Assert.IsTrue(launch.Success, launch.Reason);
+                    a.UploadPaidVessel(vessel, raw, launch.LaunchId, launch.LaunchToken, new[] { 0 });
+                    var registered = await a.WaitForAsync<EconomyResultBot>(s => s.Result.RequestId == launch.LaunchId && s.Result.Operation == EconomyOperation.RegisterLaunch, token);
+                    Assert.IsTrue(registered.Result.Success, registered.Result.Reason);
+                }
             }
             else a.UploadVessel(vessel, raw);
-            await b.WaitForAsync<VesselProtoSnapshot>(s => s.VesselId == vessel, token);
-            var draft = new TradeCommand { OfferId = Guid.NewGuid(), BuyerAgencyId = agencyB, VesselId = vessel, SellerFunds = 100, BuyerFunds = 250 };
+            if (!blueprintOnly) await b.WaitForAsync<VesselProtoSnapshot>(s => s.VesselId == vessel, token);
+            var draft = new TradeCommand { OfferId = Guid.NewGuid(), BuyerAgencyId = agencyB, VesselId = blueprintOnly ? Guid.Empty : vessel, SellerFunds = 100, BuyerFunds = 250 };
             if (tooling)
             {
                 draft.DesignFingerprint = ToolingPolicy.Fingerprint(manifest); draft.BlueprintName = "Trade probe"; draft.Editor = "VAB";
@@ -65,9 +69,13 @@ public class AgencyTradeTest
             var finalA = await a.WaitForAsync<EconomyStateBot>(s => s.State.Offers.Any(o => o.OfferId == offer.OfferId && o.Status == TradeOfferStatus.Accepted), token);
             Assert.AreEqual(offerA.State.Funds + 150, finalA.State.Funds, .001);
             Assert.AreEqual(initialB.State.Funds - 150, finalB.State.Funds, .001);
+            // Each observer must see the other agency's current balance without reconnecting.
+            await a.WaitForAsync<AgencyUpsertSnapshot>(s => s.Agency.Id == agencyB && Math.Abs(s.Agency.Funds - finalB.State.Funds) < .001, token);
+            await b.WaitForAsync<AgencyUpsertSnapshot>(s => s.Agency.Id == agencyA && Math.Abs(s.Agency.Funds - finalA.State.Funds) < .001, token);
             Assert.IsTrue(finalB.State.Entitlements.Any(e => e.Fingerprint == ToolingPolicy.Fingerprint(manifest)));
             Assert.AreEqual(tooling ? 1 : 0, finalB.State.Designs.Length, "Title-only purchase must not manufacture tooling.");
-            await b.WaitForAsync<OwnershipMapSnapshot>(s => s.Records.Any(r => r.VesselId == vessel && r.OwnerAgencyId == agencyB), token);
+            if (!blueprintOnly) await b.WaitForAsync<OwnershipMapSnapshot>(s => s.Records.Any(r => r.VesselId == vessel && r.OwnerAgencyId == agencyB), token);
+            if (tooling) CollectionAssert.AreEqual(draft.BlueprintData, finalB.State.Entitlements.Single(e => e.BlueprintData.Length > 0).BlueprintData);
             Assert.IsTrue((await Command(b, accept, token)).Success, "Receipt retry must be idempotent.");
             await b.DisconnectForReconnectAsync(token);
             await a.WaitForAsync<PlayerLeftSnapshot>(s => s.Player == b.Name, token);

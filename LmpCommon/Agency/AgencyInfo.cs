@@ -49,6 +49,7 @@ namespace LmpCommon.Agency
         /// <summary>Number of "first to X" milestones this agency holds
         /// server-wide. Each milestone is awarded to whichever agency reports
         /// it first; subsequent agencies don't displace the holder.</summary>
-        public int FirstAchievementsCount;
+        public FirstAchievement[] FirstAchievements = Array.Empty<FirstAchievement>();
+        public int FirstAchievementsCount => FirstAchievements.Length;
     }
 }

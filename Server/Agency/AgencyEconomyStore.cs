@@ -101,6 +101,7 @@ namespace Server.Agency
             if (!Enabled) return;
             lock (AgencyVesselMap.TransactionGate)
             {
+                PublishedBalances.Clear();
                 _error = null;
                 try
                 {
@@ -959,10 +960,26 @@ namespace Server.Agency
             MessageQueuer.SendToClient<AgencySrvMsg>(client, message);
         }
 
+        private static readonly Dictionary<Guid, (double Funds, float Science)> PublishedBalances = new Dictionary<Guid, (double, float)>();
+
         public static void Broadcast()
         {
             if (!Enabled) return;
             foreach (var client in ClientRetriever.GetAuthenticatedClients()) SendTo(client);
+            Agency[] changed;
+            lock (AgencyVesselMap.TransactionGate)
+            {
+                if (!Ready) return;
+                foreach (var id in PublishedBalances.Keys.Where(id => !AgencyStore.Agencies.ContainsKey(id)).ToArray()) PublishedBalances.Remove(id);
+                changed = AgencyStore.Agencies.Values.Where(a =>
+                {
+                    var signature = (a.Funds, a.Science);
+                    if (PublishedBalances.TryGetValue(a.Id, out var old) && old.Equals(signature)) return false;
+                    PublishedBalances[a.Id] = signature;
+                    return true;
+                }).ToArray();
+            }
+            foreach (var agency in changed) AgencyNetwork.BroadcastUpsert(agency);
         }
 
         public static void SendResult(ClientStructure client, EconomyResult result)

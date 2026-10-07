@@ -8,6 +8,7 @@ using LmpCommon.Agency;
 using LmpClient.Systems.SettingsSys;
 using LmpCommon.Enums;
 using LmpClient.Harmony;
+using LmpClient.Extensions;
 
 namespace LmpClient.Systems.Agency
 {
@@ -42,16 +43,27 @@ namespace LmpClient.Systems.Agency
         public static string EditorAllowanceStatus { get; private set; }
         internal static void Receive(EconomySnapshot snapshot)
         {
-            if (!Enabled || snapshot == null || !snapshot.Ready || snapshot.AgencyId != AgencySystem.Singleton.MyAgencyId) return;
+            if (snapshot == null) return;
+            if (!Enabled || !snapshot.Ready || snapshot.AgencyId != AgencySystem.Singleton.MyAgencyId)
+            {
+                TraceSnapshot(snapshot, !Enabled ? "disabled" : !snapshot.Ready ? "not-ready" : "agency-mismatch");
+                return;
+            }
             lock (gate)
             {
                 if (agency != snapshot.AgencyId) Clear();
-                if (snapshot.Revision < revision) return;
+                if (snapshot.Revision < revision) { TraceSnapshot(snapshot, "stale-revision"); return; }
                 agency = snapshot.AgencyId; revision = snapshot.Revision;
                 offers = snapshot.Offers ?? Array.Empty<TradeOffer>();
                 entitlements = snapshot.Entitlements ?? Array.Empty<TradeEntitlement>();
                 deliverPending = true;
+                TraceSnapshot(snapshot, "accepted");
             }
+        }
+        private static void TraceSnapshot(EconomySnapshot snapshot, string outcome)
+        {
+            Diagnostics.PlaytestDiagnostics.Write("client.trade.snapshot", () =>
+                $"agency={snapshot.AgencyId} revision={snapshot.Revision} outcome={outcome} offers={string.Join(",", (snapshot.Offers ?? Array.Empty<TradeOffer>()).Select(o => o.OfferId.ToString("N")))}");
         }
         public static IReadOnlyList<TradeOffer> GetOffersSnapshot()
         {
@@ -74,17 +86,36 @@ namespace LmpClient.Systems.Agency
         {
             if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) throw new InvalidOperationException("Open a craft in the editor first.");
             var node = EditorLogic.fetch.ship.SaveShip();
-            return CaptureNode(node, Encoding.UTF8.GetBytes(node.ToString()));
+            return CaptureNode(node, node.Serialize());
         }
         public static TradeCommand CaptureBlueprint(string absolutePath)
         {
+            absolutePath = ValidateBlueprintPath(absolutePath);
             var info = new FileInfo(absolutePath);
             if (!info.Exists || info.Length <= 0 || info.Length > TradeLimits.MaxBlueprintBytes) throw new InvalidOperationException("Blueprint is missing or too large.");
             var bytes = File.ReadAllBytes(absolutePath);
             return CaptureNode(ConfigNode.Parse(Encoding.UTF8.GetString(bytes)), bytes);
         }
+        private static string ValidateBlueprintPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) throw new InvalidOperationException("Choose a saved craft first.");
+            var saves = Path.GetFullPath(Path.Combine(KSPUtil.ApplicationRootPath, "saves"));
+            var save = Path.GetFullPath(Path.Combine(saves, HighLogic.SaveFolder));
+            if (!save.StartsWith(saves + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new IOException("Invalid save directory.");
+            var full = Path.GetFullPath(path);
+            var folder = Path.GetDirectoryName(full);
+            if (!string.Equals(Path.GetExtension(full), ".craft", StringComparison.OrdinalIgnoreCase) ||
+                !new[] { "VAB", "SPH" }.Any(editor => string.Equals(folder, Path.Combine(save, "Ships", editor), StringComparison.OrdinalIgnoreCase)))
+                throw new IOException("Choose a VAB or SPH craft from the current save.");
+            if (File.Exists(full) && (File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0) throw new IOException("Linked craft files are unsupported.");
+            for (var current = new DirectoryInfo(folder); current != null && current.FullName.Length >= saves.Length; current = current.Parent)
+                if (current.Exists && (current.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Linked craft directories are unsupported.");
+            return full;
+        }
         private static TradeCommand CaptureNode(ConfigNode node, byte[] bytes)
         {
+            if (bytes == null || bytes.Length == 0 || bytes.Length > TradeLimits.MaxBlueprintBytes) throw new InvalidOperationException("Blueprint is missing or too large.");
+            if (node == null || (node.GetValue("type") != "VAB" && node.GetValue("type") != "SPH")) throw new InvalidOperationException("Choose a valid VAB or SPH craft.");
             var manifest = ToolingManifestBuilder.FromConfig(node, null);
             return new TradeCommand { BlueprintData=bytes, BlueprintName=node.GetValue("ship") ?? "Purchased craft",
                 Editor=node.GetValue("type"), DesignFingerprint=ToolingPolicy.Fingerprint(manifest) };

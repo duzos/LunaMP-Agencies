@@ -4,6 +4,7 @@ using System.Linq;
 using LmpClient.Systems.Agency;
 using LmpCommon.Agency;
 using UnityEngine;
+using KSP.UI.Screens;
 
 namespace LmpClient.Windows.Agency
 {
@@ -14,7 +15,9 @@ namespace LmpClient.Windows.Agency
         private static long tradeConfirmRevision;
         private static string tradeSearch = "", tradeError, tradeDraftVesselName;
         private static string giveFunds = "0", giveScience = "0", receiveFunds = "0", receiveScience = "0";
-        private static bool includeEditorDesign;
+        private static int tradeDesignSource;
+        private static string tradeSave, tradeBlueprintPath, tradeBlueprintLabel;
+        private static CraftBrowserDialog tradeBrowser;
         private static Vector2 tradeScroll, tradeBuyerScroll, tradeVesselScroll;
         private static TradeCommand tradeDraft;
         private static GUIStyle tradeText, tradeHeading, tradeButton;
@@ -28,11 +31,15 @@ namespace LmpClient.Windows.Agency
                 tradeButton = new GUIStyle(GUI.skin.button) { wordWrap = true, richText = false };
             }
             if (!TradeClient.Enabled) { GUILayout.Label("Trading is disabled on this server.", tradeText); return; }
-            if (tradeAgency != AgencySystem.Singleton.MyAgencyId)
+            if (tradeAgency != AgencySystem.Singleton.MyAgencyId || tradeSave != HighLogic.SaveFolder)
             {
                 tradeAgency = AgencySystem.Singleton.MyAgencyId;
+                tradeSave = HighLogic.SaveFolder;
                 tradeBuyer = tradeVessel = tradeConfirm = tradeLoadConfirm = Guid.Empty;
                 tradeDraft = null; tradeError = null;
+                tradeDesignSource = 0; tradeBlueprintPath = tradeBlueprintLabel = null;
+                if (tradeBrowser != null) tradeBrowser.Dismiss();
+                tradeBrowser = null;
             }
             if (!TradeClient.Ready) { GUILayout.Label("Syncing your agency's offers and purchased designs...", tradeText); return; }
             tradeTab = GUILayout.Toolbar(tradeTab, new[] { "Offers", "New offer", "Received designs" });
@@ -100,7 +107,7 @@ namespace LmpClient.Windows.Agency
             {
                 GUILayout.Label("Review offer to " + TradeAgencyName(tradeDraft.BuyerAgencyId), tradeHeading);
                 if (tradeDraft.VesselId != Guid.Empty) GUILayout.Label("Transfers ownership of " + tradeDraftVesselName + ".", tradeText);
-                if (tradeDraft.BlueprintData.Length > 0) GUILayout.Label("Includes tooling and a copy of " + tradeDraft.BlueprintName + ".", tradeText);
+                if (tradeDraft.BlueprintData.Length > 0) GUILayout.Label("Includes tooling and a copy of " + tradeDraft.BlueprintName + " (" + tradeDraft.Editor + ").", tradeText);
                 GUILayout.Label("Your agency gives", tradeHeading); DrawTradeTerms(tradeDraft.SellerFunds, tradeDraft.SellerScience);
                 GUILayout.Label("Your agency receives", tradeHeading); DrawTradeTerms(tradeDraft.BuyerFunds, tradeDraft.BuyerScience);
                 GUILayout.Label("Nothing transfers until the other agency's owner accepts. Balances and ownership are checked again then.", tradeText);
@@ -121,8 +128,22 @@ namespace LmpClient.Windows.Agency
                 foreach (var vessel in FlightGlobals.Vessels.Where(v => v != null && AgencySystem.Singleton.GetVesselAgency(v.id) == tradeAgency).OrderBy(v => v.vesselName))
                     if (GUILayout.Toggle(tradeVessel == vessel.id, vessel.vesselName, tradeButton)) tradeVessel = vessel.id;
             GUILayout.EndScrollView();
-            if (HighLogic.LoadedSceneIsEditor) includeEditorDesign = GUILayout.Toggle(includeEditorDesign, "Include the current editor craft and its tooling");
-            else { includeEditorDesign = false; GUILayout.Label("Open a tooled craft in the editor to include its design.", tradeText); }
+            GUILayout.Label("Design and tooling", tradeHeading);
+            if (GUILayout.Toggle(tradeDesignSource == 0, "No design", tradeButton)) tradeDesignSource = 0;
+            if (HighLogic.LoadedSceneIsEditor)
+            {
+                if (GUILayout.Toggle(tradeDesignSource == 1, "Current editor craft", tradeButton)) tradeDesignSource = 1;
+            }
+            else if (tradeDesignSource == 1) tradeDesignSource = 0;
+            if (GUILayout.Toggle(tradeDesignSource == 2, "Saved craft", tradeButton)) tradeDesignSource = 2;
+            if (tradeDesignSource == 2)
+            {
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Choose VAB craft", tradeButton)) BrowseTradeBlueprint(EditorFacility.VAB);
+                if (GUILayout.Button("Choose SPH craft", tradeButton)) BrowseTradeBlueprint(EditorFacility.SPH);
+                GUILayout.EndHorizontal();
+                GUILayout.Label(tradeBlueprintLabel ?? "Choose a craft from this save's library.", tradeText);
+            }
             GUILayout.Label("3. Set both sides of the exchange", tradeHeading);
             GUILayout.Label("Your agency gives", tradeText); AmountInputs(ref giveFunds, ref giveScience);
             GUILayout.Label("The other agency gives", tradeText); AmountInputs(ref receiveFunds, ref receiveScience);
@@ -131,7 +152,7 @@ namespace LmpClient.Windows.Agency
             {
                 try
                 {
-                    var draft = includeEditorDesign ? TradeClient.CaptureCurrentDesign() : new TradeCommand();
+                    var draft = tradeDesignSource == 1 ? TradeClient.CaptureCurrentDesign() : tradeDesignSource == 2 ? TradeClient.CaptureBlueprint(tradeBlueprintPath) : new TradeCommand();
                     draft.BuyerAgencyId = tradeBuyer; draft.VesselId = tradeVessel;
                     draft.SellerFunds = ParseTradeAmount(giveFunds); draft.SellerScience = ParseTradeAmount(giveScience);
                     draft.BuyerFunds = ParseTradeAmount(receiveFunds); draft.BuyerScience = ParseTradeAmount(receiveScience);
@@ -141,6 +162,32 @@ namespace LmpClient.Windows.Agency
                 catch (Exception e) { tradeError = e.Message; }
             }
             GUI.enabled = enabled;
+        }
+
+        private static void BrowseTradeBlueprint(EditorFacility facility)
+        {
+            if (tradeBrowser != null) return;
+            var selectedAgency = tradeAgency;
+            var selectedSave = tradeSave;
+            try
+            {
+                tradeBrowser = CraftBrowserDialog.Spawn(facility, selectedSave,
+                    (CraftBrowserDialog.SelectFileCallback)((path, loadType) =>
+                    {
+                        tradeBrowser = null;
+                        if (!TradeClient.Ready || selectedAgency != AgencySystem.Singleton.MyAgencyId || selectedSave != HighLogic.SaveFolder) return;
+                        try
+                        {
+                            var design = TradeClient.CaptureBlueprint(path);
+                            tradeBlueprintPath = path;
+                            tradeBlueprintLabel = design.BlueprintName + " (" + design.Editor + ")";
+                            tradeDesignSource = 2;
+                            tradeError = null;
+                        }
+                        catch (Exception e) { tradeError = e.Message; }
+                    }), () => { tradeBrowser = null; }, false);
+            }
+            catch (Exception e) { tradeBrowser = null; tradeError = "Could not open craft library: " + e.Message; }
         }
 
         private static void AmountInputs(ref string funds, ref string science)

@@ -186,7 +186,7 @@ namespace ServerTest.Agency
                 denied("split parent");
                 Assert.IsFalse(Delete(owner, child).Success, "A pending split child is denied.");
                 Assert.IsFalse(AgencyVesselMap.IsDeleted(child));
-                AgencyVesselMap.CancelPendingSplits();
+                AgencyVesselMap.ClearPendingSplits();
                 epoch = AgencyVesselMap.CaptureEpoch();
 
                 // A craft that was docked away.

@@ -590,6 +590,7 @@
     <Compile Include="Utilities\DisclaimerDialog.cs" />
     <Compile Include="Windows\Agency\AgencyWindow.cs" />
     <Compile Include="Windows\Agency\AgencyDrawer.cs" />
+    <Compile Include="Windows\Agency\LeaderboardDrawer.cs" />
     <Compile Include="Windows\Agency\AgencyLaunchSitesDrawer.cs" />
     <Compile Include="Windows\Chat\ChatWindow.cs" />
     <Compile Include="Windows\Chat\ChatDrawer.cs" />

@@ -271,56 +271,5 @@ namespace LmpClient.Windows.Agency
             }
         }
 
-        private static void DrawLeaderboardTab()
-        {
-            GUILayout.Label("Cross-agency leaderboard. Sort by:");
-            _leaderboardSort = GUILayout.Toolbar(_leaderboardSort, _leaderboardSortLabels);
-
-            GUILayout.Space(6);
-
-            // Solo agencies are excluded — they're hidden book-keeping.
-            var rows = AgencySystem.Singleton.KnownAgencies.Values
-                .Where(a => !a.IsSolo)
-                .ToArray();
-
-            switch (_leaderboardSort)
-            {
-                case 0: rows = rows.OrderByDescending(a => a.FirstAchievementsCount).ThenByDescending(a => a.LifetimeFundsEarned).ToArray(); break;
-                case 1: rows = rows.OrderByDescending(a => a.LifetimeFundsEarned).ToArray(); break;
-                case 2: rows = rows.OrderByDescending(a => a.LifetimeScienceGenerated).ToArray(); break;
-                case 3: rows = rows.OrderByDescending(a => a.VesselsLaunched).ToArray(); break;
-            }
-
-            // Header row.
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("#", GUILayout.Width(24));
-            GUILayout.Label("Agency");
-            GUILayout.FlexibleSpace();
-            GUILayout.Label("Firsts", GUILayout.Width(50));
-            GUILayout.Label("Funds", GUILayout.Width(90));
-            GUILayout.Label("Science", GUILayout.Width(70));
-            GUILayout.Label("Vessels", GUILayout.Width(60));
-            GUILayout.EndHorizontal();
-
-            _leaderboardScrollPos = GUILayout.BeginScrollView(_leaderboardScrollPos);
-            for (int i = 0; i < rows.Length; i++)
-            {
-                var a = rows[i];
-                GUILayout.BeginHorizontal();
-                GUILayout.Label((i + 1).ToString(), GUILayout.Width(24));
-                GUILayout.Label(a.Id == AgencySystem.Singleton.MyAgencyId ? a.Name + "  (you)" : a.Name);
-                GUILayout.FlexibleSpace();
-                GUILayout.Label(a.FirstAchievementsCount.ToString(), GUILayout.Width(50));
-                GUILayout.Label(a.LifetimeFundsEarned.ToString("N0"), GUILayout.Width(90));
-                GUILayout.Label(a.LifetimeScienceGenerated.ToString("N1"), GUILayout.Width(70));
-                GUILayout.Label(a.VesselsLaunched.ToString(), GUILayout.Width(60));
-                GUILayout.EndHorizontal();
-            }
-            GUILayout.EndScrollView();
-
-            GUILayout.Space(4);
-            GUILayout.Label("Firsts: server-wide milestones (first to orbit, first to dock, etc.).");
-            GUILayout.Label("Funds / Science: lifetime totals — only positive deltas accumulate.");
-        }
     }
 }

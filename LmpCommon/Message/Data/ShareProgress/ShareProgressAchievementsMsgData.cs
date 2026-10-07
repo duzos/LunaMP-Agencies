@@ -1,4 +1,5 @@
 ﻿using Lidgren.Network;
+using LmpCommon.Agency;
 using LmpCommon.Message.Types;
 
 namespace LmpCommon.Message.Data.ShareProgress
@@ -13,6 +14,7 @@ namespace LmpCommon.Message.Data.ShareProgress
         public override ShareProgressMessageType ShareProgressMessageType => ShareProgressMessageType.AchievementsUpdate;
 
         public string Id;
+        public AchievementDetails Details;
         public int NumBytes;
         public byte[] Data = new byte[0];
 
@@ -25,10 +27,12 @@ namespace LmpCommon.Message.Data.ShareProgress
             lidgrenMsg.Write(Id);
             lidgrenMsg.Write(NumBytes);
             lidgrenMsg.Write(Data, 0, NumBytes);
+            AchievementWire.WriteDetails(lidgrenMsg, Details);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
         {
+            Details = null;
             base.InternalDeserialize(lidgrenMsg);
 
             Id = lidgrenMsg.ReadString();
@@ -38,11 +42,12 @@ namespace LmpCommon.Message.Data.ShareProgress
                 Data = new byte[NumBytes];
 
             lidgrenMsg.ReadBytes(Data, 0, NumBytes);
+            Details = AchievementWire.ReadDetails(lidgrenMsg);
         }
 
         internal override int InternalGetMessageSize()
         {
-            return base.InternalGetMessageSize() + sizeof(int) + sizeof(byte) * NumBytes;
+            return base.InternalGetMessageSize() + sizeof(int) + sizeof(byte) * NumBytes + AchievementWire.StringSize(Id) + AchievementWire.Size(Details);
         }
     }
 }

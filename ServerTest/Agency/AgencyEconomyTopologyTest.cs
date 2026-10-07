@@ -69,6 +69,54 @@ namespace ServerTest.Agency
         }
 
         [TestMethod]
+        public void MissingRequesterCannotCancelOtherPlayersPendingSplits()
+        {
+            using (var fixture = new AgencyEconomyTest.Fixture())
+            {
+                var firstParent = Launch(fixture, 1201, out _);
+                var secondParent = Launch(fixture, 1202, out _);
+                var firstChild = Guid.NewGuid();
+                var secondChild = Guid.NewGuid();
+                Assert.IsTrue(AgencyVesselMap.RestoreSplit(firstParent, firstChild, 0, 1201, null, "first", 10));
+                Assert.IsTrue(AgencyVesselMap.RestoreSplit(secondParent, secondChild, 0, 1202, null, "second", 20));
+
+                // A rejected handshake has an endpoint but no authenticated identity.
+                var rejected = (Server.Client.ClientStructure)typeof(object)
+                    .GetMethod("MemberwiseClone", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    .Invoke(fixture.Client, null);
+                var connection = (Lidgren.Network.NetConnection)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(Lidgren.Network.NetConnection));
+                typeof(Lidgren.Network.NetConnection).GetField("m_remoteEndPoint", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    .SetValue(connection, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 32499));
+                typeof(Server.Client.ClientStructure).GetField("<Connection>k__BackingField", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    .SetValue(rejected, connection);
+                rejected.Authenticated = false;
+                rejected.UniqueIdentifier = null;
+                rejected.ConnectionStatus = LmpCommon.Enums.ConnectionStatus.Disconnected;
+                Server.Context.ServerContext.Clients[rejected.Endpoint] = rejected;
+                Server.Client.ClientConnectionHandler.DisconnectClient(rejected);
+                Assert.IsTrue(AgencyVesselMap.IsPendingSplit(firstChild), "A rejected handshake must not cancel an authenticated player's split.");
+                Assert.IsTrue(AgencyVesselMap.IsPendingSplit(secondChild));
+
+                AgencyVesselMap.CancelPendingSplits(null, 10);
+                AgencyVesselMap.CancelPendingSplits(string.Empty, 20);
+                AgencyVesselMap.CancelPendingSplits(null, 10, firstChild);
+                Assert.IsTrue(AgencyVesselMap.IsPendingSplit(firstChild));
+                Assert.IsTrue(AgencyVesselMap.IsPendingSplit(secondChild));
+
+                AgencyVesselMap.CancelPendingSplits("first", 11);
+                Assert.IsTrue(AgencyVesselMap.IsPendingSplit(firstChild), "A stale connection must not cancel a different session.");
+                AgencyVesselMap.CancelPendingSplits("first", 10);
+                Assert.IsFalse(AgencyVesselMap.IsPendingSplit(firstChild));
+                Assert.IsTrue(AgencyVesselMap.IsPendingSplit(secondChild), "Disconnect cleanup must preserve the other requester.");
+
+                AgencyVesselMap.ClearPendingSplits();
+                Assert.IsFalse(AgencyVesselMap.IsPendingSplit(secondChild));
+                Assert.IsTrue(VesselStoreSystem.VesselExists(firstParent));
+                Assert.IsTrue(VesselStoreSystem.VesselExists(secondParent));
+            }
+        }
+
+        [TestMethod]
         public void AbandonedSplitCleanupIsSessionBoundAndStartupRestoresUsableParent()
         {
             using (var fixture = new AgencyEconomyTest.Fixture())
@@ -88,7 +136,7 @@ namespace ServerTest.Agency
                 Assert.IsTrue(AgencyVesselMap.RestoreSplit(parent, child, 0, 1101, null, actor, ticks));
                 AgencyVesselMap.Load();
                 AgencyEconomyStore.Load();
-                AgencyVesselMap.CancelPendingSplits();
+                AgencyVesselMap.ClearPendingSplits();
                 Assert.IsFalse(AgencyVesselMap.IsSplitParent(parent));
                 Assert.IsTrue(AgencyVesselMap.CanApplyEpoch(parent, AgencyVesselMap.CaptureEpoch()));
                 Assert.AreEqual(1101u, fixture.Snapshot.Vessels.Single(v => v.VesselId == parent).Parts.Single().FlightId);

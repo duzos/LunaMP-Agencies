@@ -57,12 +57,20 @@ namespace Server.Agency
         /// authenticated client. The full list of agencies is public metadata
         /// so every client can see the list in the browse UI.
         /// </summary>
+        internal static Action<AgencyInfo> UpsertSnapshotCaptured;
+
         public static void BroadcastUpsert(Agency agency)
         {
             if (agency == null) return;
-            var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyUpsertMsgData>();
-            data.Agency = agency.ToInfo();
-            MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
+            // Keep capture and queueing ordered with every mutation/publisher of this
+            // agency. Queueing only enqueues messages; it never takes TransactionGate.
+            lock (agency.Lock)
+            {
+                var data = ServerContext.ServerMessageFactory.CreateNewMessageData<AgencyUpsertMsgData>();
+                data.Agency = agency.ToInfo();
+                UpsertSnapshotCaptured?.Invoke(data.Agency);
+                MessageQueuer.SendToAllClients<AgencySrvMsg>(data);
+            }
         }
 
         public static void BroadcastDelete(Guid agencyId)

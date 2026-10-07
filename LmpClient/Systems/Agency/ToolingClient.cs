@@ -245,7 +245,12 @@ namespace LmpClient.Systems.Agency
             if (splitting != null && DateTime.UtcNow > splitting.Deadline) { RecoveryDisconnect("Split confirmation timed out."); return; }
             while (snapshots.TryDequeue(out var state))
             {
-                if (!BalanceAuthorityEnabled || state.AgencyId != AgencySystem.Singleton.MyAgencyId || state.Revision < revision) continue;
+                if (!BalanceAuthorityEnabled || state.AgencyId != AgencySystem.Singleton.MyAgencyId || state.Revision < revision)
+                {
+                    Diagnostics.PlaytestDiagnostics.Write("client.economy.snapshot.dropped", () =>
+                        $"agency={state.AgencyId} currentAgency={AgencySystem.Singleton.MyAgencyId} revision={state.Revision} currentRevision={revision} reason={(!BalanceAuthorityEnabled ? "disabled" : state.AgencyId != AgencySystem.Singleton.MyAgencyId ? "agency-mismatch" : "stale-revision")} offers={string.Join(",", (state.Offers ?? Array.Empty<TradeOffer>()).Select(o => o.OfferId.ToString("N")))}");
+                    continue;
+                }
                 lock (stateLock)
                 {
                     if (economySession != state.SessionId) { economySession = state.SessionId; nextSequence = state.LastSequence; }

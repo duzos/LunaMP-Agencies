@@ -28,7 +28,8 @@ namespace Server.Client
             if (!string.IsNullOrEmpty(reason))
                 LunaLog.Debug($"{client.PlayerName} sent Connection end message, reason: {reason}");
 
-            global::Server.Agency.AgencyVesselMap.CancelPendingSplits(client.UniqueIdentifier, client.ConnectionTime.Ticks);
+            if (client.Authenticated && !string.IsNullOrEmpty(client.UniqueIdentifier))
+                global::Server.Agency.AgencyVesselMap.CancelPendingSplits(client.UniqueIdentifier, client.ConnectionTime.Ticks);
             global::Server.Agency.AgencyEconomyStore.CancelPending(client);
             global::Server.Agency.VesselOwnershipSystem.Disconnect(client);
             //Remove Clients from list

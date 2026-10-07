@@ -1,4 +1,5 @@
 using Server.Log;
+using LmpCommon.Agency;
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
@@ -51,15 +52,18 @@ namespace Server.Agency
         /// Returns true and records the claim if no agency held it before;
         /// returns false if another agency already holds it (no-op).
         /// </summary>
-        public static bool ClaimIfFirst(Agency agency, string key)
+        public static bool ClaimIfFirst(Agency agency, string key, AchievementDetails details = null)
         {
             if (agency == null || string.IsNullOrEmpty(key)) return false;
 
+            AchievementWire.Validate(details);
+            if (key.Length > AchievementWire.MaxName) return false;
             if (Holders.TryAdd(key, agency.Id))
             {
                 lock (agency.Lock)
                 {
                     agency.FirstAchievements[key] = DateTime.UtcNow.Ticks;
+                    if (details != null) agency.FirstAchievementDetails[key] = AchievementWire.Copy(details);
                 }
                 LunaLog.Info($"[Agency] First achievement '{key}' claimed by '{agency.Name}'.");
                 AgencyStore.PersistAgency(agency);

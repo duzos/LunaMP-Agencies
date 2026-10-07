@@ -41,6 +41,8 @@ namespace Server.Agency
         /// is the UTC ticks the agency claimed it. AgencyAchievementRegistry
         /// guards against duplicate claims across agencies.
         /// </summary>
+        public readonly Dictionary<string, AchievementDetails> FirstAchievementDetails = new Dictionary<string, AchievementDetails>();
+
         public readonly Dictionary<string, long> FirstAchievements = new Dictionary<string, long>();
 
         /// <summary>
@@ -83,7 +85,7 @@ namespace Server.Agency
                     LifetimeFundsEarned = LifetimeFundsEarned,
                     LifetimeScienceGenerated = LifetimeScienceGenerated,
                     VesselsLaunched = VesselsLaunched,
-                    FirstAchievementsCount = FirstAchievements.Count,
+                    FirstAchievements = FirstAchievements.Select(kv => new FirstAchievement { Key = kv.Key, UtcTicks = kv.Value, Details = FirstAchievementDetails.TryGetValue(kv.Key, out var details) ? AchievementWire.Copy(details) : null }).ToArray(),
                     MemberUniqueIds = Members.Select(m => m.UniqueId ?? string.Empty).ToArray(),
                     MemberDisplayNames = Members.Select(m => m.DisplayName ?? string.Empty).ToArray(),
                 };

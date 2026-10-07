@@ -27,7 +27,7 @@ namespace Server.System
             var agency = AgencySystem.GetAgency(client.AgencyId);
             if (agency != null && !string.IsNullOrEmpty(data.Id))
             {
-                AgencyAchievementRegistry.ClaimIfFirst(agency, data.Id);
+                AgencyAchievementRegistry.ClaimIfFirst(agency, data.Id, data.Details);
             }
         }
     }

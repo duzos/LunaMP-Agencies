@@ -1,4 +1,5 @@
 using LmpCommon.Agency;
+using Newtonsoft.Json;
 using LunaConfigNode.CfgNode;
 using Server.Context;
 using Server.Log;
@@ -148,6 +149,13 @@ namespace Server.Agency
                 sb.Append("\tACHIEVEMENT\n\t{\n");
                 sb.Append($"\t\tkey = {EscapeText(kv.Key)}\n");
                 sb.Append($"\t\tutcTicks = {kv.Value.ToString(inv)}\n");
+                if (agency.FirstAchievementDetails.TryGetValue(kv.Key, out var details) && details != null)
+                {
+                    AchievementWire.Validate(details);
+                    // Base64 keeps ConfigNode delimiters, comment markers and Unicode names lossless.
+                    var encoded = Convert.ToBase64String(global::System.Text.Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(details)));
+                    sb.Append($"\t\tdetails = {encoded}\n");
+                }
                 sb.Append("\t}\n");
             }
             sb.Append("}\n");
@@ -224,6 +232,17 @@ namespace Server.Agency
                     if (string.IsNullOrEmpty(key)) continue;
                     var ticks = ParseLongSafe(GetValueOrDefault(an, "utcTicks", "0"));
                     agency.FirstAchievements[key] = ticks;
+                    var encoded = GetValueOrDefault(an, "details", null);
+                    if (!string.IsNullOrEmpty(encoded) && encoded.Length <= 150000)
+                    {
+                        try
+                        {
+                            var details = JsonConvert.DeserializeObject<AchievementDetails>(global::System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)));
+                            AchievementWire.Validate(details);
+                            if (details != null) agency.FirstAchievementDetails[key] = details;
+                        }
+                        catch (Exception) { /* Invalid optional details never replace the authoritative key/date. */ }
+                    }
                 }
             }
 

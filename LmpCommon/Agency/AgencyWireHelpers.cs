@@ -1,5 +1,7 @@
 using Lidgren.Network;
 using System;
+using System.IO;
+using System.Linq;
 
 namespace LmpCommon.Agency
 {
@@ -36,7 +38,13 @@ namespace LmpCommon.Agency
             msg.Write(a.LifetimeFundsEarned);
             msg.Write(a.LifetimeScienceGenerated);
             msg.Write(a.VesselsLaunched);
-            msg.Write(a.FirstAchievementsCount);
+            var firsts = a.FirstAchievements ?? Array.Empty<FirstAchievement>();
+            msg.Write(firsts.Length);
+            foreach (var first in firsts)
+            {
+                if (first == null || first.Key == null || first.Key.Length > AchievementWire.MaxName) throw new InvalidDataException("Invalid first key.");
+                msg.Write(first.Key); msg.Write(first.UtcTicks); AchievementWire.WriteDetails(msg, first.Details);
+            }
         }
 
         public static AgencyInfo ReadAgencyInfo(NetIncomingMessage msg)
@@ -66,8 +74,20 @@ namespace LmpCommon.Agency
             a.LifetimeFundsEarned = msg.ReadDouble();
             a.LifetimeScienceGenerated = msg.ReadFloat();
             a.VesselsLaunched = msg.ReadInt32();
-            a.FirstAchievementsCount = msg.ReadInt32();
+            var firstCount = msg.ReadInt32();
+            if (firstCount < 0 || firstCount > (msg.LengthBits - msg.Position) / 73) throw new InvalidDataException("Invalid first count.");
+            a.FirstAchievements = new FirstAchievement[firstCount];
+            for (var i = 0; i < firstCount; i++) a.FirstAchievements[i] = new FirstAchievement { Key = AchievementWire.ReadText(msg), UtcTicks = msg.ReadInt64(), Details = AchievementWire.ReadDetails(msg) };
             return a;
+        }
+
+        public static int AgencyInfoSize(AgencyInfo a)
+        {
+            var size = 73 + AchievementWire.StringSize(a.Name) + AchievementWire.StringSize(a.OwnerUniqueId) + AchievementWire.StringSize(a.OwnerDisplayName);
+            var ids = a.MemberUniqueIds ?? Array.Empty<string>(); var names = a.MemberDisplayNames ?? Array.Empty<string>();
+            for (var i = 0; i < ids.Length; i++) size += AchievementWire.StringSize(ids[i]) + AchievementWire.StringSize(i < names.Length ? names[i] : null);
+            foreach (var first in a.FirstAchievements ?? Array.Empty<FirstAchievement>()) size += AchievementWire.StringSize(first.Key) + 8 + AchievementWire.Size(first.Details);
+            return size;
         }
 
         public static void WriteJoinRequestInfo(NetOutgoingMessage msg, JoinRequestInfo r)

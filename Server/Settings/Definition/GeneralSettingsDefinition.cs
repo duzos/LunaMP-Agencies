@@ -108,6 +108,10 @@ namespace Server.Settings.Definition
         public bool AgencyHideCraft { get; set; } = false;
         [XmlComment(Value = "Antenna detection range multiplier (0 < value <= 1), independent of communication range. Invalid values use 0.01.")]
         public double AgencyDetectionRangeMultiplier { get; set; } = VisibilityPolicy.DefaultDetectionRangeMultiplier;
+        public double AgencyContactClassificationSeconds { get; set; } = VisibilityContactSettings.ClassificationSeconds;
+        public double AgencyContactIdentificationDistance { get; set; } = VisibilityContactSettings.IdentificationDistance;
+        public double AgencyContactExpirySeconds { get; set; } = VisibilityContactSettings.ExpirySeconds;
+        public double AgencyActiveDetectionRangeMultiplier { get; set; } = VisibilityContactSettings.ActiveDetectionRangeMultiplier;
         public double ToolingCostMultiplier { get; set; } = ToolingDefaults.ToolingCost;
         public double TooledLaunchMultiplier { get; set; } = ToolingDefaults.TooledLaunch;
         public double ToolingCombineMultiplier { get; set; } = ToolingDefaults.Combine;

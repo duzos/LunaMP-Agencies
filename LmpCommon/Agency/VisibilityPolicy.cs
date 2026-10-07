@@ -35,6 +35,7 @@ namespace LmpCommon.Agency
     {
         public VisibilityPoint Position;
         public double SensorRadius, PhysicsRadius;
+        public bool CanReceive;
     }
 
     public struct VisibilitySphere
@@ -74,13 +75,14 @@ namespace LmpCommon.Agency
             internal VisibilitySensor Sensor;
             internal Node Left, Right;
             internal double MinX, MinY, MinZ, MaxX, MaxY, MaxZ, MaxSensor, MaxPhysics;
+            internal bool HasReceiver;
         }
         private readonly Node root;
         public VisibilitySensorIndex(IEnumerable<VisibilitySensor> sensors)
         {
             var copy = (sensors ?? Array.Empty<VisibilitySensor>()).Where(s => s != null && s.Position.Valid)
                 .Select(s => new VisibilitySensor { Position = s.Position, SensorRadius = Radius(s.SensorRadius),
-                    PhysicsRadius = Math.Max(VisibilityPolicy.PhysicsFloor, Radius(s.PhysicsRadius)) }).ToArray();
+                    PhysicsRadius = Math.Max(VisibilityPolicy.PhysicsFloor, Radius(s.PhysicsRadius)), CanReceive = s.CanReceive }).ToArray();
             root = Build(copy, 0, copy.Length, 0);
         }
         private static double Radius(double value) => VisibilityPoint.Finite(value) && value > 0 ? value : 0;
@@ -92,6 +94,7 @@ namespace LmpCommon.Agency
             var sensor = sensors[middle]; var p = sensor.Position;
             var node = new Node { Sensor = sensor, MinX = p.X, MaxX = p.X, MinY = p.Y, MaxY = p.Y, MinZ = p.Z, MaxZ = p.Z,
                 MaxSensor = sensor.SensorRadius, MaxPhysics = sensor.PhysicsRadius,
+                HasReceiver = sensor.CanReceive,
                 Left = Build(sensors, start, middle - start, (axis + 1) % 3),
                 Right = Build(sensors, middle + 1, start + length - middle - 1, (axis + 1) % 3) };
             Include(node, node.Left); Include(node, node.Right); return node;
@@ -103,25 +106,34 @@ namespace LmpCommon.Agency
             node.MinY = Math.Min(node.MinY, child.MinY); node.MaxY = Math.Max(node.MaxY, child.MaxY);
             node.MinZ = Math.Min(node.MinZ, child.MinZ); node.MaxZ = Math.Max(node.MaxZ, child.MaxZ);
             node.MaxSensor = Math.Max(node.MaxSensor, child.MaxSensor); node.MaxPhysics = Math.Max(node.MaxPhysics, child.MaxPhysics);
+            node.HasReceiver |= child.HasReceiver;
         }
         public bool InSensorRange(VisibilityPoint target, Func<VisibilityPoint, VisibilityPoint, bool> lineOfSight = null) =>
-            target.Valid && Query(root, target, false, 0, lineOfSight);
+            target.Valid && Query(root, target, false, 0, lineOfSight, false, 0);
+        public bool InDetectionRange(VisibilityPoint target, double targetEmissionRadius,
+            Func<VisibilityPoint, VisibilityPoint, bool> lineOfSight = null) =>
+            target.Valid && Query(root, target, false, 0, lineOfSight, true, Radius(targetEmissionRadius));
         public bool InPhysicsRange(VisibilityPoint target, double targetPhysicsRadius = VisibilityPolicy.PhysicsFloor) =>
-            target.Valid && Query(root, target, true, Math.Max(VisibilityPolicy.PhysicsFloor, Radius(targetPhysicsRadius)), null);
+            target.Valid && Query(root, target, true, Math.Max(VisibilityPolicy.PhysicsFloor, Radius(targetPhysicsRadius)), null, false, 0);
         private static double Outside(double value, double min, double max) => value < min ? min - value : value > max ? value - max : 0;
-        private static bool Query(Node node, VisibilityPoint target, bool physics, double floor, Func<VisibilityPoint, VisibilityPoint, bool> lineOfSight)
+        private static bool Query(Node node, VisibilityPoint target, bool physics, double floor,
+            Func<VisibilityPoint, VisibilityPoint, bool> lineOfSight, bool requireReceiver, double targetEmissionRadius)
         {
             if (node == null) return false;
+            if (requireReceiver && !node.HasReceiver) return false;
             var radius = physics ? Math.Max(node.MaxPhysics, floor) : node.MaxSensor;
+            if (requireReceiver) radius = Math.Max(radius, targetEmissionRadius);
             if (radius <= 0) return false;
             var dx = Outside(target.X, node.MinX, node.MaxX); var dy = Outside(target.Y, node.MinY, node.MaxY); var dz = Outside(target.Z, node.MinZ, node.MaxZ);
             if (dx * dx + dy * dy + dz * dz > radius * radius) return false;
             var position = node.Sensor.Position;
             radius = physics ? Math.Max(node.Sensor.PhysicsRadius, floor) : node.Sensor.SensorRadius;
+            if (requireReceiver) radius = node.Sensor.CanReceive ? Math.Max(radius, targetEmissionRadius) : 0;
             dx = target.X - position.X; dy = target.Y - position.Y; dz = target.Z - position.Z;
             if (radius > 0 && dx * dx + dy * dy + dz * dz <= radius * radius &&
                 (lineOfSight == null || lineOfSight(position, target))) return true;
-            return Query(node.Left, target, physics, floor, lineOfSight) || Query(node.Right, target, physics, floor, lineOfSight);
+            return Query(node.Left, target, physics, floor, lineOfSight, requireReceiver, targetEmissionRadius) ||
+                Query(node.Right, target, physics, floor, lineOfSight, requireReceiver, targetEmissionRadius);
         }
     }
 }

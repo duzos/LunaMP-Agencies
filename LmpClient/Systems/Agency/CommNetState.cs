@@ -23,13 +23,14 @@ namespace LmpClient.Systems.Agency
     {
         public CommNetEndpointSnapshot Source { get; }
         public bool AcceptAll { get; }
+        public bool ActiveScanning { get; }
         public IReadOnlyList<CommNetEndpointSnapshot> Targets { get; }
         internal readonly CommNetPreference Value;
         internal CommNetPreferenceSnapshot(CommNetPreference value)
         {
-            Source = new CommNetEndpointSnapshot(value.Source); AcceptAll = value.AcceptAll;
+            Source = new CommNetEndpointSnapshot(value.Source); AcceptAll = value.AcceptAll; ActiveScanning = value.ActiveScanning;
             Targets = Array.AsReadOnly(value.Targets.Select(t => new CommNetEndpointSnapshot(t)).ToArray());
-            Value = new CommNetPreference { Source = Source.Value, AcceptAll = AcceptAll, Targets = Targets.Select(t => t.Value).ToArray() };
+            Value = new CommNetPreference { Source = Source.Value, AcceptAll = AcceptAll, ActiveScanning = ActiveScanning, Targets = Targets.Select(t => t.Value).ToArray() };
         }
     }
     public sealed class CommNetResultSnapshot
@@ -57,6 +58,13 @@ namespace LmpClient.Systems.Agency
         public IReadOnlyDictionary<Guid, CommNetPreferenceSnapshot> GetCommNetPreferences()
         {
             lock (commNetLock) return new ReadOnlyDictionary<Guid, CommNetPreferenceSnapshot>(commNetPreferences);
+        }
+        internal bool IsActiveScanning(Guid vessel)
+        {
+            lock (commNetLock)
+                return commNetReady && commNetEndpoints.TryGetValue(vessel, out var endpoint) &&
+                    commNetPreferences.TryGetValue(vessel, out var preference) && preference.ActiveScanning &&
+                    endpoint.OwnerAgencyId != Guid.Empty && CommNetOptInPolicy.SameStamp(endpoint.Value, preference.Source.Value);
         }
         internal bool CanLinkCommNet(Guid a, Guid b)
         {

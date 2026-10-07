@@ -104,9 +104,29 @@ Custom flag files must already be available through the server's existing flag s
 and a clear line past celestial bodies' solid spheres. Terrain and atmosphere are not
 occluders. `AgencyDetectionRangeMultiplier` defaults to `0.01`: an HG-5's nominal
 5,000 km becomes a 50 km detection radius, without reducing its communications range.
-Any detector in your agency can reveal a craft; it need not remain in range throughout
-its orbit. Visibility updates periodically. Explicit visibility sharing, your own craft,
-and close-range physics visibility remain independent of sensor detection.
+Use the *CommNet* tab to select a craft and switch between passive listening and active
+radar. New craft start passive. Active radar uses `AgencyActiveDetectionRangeMultiplier`
+(default `3`), giving an HG-5 a 150 km scan radius and the same emission radius. Any
+usable antenna can passively hear an active scanner within that scanner's emission
+radius. Silent craft require active scanning. Both routes respect planetary blocking;
+radar mode does not change actual communications or sharing agreements. Modded antennas
+using KSP's antenna interface are supported, including Near Future Exploration transmitters.
+
+Detection initially shows an anonymous contact and approximate orbit. The marker displays
+observation progress; after `AgencyContactClassificationSeconds` (default `600`) of
+observation it reveals agency and approximate size. Approaching within
+`AgencyContactIdentificationDistance` (default `2500` metres) identifies the craft.
+After detection is lost, its last observed position and orbit stop updating and fade out
+over `AgencyContactExpirySeconds` (default `600`). Timers use real time, unaffected by
+warp. Contact knowledge is local to the current client session. Explicit visibility
+sharing, your own craft, and close-range physics visibility remain independent of sensors.
+
+**Windows installer.** Releases include a standalone installer executable containing the
+client package. It detects KSP across Steam libraries and also supports browsing to a
+custom installation. Close KSP, run the installer, confirm the destination, then select
+*Install*. Existing settings and custom non-binary files are retained, with backup and
+recovery files saved under the chosen KSP directory. The ZIP remains available for manual
+installation and other operating systems.
 
 The in-game admin window (press Admin, enter admin password) gets a new **Agencies** tab with:
 

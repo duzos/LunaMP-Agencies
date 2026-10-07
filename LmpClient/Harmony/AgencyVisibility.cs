@@ -17,6 +17,11 @@ namespace LmpClient.Harmony
         private static FieldInfo markerVessel,markerCanvas,orbitTarget;
         private static MethodInfo rebuildList,updateCounts;
         private static bool restoringCounts;
+        private static FieldInfo orbitLineField;
+        private static PropertyInfo orbitLineActive;
+        private sealed class OrbitMask { internal object Line; internal bool Active; }
+        private static readonly Dictionary<OrbitRendererBase,OrbitMask> orbitMasks = new Dictionary<OrbitRendererBase,OrbitMask>();
+        private static readonly HashSet<OrbitRendererBase> observedOrbits = new HashSet<OrbitRendererBase>();
         private sealed class Mask {internal float Alpha;internal bool Interactable,Blocks;}
         private static readonly Dictionary<CanvasGroup,Mask> masks=new Dictionary<CanvasGroup,Mask>();
         private static readonly Dictionary<TrackingStationObjectButton,bool> counts=new Dictionary<TrackingStationObjectButton,bool>();
@@ -24,6 +29,8 @@ namespace LmpClient.Harmony
         {
             try
             {
+                orbitLineField=AccessTools.Field(typeof(OrbitRendererBase),"orbitLine")??throw new MissingFieldException("OrbitRendererBase.orbitLine");
+                orbitLineActive=orbitLineField.FieldType.GetProperty("active")??throw new MissingMemberException("VectorLine.active");
                 markerVessel=AccessTools.Field(typeof(KSCVesselMarker),"v")??throw new MissingFieldException("KSCVesselMarker.v");
                 markerCanvas=AccessTools.Field(typeof(KSCVesselMarker),"canvasGroup")??throw new MissingFieldException("KSCVesselMarker.canvasGroup");
                 orbitTarget=AccessTools.Field(typeof(OrbitTargeter),"target")??throw new MissingFieldException("OrbitTargeter.target");
@@ -32,6 +39,12 @@ namespace LmpClient.Harmony
                 Patch(harmony,typeof(MapViewFiltering),"CheckAgainstFilter",new[]{typeof(Vessel)},null,nameof(Filter));
                 Patch(harmony,typeof(OrbitRenderer),"CanDrawAnyIcons",Type.EmptyTypes,null,nameof(Icons));
                 Patch(harmony,typeof(OrbitRendererBase),"CanDrawAnyIcons",Type.EmptyTypes,null,nameof(Icons));
+                Patch(harmony,typeof(OrbitRendererBase),"DrawSpline",Type.EmptyTypes,nameof(Spline));
+                var hit = typeof(OrbitRendererBase.OrbitCastHit).MakeByRefType();
+                Patch(harmony,typeof(OrbitRendererBase),"OrbitCast",new[]{typeof(Vector3),hit,typeof(float)},nameof(OrbitHit));
+                Patch(harmony,typeof(OrbitRendererBase),"OrbitCast",new[]{typeof(Vector3),typeof(Camera),hit,typeof(float)},nameof(OrbitHit));
+                Patch(harmony,typeof(OrbitRenderer),"OrbitCast",new[]{typeof(Vector3),hit,typeof(float)},nameof(OrbitHit));
+                Patch(harmony,typeof(MainSystem),"OnGUI",Type.EmptyTypes,null,nameof(DrawContacts));
                 Patch(harmony,typeof(VesselLabels),"ProcessLabel",new[]{typeof(BaseLabel),typeof(Vessel),typeof(ITargetable),typeof(Vector3)},nameof(Label));
                 foreach(var method in new[]{"GoToAndFocusVessel","RequestVessel","FlyVessel","onVesselIconClick"})Patch(harmony,typeof(SpaceTracking),method,new[]{typeof(Vessel)},nameof(Select));
                 Patch(harmony,typeof(SpaceTracking),"SetVessel",new[]{typeof(Vessel),typeof(bool)},nameof(Select));
@@ -64,6 +77,47 @@ namespace LmpClient.Harmony
         private static bool OrbitSelect(OrbitDriver __0)=>!__0 || VisibilityClient.CanSee(__0.vessel);
         private static void OrbitVisible(OrbitTargeter __instance,ref bool __result)
         {var target=orbitTarget.GetValue(__instance) as OrbitDriver;if(__result && target && !VisibilityClient.CanSee(target.vessel))__result=false;}
+        private static void DrawContacts()
+        {
+            try { Windows.Agency.VisibilityContactOverlay.Draw(); }
+            catch(Exception e) { Diagnostics.PlaytestDiagnostics.Write("client.contacts.overlay-error",()=>e.Message); }
+        }
+        private static bool OrbitHit(OrbitRendererBase __instance, ref bool __result)
+        { if(VisibilityClient.CanSee(__instance.vessel))return true; __result=false; return false; }
+        private static bool Spline(OrbitRendererBase __instance)
+        {
+            if(VisibilityClient.Enabled)observedOrbits.Add(__instance);
+            return ApplyOrbitMask(__instance);
+        }
+        private static bool ApplyOrbitMask(OrbitRendererBase renderer)
+        {
+            var allowed = !VisibilityClient.Enabled || VisibilityClient.CanSee(renderer.vessel);
+            var line = orbitLineField.GetValue(renderer);
+            if(orbitMasks.TryGetValue(renderer,out var saved) && (!ReferenceEquals(saved.Line,line) || allowed))
+            {
+                if(allowed && ReferenceEquals(saved.Line,line))try { orbitLineActive.SetValue(saved.Line,saved.Active,null); } catch { }
+                orbitMasks.Remove(renderer);
+            }
+            if(!allowed && line!=null)
+            {
+                if(!orbitMasks.ContainsKey(renderer))orbitMasks[renderer]=new OrbitMask{Line=line,Active=(bool)orbitLineActive.GetValue(line,null)};
+                orbitLineActive.SetValue(line,false,null);
+            }
+            return allowed;
+        }
+        internal static void RefreshOrbitMasks()
+        {
+            foreach(var renderer in new List<OrbitRendererBase>(observedOrbits))
+            {
+                if(!renderer){observedOrbits.Remove(renderer);orbitMasks.Remove(renderer);continue;}
+                ApplyOrbitMask(renderer);
+            }
+        }
+        private static void RestoreOrbitMasks()
+        {
+            foreach(var pair in orbitMasks)try{if(ReferenceEquals(orbitLineField.GetValue(pair.Key),pair.Value.Line))orbitLineActive.SetValue(pair.Value.Line,pair.Value.Active,null);}catch{}
+            orbitMasks.Clear();observedOrbits.Clear();
+        }
         private static void Restore(CanvasGroup group)
         {
             if(!group || !masks.TryGetValue(group,out var state))return;
@@ -82,6 +136,7 @@ namespace LmpClient.Harmony
         {if(VisibilityClient.Enabled && !restoringCounts){counts[__instance]=__0;__0=false;}}
         internal static void RestorePresentation()
         {
+            RestoreOrbitMasks();
             foreach(var group in new List<CanvasGroup>(masks.Keys))Restore(group);
             masks.Clear();
             restoringCounts=true;

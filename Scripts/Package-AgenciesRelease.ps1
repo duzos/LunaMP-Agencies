@@ -38,7 +38,9 @@ function Add-Updater([string]$dir) {
     [System.IO.File]::WriteAllText((Join-Path $dir 'build.txt'), $number, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-$out = Join-Path $repo "Artifacts\Release-$tag"
+$out = [System.IO.Path]::GetFullPath((Join-Path $repo "Artifacts\Release-$tag"))
+$artifactsRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'Artifacts')) + [System.IO.Path]::DirectorySeparatorChar
+if (-not $out.StartsWith($artifactsRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Release output escaped Artifacts' }
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 
 # 3. client
@@ -79,7 +81,26 @@ Push-Location (Join-Path $out 'Client')
 try { & $sevenZip a -tzip $clientZip 'GameData' | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'client zip failed' } } finally { Pop-Location }
 Push-Location $srv
 try { & $sevenZip a -tzip $serverZip '*' | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'server zip failed' } } finally { Pop-Location }
-$lines = Get-FileHash $clientZip, $serverZip -Algorithm SHA256 | ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(), (Split-Path $_.Path -Leaf) }
+# 7. A standalone Windows installer embeds the exact client ZIP; no companion download is needed.
+$installerMetadata = Join-Path $out 'installer-metadata.txt'
+$clientHash = (Get-FileHash $clientZip -Algorithm SHA256).Hash.ToLowerInvariant()
+[System.IO.File]::WriteAllText($installerMetadata, "$number`n$tag`n$clientHash`n", (New-Object System.Text.UTF8Encoding($false)))
+$installerProject = Join-Path $repo 'Updater\LmpAgenciesInstaller\LmpAgenciesInstaller.csproj'
+& $dotnet build $installerProject -c Release --no-incremental "-p:ClientPayload=$clientZip" "-p:InstallerMetadata=$installerMetadata"
+if ($LASTEXITCODE -ne 0) { throw 'installer build failed' }
+$installerBin = Join-Path $repo 'Updater\LmpAgenciesInstaller\bin\Release\net48'
+if (Get-ChildItem $installerBin -File -Filter *.dll) { throw 'installer must not require companion DLLs' }
+$installerExe = Join-Path $out "LunaMultiplayer-Agencies-Installer-$tag.exe"
+Copy-Item (Join-Path $installerBin 'LmpAgenciesInstaller.exe') $installerExe -Force
+$assembly = [System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($installerExe))
+$embedded = $assembly.GetManifestResourceStream('client.zip')
+if ($null -eq $embedded) { throw 'installer has no embedded client ZIP' }
+try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $embeddedHash = [System.BitConverter]::ToString($sha.ComputeHash($embedded)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+} finally { $embedded.Dispose() }
+if ($embeddedHash -ne $clientHash) { throw 'installer payload differs from client ZIP' }
+$lines = Get-FileHash $clientZip, $serverZip, $installerExe -Algorithm SHA256 | ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(), (Split-Path $_.Path -Leaf) }
 [System.IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Get-Content (Join-Path $out 'SHA256SUMS.txt')
 Write-Host "Output: $out"

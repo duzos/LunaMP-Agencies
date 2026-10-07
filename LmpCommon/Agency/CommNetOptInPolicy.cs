@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 namespace LmpCommon.Agency
 {
-    public enum CommNetOperation : byte { SetAcceptAll, SetTarget }
+    public enum CommNetOperation : byte { SetAcceptAll, SetTarget, SetActiveScanning }
     public sealed class CommNetEndpoint
     {
         public Guid VesselId;
@@ -15,8 +15,9 @@ namespace LmpCommon.Agency
     {
         public CommNetEndpoint Source;
         public bool AcceptAll;
+        public bool ActiveScanning;
         public CommNetEndpoint[] Targets = Array.Empty<CommNetEndpoint>();
-        public CommNetPreference Copy() => new CommNetPreference { Source=Source.Copy(), AcceptAll=AcceptAll, Targets=Targets.Select(t=>t.Copy()).ToArray() };
+        public CommNetPreference Copy() => new CommNetPreference { Source=Source.Copy(), AcceptAll=AcceptAll, ActiveScanning=ActiveScanning, Targets=Targets.Select(t=>t.Copy()).ToArray() };
     }
     public static class CommNetOptInPolicy
     {

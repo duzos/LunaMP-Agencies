@@ -16,9 +16,9 @@ namespace LmpCommonTest
   {
    var peer=new NetClient(new NetPeerConfiguration("commnet-wire"));var factory=new ServerMessageFactory();
    var a=new CommNetEndpoint{VesselId=Guid.NewGuid(),OwnerAgencyId=Guid.NewGuid(),OwnershipRevision=3};var b=new CommNetEndpoint{VesselId=Guid.NewGuid(),OwnerAgencyId=Guid.NewGuid(),OwnershipRevision=4};
-   var source=factory.CreateNewMessageData<AgencyCommNetSnapshotMsgData>();source.Ready=true;source.Revision=8;source.Endpoints=new[]{a,b};source.Preferences=new[]{new CommNetPreference{Source=a,Targets=new[]{b}},new CommNetPreference{Source=b,AcceptAll=true}};
+   var source=factory.CreateNewMessageData<AgencyCommNetSnapshotMsgData>();source.Ready=true;source.Revision=8;source.Endpoints=new[]{a,b};source.Preferences=new[]{new CommNetPreference{Source=a,ActiveScanning=true,Targets=new[]{b}},new CommNetPreference{Source=b,AcceptAll=true}};
    var output=peer.CreateMessage();source.Serialize(output);Assert.IsTrue(source.GetMessageSize()>=output.LengthBytes);var target=factory.CreateNewMessageData<AgencyCommNetSnapshotMsgData>();target.Deserialize(Incoming(peer,output));
-   Assert.IsTrue(target.Ready);Assert.AreEqual(8L,target.Revision);Assert.AreEqual(4L,target.Preferences[0].Targets[0].OwnershipRevision);Assert.IsTrue(target.Preferences[1].AcceptAll);
+   Assert.IsTrue(target.Ready);Assert.AreEqual(8L,target.Revision);Assert.AreEqual(4L,target.Preferences[0].Targets[0].OwnershipRevision);Assert.IsTrue(target.Preferences[1].AcceptAll);Assert.IsTrue(target.Preferences[0].ActiveScanning);Assert.IsFalse(target.Preferences[1].ActiveScanning);Assert.IsTrue(target.Preferences[0].Copy().ActiveScanning);
    Assert.ThrowsException<EndOfStreamException>(()=>target.Deserialize(Incoming(peer,output,output.LengthBits-1)));Assert.IsFalse(target.Ready);Assert.AreEqual(0,target.Endpoints.Length);
   }
   [TestMethod]

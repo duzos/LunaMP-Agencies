@@ -8,6 +8,34 @@ namespace LmpCommonTest
     public class VisibilityPolicyTest
     {
         [TestMethod]
+        public void ActiveScansSilentTargetsAndPassiveReceiversHearActiveEmitters()
+        {
+            var target = new VisibilityPoint(50000, 0, 0);
+            var passive = new VisibilitySensorIndex(new[] { new VisibilitySensor { Position = new VisibilityPoint(0, 0, 0), CanReceive = true } });
+            Assert.IsFalse(passive.InDetectionRange(target, 0), "Passive/passive cannot detect.");
+            Assert.IsTrue(passive.InDetectionRange(target, 50000), "Weak receiver hears powerful target at emitted boundary.");
+            Assert.IsFalse(passive.InDetectionRange(new VisibilityPoint(50000.1, 0, 0), 50000));
+            var active = new VisibilitySensorIndex(new[] { new VisibilitySensor { Position = new VisibilityPoint(0, 0, 0), CanReceive = true, SensorRadius = 50000 } });
+            Assert.IsTrue(active.InDetectionRange(target, 0), "Active detects silent target.");
+            var broken = new VisibilitySensorIndex(new[] { new VisibilitySensor { Position = new VisibilityPoint(0, 0, 0), CanReceive = false, SensorRadius = 100000 } });
+            Assert.IsFalse(broken.InDetectionRange(target, 100000), "Unavailable antenna can neither scan nor receive.");
+            Assert.IsTrue(broken.InPhysicsRange(new VisibilityPoint(2000, 0, 0)));
+        }
+
+        [TestMethod]
+        public void EmissionSearchExpandsTreeBoundsAndContinuesPastOccludedReceiver()
+        {
+            var sensors = new[] {
+                new VisibilitySensor { Position = new VisibilityPoint(-20,0,0), CanReceive = true },
+                new VisibilitySensor { Position = new VisibilityPoint(-15,0,0), CanReceive = true },
+                new VisibilitySensor { Position = new VisibilityPoint(25,0,0), CanReceive = true } };
+            var index = new VisibilitySensorIndex(sensors);
+            sensors[2].CanReceive = false;
+            var bodies = new[] { new VisibilitySphere(new VisibilityPoint(0,0,0),10) };
+            Assert.IsTrue(index.InDetectionRange(new VisibilityPoint(20,0,0),50,(a,b)=>VisibilityLineOfSight.IsClear(a,b,bodies)));
+            Assert.IsFalse(index.InDetectionRange(new VisibilityPoint(20,0,0),double.NaN));
+        }
+        [TestMethod]
         public void SolidBodiesBlockFarSideButNotSurfaceOutwardOrTangency()
         {
             var bodies = new[] { new VisibilitySphere(new VisibilityPoint(0, 0, 0), 10) };

@@ -73,12 +73,12 @@ namespace LmpAgenciesUpdater
         /// (with a backup and a rollback). Every outcome writes the result file. <paramref name="waitForExit"/> gets the pid
         /// and a timeout (null = wait forever) and returns false if the process was still running at the deadline.
         /// </summary>
-        public static InstallResult Run(HelperOptions o, Func<int, TimeSpan?, bool> waitForExit, Action<string> faultInjector = null)
+        public static InstallResult Run(HelperOptions o, Func<int, TimeSpan?, bool> waitForExit, Action<string> faultInjector = null, bool clientInstaller = false, Action preSwap = null)
         {
             if (o == null) throw new ArgumentNullException(nameof(o));
             if (waitForExit == null) throw new ArgumentNullException(nameof(waitForExit));
 
-            var result = Execute(o, waitForExit, faultInjector);
+            var result = Execute(o, waitForExit, faultInjector, clientInstaller, preSwap);
             try
             {
                 HelperCommandLine.WriteResult(o.Result, result.Success, result.Build, result.PreviousBuild, result.Message);
@@ -154,12 +154,12 @@ namespace LmpAgenciesUpdater
 
         // ------------------------------------------------------------------ the run
 
-        private static InstallResult Execute(HelperOptions o, Func<int, TimeSpan?, bool> waitForExit, Action<string> faultInjector)
+        private static InstallResult Execute(HelperOptions o, Func<int, TimeSpan?, bool> waitForExit, Action<string> faultInjector, bool clientInstaller, Action preSwap)
         {
             var state = new State();
             try
             {
-                var message = Install(o, waitForExit, faultInjector, state);
+                var message = Install(o, waitForExit, faultInjector, state, clientInstaller, preSwap);
                 return new InstallResult { Success = true, Build = o.Build, PreviousBuild = state.Previous, Message = message };
             }
             catch (TimedOutException e)
@@ -189,7 +189,7 @@ namespace LmpAgenciesUpdater
         }
 
         /// <summary>The seven steps. Returns the success message; every rejection or failure is an exception.</summary>
-        private static string Install(HelperOptions o, Func<int, TimeSpan?, bool> waitForExit, Action<string> faultInjector, State state)
+        private static string Install(HelperOptions o, Func<int, TimeSpan?, bool> waitForExit, Action<string> faultInjector, State state, bool clientInstaller, Action preSwap)
         {
             // 1. wait for the game or server to release its files
             var exited = waitForExit(o.Pid, o.WaitTimeoutSeconds == 0 ? (TimeSpan?)null : TimeSpan.FromSeconds(o.WaitTimeoutSeconds));
@@ -197,7 +197,7 @@ namespace LmpAgenciesUpdater
             if (!exited) throw new TimedOutException("Timed out waiting for exit.");
 
             // 2. never install over the same or a newer build
-            if (o.Build <= state.Previous)
+            if (o.Build < state.Previous || o.Build == state.Previous && !(clientInstaller && o.Mode == HelperMode.Client))
                 throw new InstallException("Refusing to install agencies." + o.Build + " over agencies." + state.Previous + ".");
             CheckPaths(o);
 
@@ -217,7 +217,8 @@ namespace LmpAgenciesUpdater
             if (o.Mode == HelperMode.Client)
             {
                 ValidateClientLayout(o);
-                note = SwapClient(o, faultInjector, state.Previous); // 5
+                preSwap?.Invoke(); // Last guard after expensive extraction, before any live directory moves.
+                note = SwapClient(o, faultInjector, state.Previous, clientInstaller); // 5
             }
             else
             {
@@ -391,7 +392,7 @@ namespace LmpAgenciesUpdater
 
         // ------------------------------------------------------------------ client swap
 
-        private static string SwapClient(HelperOptions o, Action<string> fault, int previous)
+        private static string SwapClient(HelperOptions o, Action<string> fault, int previous, bool preserveCustomFiles)
         {
             var live = Path.Combine(o.Target, "LunaMultiplayer");
             var liveHarmony = Path.Combine(o.Target, "000_Harmony");
@@ -419,6 +420,7 @@ namespace LmpAgenciesUpdater
 
                 // b. only these things survive from the old install: Data (replacing the payload's), Screenshots, missing Flags
                 if (oldMoved) CarryOver(backupMod, payloadMod);
+                if (oldMoved && preserveCustomFiles) CarryOverCustomFiles(backupMod, payloadMod);
 
                 // c. the new mod takes its place
                 Directory.Move(payloadMod, live);
@@ -485,6 +487,20 @@ namespace LmpAgenciesUpdater
 
             var oldFlags = Path.Combine(oldMod, "Flags");
             if (Directory.Exists(oldFlags)) CopyDirectory(oldFlags, Path.Combine(newMod, "Flags"), true);
+        }
+
+        // Keep absent user files for manual installs, without reviving obsolete plugin/helper binaries.
+        private static void CarryOverCustomFiles(string source, string destination)
+        {
+            foreach (var file in Directory.GetFiles(source))
+            {
+                var extension = Path.GetExtension(file);
+                if (string.Equals(extension, ".dll", StringComparison.OrdinalIgnoreCase) || string.Equals(extension, ".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                var target = Path.Combine(destination, Path.GetFileName(file));
+                if (!File.Exists(target)) CopyFile(file, target);
+            }
+            foreach (var directory in Directory.GetDirectories(source))
+                CarryOverCustomFiles(directory, Path.Combine(destination, Path.GetFileName(directory)));
         }
 
         // ------------------------------------------------------------------ server swap

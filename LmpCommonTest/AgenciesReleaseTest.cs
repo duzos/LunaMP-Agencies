@@ -55,8 +55,8 @@ namespace LmpCommonTest
         [TestMethod]
         public void BuildTagMatchesNumber()
         {
-            Assert.AreEqual(3, AgenciesBuild.Number);
-            Assert.AreEqual("v0.30.0-agencies.3", AgenciesBuild.Tag);
+            Assert.AreEqual(4, AgenciesBuild.Number);
+            Assert.AreEqual("v0.30.0-agencies.4", AgenciesBuild.Tag);
             Assert.AreEqual(AgenciesBuild.Number, AgenciesRelease.ParseBuild(AgenciesBuild.Tag));
         }
 

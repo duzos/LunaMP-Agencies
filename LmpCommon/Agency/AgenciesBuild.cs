@@ -7,7 +7,7 @@ namespace LmpCommon.Agency
     /// </summary>
     public static class AgenciesBuild
     {
-        public const int Number = 3;
+        public const int Number = 4;
         public const string UpstreamVersion = "0.30.0";
         public const string Owner = "duzos";
         public const string Repo = "LunaMP-Agencies";

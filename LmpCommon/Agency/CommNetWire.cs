@@ -20,11 +20,11 @@ namespace LmpCommon.Agency
         public static void Write(NetOutgoingMessage m,CommNetPreference p)
         {
             if(p==null || p.Targets==null || p.Targets.Length>CommNetOptInPolicy.MaxTargets) throw new InvalidDataException();
-            Write(m,p.Source);m.Write(p.AcceptAll);m.Write(p.Targets.Length);foreach(var t in p.Targets)Write(m,t);
+            Write(m,p.Source);m.Write(p.AcceptAll);m.Write(p.ActiveScanning);m.Write(p.Targets.Length);foreach(var t in p.Targets)Write(m,t);
         }
         public static CommNetPreference ReadPreference(NetIncomingMessage m)
         {
-            var p=new CommNetPreference{Source=Read(m)};VesselOwnershipWire.Require(m,33);p.AcceptAll=m.ReadBoolean();int count=m.ReadInt32();
+            var p=new CommNetPreference{Source=Read(m)};VesselOwnershipWire.Require(m,34);p.AcceptAll=m.ReadBoolean();p.ActiveScanning=m.ReadBoolean();int count=m.ReadInt32();
             if(count<0 || count>CommNetOptInPolicy.MaxTargets)throw new InvalidDataException();VesselOwnershipWire.Require(m,count*320);
             p.Targets=new CommNetEndpoint[count];for(int i=0;i<count;i++)p.Targets[i]=Read(m);
             if(p.Targets.Select(x=>x.VesselId).Distinct().Count()!=count)throw new InvalidDataException();return p;

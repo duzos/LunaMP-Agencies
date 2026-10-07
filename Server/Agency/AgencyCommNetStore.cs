@@ -29,7 +29,8 @@ namespace Server.Agency
         private static string _loadError;
         private static long _snapshotRevision;
         public static string FilePath=>Path.Combine(ServerContext.UniverseDirectory,"AgencyCommNet.json");
-        public static bool Enabled=>GeneralSettings.SettingsStore.AgencyCommNetOptIn && GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
+        public static bool AgreementsEnabled=>GeneralSettings.SettingsStore.AgencyCommNetOptIn && GeneralSettings.SettingsStore.AgencyCommNetPerAgency;
+        public static bool Enabled=>AgreementsEnabled || GeneralSettings.SettingsStore.AgencyHideCraft;
         public static bool Ready { get { lock(AgencyVesselMap.TransactionGate) return _loadError==null && AgencyVesselMap.Ready; } }
         public static void Load()
         {
@@ -78,7 +79,7 @@ namespace Server.Agency
             var current=endpoints.ToDictionary(e=>e.VesselId);
             return _document.Preferences.Where(p=>current.TryGetValue(p.Source.VesselId,out var source) && source.OwnerAgencyId!=Guid.Empty && CommNetOptInPolicy.SameStamp(source,p.Source)).Select(p=>new CommNetPreference
             {
-                Source=p.Source.Copy(),AcceptAll=p.AcceptAll,
+                Source=p.Source.Copy(),AcceptAll=p.AcceptAll,ActiveScanning=p.ActiveScanning,
                 Targets=p.Targets.Where(t=>current.TryGetValue(t.VesselId,out var target) && target.OwnerAgencyId!=Guid.Empty && CommNetOptInPolicy.SameStamp(target,t)).Select(t=>t.Copy()).ToArray()
             }).ToArray();
         }
@@ -94,7 +95,11 @@ namespace Server.Agency
         {
             lock(AgencyVesselMap.TransactionGate)
             {
-                if(!Enabled)return(false,"CommNet opt-in is disabled.");
+                if(operation==CommNetOperation.SetActiveScanning)
+                {
+                    if(!GeneralSettings.SettingsStore.AgencyHideCraft)return(false,"Craft detection is disabled.");
+                }
+                else if(!AgreementsEnabled)return(false,"CommNet opt-in is disabled.");
                 if(!Ready)return(false,_loadError??"Vessel ownership is unavailable.");
                 if(client==null || !client.Authenticated || client.ConnectionStatus!=ConnectionStatus.Connected || !ServerContext.Clients.Values.Any(c=>ReferenceEquals(c,client)) || !AgencyStore.Agencies.TryGetValue(client.AgencyId,out var agency) || !agency.HasMember(client.UniqueIdentifier))return(false,"Active agency membership is required.");
                 var endpoints=Endpoints();var source=endpoints.FirstOrDefault(e=>e.VesselId==vesselId);
@@ -103,6 +108,7 @@ namespace Server.Agency
                 switch(operation)
                 {
                     case CommNetOperation.SetAcceptAll:preference.AcceptAll=enabled;break;
+                    case CommNetOperation.SetActiveScanning:preference.ActiveScanning=enabled;break;
                     case CommNetOperation.SetTarget:
                         if(targetId==vesselId)return(false,"Select a different craft.");
                         var target=endpoints.FirstOrDefault(e=>e.VesselId==targetId);

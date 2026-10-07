@@ -78,7 +78,7 @@ namespace LmpClient.Systems.Agency
             {
                 var mine=AgencySystem.Singleton.MyAgencyId;var owner=Owner(id);
                 return VisibilityPolicy.CanSee(mine,owner,ready,sharedOwners.Contains(owner),localOverrides.TryGetValue(id,out var rule)?rule:VisibilityOverride.Inherit,physicsUntil.TryGetValue(id,out var physicalUntil)&&physicalUntil>DateTime.UtcNow,
-                    visibleUntil.TryGetValue(id,out var until)&&until>DateTime.UtcNow);
+                    visibleUntil.TryGetValue(id,out var until)&&until>DateTime.UtcNow && VisibilityContacts.Identified(id));
             }
         }
         public static bool CanSee(Vessel vessel)
@@ -108,8 +108,9 @@ namespace LmpClient.Systems.Agency
                 wasEnabled=false;return;
             }
             wasEnabled=true;
+            VisibilityContacts.Prepare();
             var all=FlightGlobals.Vessels;
-            if(all==null || all.Count==0)return;
+            if(all==null || all.Count==0){Harmony.AgencyVisibility.RefreshOrbitMasks();return;}
             var now=DateTime.UtcNow;
             lock(gate)
             {
@@ -117,7 +118,7 @@ namespace LmpClient.Systems.Agency
                 {
                     if(sensorCursor>=all.Count)sensorCursor=0;
                     var vessel=all[sensorCursor++];
-                    if(!vessel || Owner(vessel.id)!=AgencySystem.Singleton.MyAgencyId || AgencySystem.Singleton.MyAgencyId==Guid.Empty)continue;
+                    if(!vessel)continue;
                     if(!sensors.TryGetValue(vessel.id,out var cached)||cached.Expires<=now)
                         sensors[vessel.id]=new SensorCache{Power=VisibilitySensors.StrongestPower(vessel),Expires=now.AddSeconds(2)};
                 }
@@ -139,17 +140,35 @@ namespace LmpClient.Systems.Agency
                 {
                     if(!vessel || Owner(vessel.id)!=AgencySystem.Singleton.MyAgencyId || AgencySystem.Singleton.MyAgencyId==Guid.Empty)continue;
                     var floor=PhysicsRadius(vessel);var power=sensors.TryGetValue(vessel.id,out var cache)&&cache.Expires>now?cache.Power:0;
-                    samples.Add(new VisibilitySensor{Position=Point(vessel),SensorRadius=VisibilityPolicy.DetectionRadius(power,SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier),PhysicsRadius=floor});
+                    var activeScan = AgencySystem.Singleton.IsActiveScanning(vessel.id);
+                    samples.Add(new VisibilitySensor{Position=Point(vessel),
+                        SensorRadius=activeScan ? VisibilityPolicy.DetectionRadius(power,SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier) * SettingsSystem.ServerSettings.AgencyActiveDetectionRangeMultiplier : 0,
+                        PhysicsRadius=floor, CanReceive=power>0});
                 }
                 index=new VisibilitySensorIndex(samples);
+                VisibilityContacts.Reconcile((id, owner, ownershipRevision) => !ready ||
+                    endpoints.TryGetValue(id,out var entry) && entry.OwnerAgencyId == owner && entry.OwnershipRevision == ownershipRevision);
                 for(var count=0;count<Math.Min(128,all.Count);count++)
                 {
                     if(targetCursor>=all.Count)targetCursor=0;
                     var vessel=all[targetCursor++];if(!vessel)continue;
                     var before=CanSee(vessel.id);var point=Point(vessel);
-                    var inRange=index.InSensorRange(point,(sensor,target)=>VisibilityLineOfSight.IsClear(sensor,target,occluders));
+                    var targetPower = sensors.TryGetValue(vessel.id,out var targetCache) && targetCache.Expires>now ? targetCache.Power : 0;
+                    var emissionRadius = AgencySystem.Singleton.IsActiveScanning(vessel.id) ?
+                        VisibilityPolicy.DetectionRadius(targetPower,SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier) * SettingsSystem.ServerSettings.AgencyActiveDetectionRangeMultiplier : 0;
+                    var inRange=index.InDetectionRange(point,emissionRadius,(sensor,target)=>VisibilityLineOfSight.IsClear(sensor,target,occluders));
                     if(index.InPhysicsRange(point,PhysicsRadius(vessel)))physicsUntil[vessel.id]=now.AddSeconds(1);else physicsUntil.Remove(vessel.id);
                     if(inRange)visibleUntil[vessel.id]=now.AddSeconds(1);else visibleUntil.Remove(vessel.id);
+                    var owner = Owner(vessel.id);
+                    var shared = VisibilityPolicy.CanSee(AgencySystem.Singleton.MyAgencyId, owner, ready, sharedOwners.Contains(owner),
+                        localOverrides.TryGetValue(vessel.id,out var rule) ? rule : VisibilityOverride.Inherit, false, false);
+                    var closeDistance = SettingsSystem.ServerSettings.AgencyContactIdentificationDistance;
+                    var close = samples.Any(sensor => {
+                        var dx = sensor.Position.X - point.X; var dy = sensor.Position.Y - point.Y; var dz = sensor.Position.Z - point.Z;
+                        return dx*dx + dy*dy + dz*dz <= closeDistance*closeDistance && VisibilityLineOfSight.IsClear(sensor.Position,point,occluders);
+                    });
+                    VisibilityContacts.Observe(vessel, owner, endpoints.TryGetValue(vessel.id,out var contactEndpoint) ? contactEndpoint.OwnershipRevision : 0,
+                        ready && inRange, close, shared);
                     var after=CanSee(vessel.id);
                     if(before!=after)
                     {
@@ -158,12 +177,14 @@ namespace LmpClient.Systems.Agency
                     }
                 }
             }
+            Harmony.AgencyVisibility.RefreshOrbitMasks();
             Harmony.AgencyVisibility.ClearHiddenSelection();
             if(refreshPresentation && now>=nextPresentation){refreshPresentation=false;nextPresentation=now.AddMilliseconds(250);Harmony.AgencyVisibility.RefreshPresentation();}
         }
         internal static void Clear()
         {
             lock(gate){endpoints.Clear();grants=Array.Empty<VisibilityAgencyGrant>();overrides=Array.Empty<VisibilityCraftOverride>();sharedOwners.Clear();localOverrides.Clear();visibleUntil.Clear();physicsUntil.Clear();sensors.Clear();ready=false;revision=-1;nextIndex=default(DateTime);index=new VisibilitySensorIndex(Array.Empty<VisibilitySensor>());refreshPresentation=true;}
+            VisibilityContacts.Clear();
             LatestStatus=null;
         }
     }

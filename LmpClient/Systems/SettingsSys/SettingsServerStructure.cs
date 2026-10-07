@@ -41,6 +41,10 @@ namespace LmpClient.Systems.SettingsSys
         public bool AgencyTrade;
         public bool AgencyHideCraft;
         public double AgencyDetectionRangeMultiplier = VisibilityPolicy.DefaultDetectionRangeMultiplier;
+        public double AgencyContactClassificationSeconds = VisibilityContactSettings.ClassificationSeconds;
+        public double AgencyContactIdentificationDistance = VisibilityContactSettings.IdentificationDistance;
+        public double AgencyContactExpirySeconds = VisibilityContactSettings.ExpirySeconds;
+        public double AgencyActiveDetectionRangeMultiplier = VisibilityContactSettings.ActiveDetectionRangeMultiplier;
         public double ToolingCostMultiplier = ToolingDefaults.ToolingCost;
         public double TooledLaunchMultiplier = ToolingDefaults.TooledLaunch;
         public double UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch;

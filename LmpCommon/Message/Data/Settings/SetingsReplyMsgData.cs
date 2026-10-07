@@ -86,6 +86,10 @@ namespace LmpCommon.Message.Data.Settings
         public bool AgencyTrade;
         public bool AgencyHideCraft;
         public double AgencyDetectionRangeMultiplier = VisibilityPolicy.DefaultDetectionRangeMultiplier;
+        public double AgencyContactClassificationSeconds = VisibilityContactSettings.ClassificationSeconds;
+        public double AgencyContactIdentificationDistance = VisibilityContactSettings.IdentificationDistance;
+        public double AgencyContactExpirySeconds = VisibilityContactSettings.ExpirySeconds;
+        public double AgencyActiveDetectionRangeMultiplier = VisibilityContactSettings.ActiveDetectionRangeMultiplier;
         public double ToolingCostMultiplier = ToolingDefaults.ToolingCost, TooledLaunchMultiplier = ToolingDefaults.TooledLaunch, ToolingCombineMultiplier = ToolingDefaults.Combine, UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch;
 
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
@@ -168,6 +172,10 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(AgencyHideCraft);
             lidgrenMsg.Write(UntooledLaunchMultiplier);
             lidgrenMsg.Write(VisibilityPolicy.NormalizeDetectionMultiplier(AgencyDetectionRangeMultiplier));
+            lidgrenMsg.Write(VisibilityContactSettings.NormalizeClassificationSeconds(AgencyContactClassificationSeconds));
+            lidgrenMsg.Write(VisibilityContactSettings.NormalizeIdentificationDistance(AgencyContactIdentificationDistance));
+            lidgrenMsg.Write(VisibilityContactSettings.NormalizeExpirySeconds(AgencyContactExpirySeconds));
+            lidgrenMsg.Write(VisibilityContactSettings.NormalizeActiveDetectionRangeMultiplier(AgencyActiveDetectionRangeMultiplier));
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -262,6 +270,10 @@ namespace LmpCommon.Message.Data.Settings
             AgencyTrade = false;
             AgencyHideCraft = false;
             AgencyDetectionRangeMultiplier = VisibilityPolicy.DefaultDetectionRangeMultiplier;
+            AgencyContactClassificationSeconds = VisibilityContactSettings.ClassificationSeconds;
+            AgencyContactIdentificationDistance = VisibilityContactSettings.IdentificationDistance;
+            AgencyContactExpirySeconds = VisibilityContactSettings.ExpirySeconds;
+            AgencyActiveDetectionRangeMultiplier = VisibilityContactSettings.ActiveDetectionRangeMultiplier;
             ToolingCostMultiplier = ToolingDefaults.ToolingCost; TooledLaunchMultiplier = ToolingDefaults.TooledLaunch; ToolingCombineMultiplier = ToolingDefaults.Combine; UntooledLaunchMultiplier = ToolingDefaults.LegacyUntooledLaunch;
             if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 193)
             {
@@ -276,7 +288,17 @@ namespace LmpCommon.Message.Data.Settings
                 {
                     UntooledLaunchMultiplier = lidgrenMsg.ReadDouble();
                     if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 64)
+                    {
                         AgencyDetectionRangeMultiplier = VisibilityPolicy.NormalizeDetectionMultiplier(lidgrenMsg.ReadDouble());
+                        if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 192)
+                        {
+                            AgencyContactClassificationSeconds = VisibilityContactSettings.NormalizeClassificationSeconds(lidgrenMsg.ReadDouble());
+                            AgencyContactIdentificationDistance = VisibilityContactSettings.NormalizeIdentificationDistance(lidgrenMsg.ReadDouble());
+                            AgencyContactExpirySeconds = VisibilityContactSettings.NormalizeExpirySeconds(lidgrenMsg.ReadDouble());
+                            if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 64)
+                                AgencyActiveDetectionRangeMultiplier = VisibilityContactSettings.NormalizeActiveDetectionRangeMultiplier(lidgrenMsg.ReadDouble());
+                        }
+                    }
                 }
             }
         }
@@ -284,7 +306,7 @@ namespace LmpCommon.Message.Data.Settings
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 35 + sizeof(double) * 5 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 35 + sizeof(double) * 9 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

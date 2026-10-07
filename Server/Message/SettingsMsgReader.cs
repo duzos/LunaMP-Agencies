@@ -52,6 +52,10 @@ namespace Server.Message
             msgData.AgencyTrade = GeneralSettings.SettingsStore.AgencyTrade;
             msgData.AgencyHideCraft = GeneralSettings.SettingsStore.AgencyHideCraft;
             msgData.AgencyDetectionRangeMultiplier = LmpCommon.Agency.VisibilityPolicy.NormalizeDetectionMultiplier(GeneralSettings.SettingsStore.AgencyDetectionRangeMultiplier);
+            msgData.AgencyContactClassificationSeconds = LmpCommon.Agency.VisibilityContactSettings.NormalizeClassificationSeconds(GeneralSettings.SettingsStore.AgencyContactClassificationSeconds);
+            msgData.AgencyContactIdentificationDistance = LmpCommon.Agency.VisibilityContactSettings.NormalizeIdentificationDistance(GeneralSettings.SettingsStore.AgencyContactIdentificationDistance);
+            msgData.AgencyContactExpirySeconds = LmpCommon.Agency.VisibilityContactSettings.NormalizeExpirySeconds(GeneralSettings.SettingsStore.AgencyContactExpirySeconds);
+            msgData.AgencyActiveDetectionRangeMultiplier = LmpCommon.Agency.VisibilityContactSettings.NormalizeActiveDetectionRangeMultiplier(GeneralSettings.SettingsStore.AgencyActiveDetectionRangeMultiplier);
             msgData.ToolingCostMultiplier = GeneralSettings.SettingsStore.ToolingCostMultiplier;
             msgData.TooledLaunchMultiplier = GeneralSettings.SettingsStore.TooledLaunchMultiplier;
             msgData.ToolingCombineMultiplier = GeneralSettings.SettingsStore.ToolingCombineMultiplier;

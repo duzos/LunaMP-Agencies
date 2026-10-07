@@ -47,6 +47,10 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.AgencyTrade = msgData.AgencyTrade;
             SettingsSystem.ServerSettings.AgencyHideCraft = msgData.AgencyHideCraft;
             SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier = LmpCommon.Agency.VisibilityPolicy.NormalizeDetectionMultiplier(msgData.AgencyDetectionRangeMultiplier);
+            SettingsSystem.ServerSettings.AgencyContactClassificationSeconds = LmpCommon.Agency.VisibilityContactSettings.NormalizeClassificationSeconds(msgData.AgencyContactClassificationSeconds);
+            SettingsSystem.ServerSettings.AgencyContactIdentificationDistance = LmpCommon.Agency.VisibilityContactSettings.NormalizeIdentificationDistance(msgData.AgencyContactIdentificationDistance);
+            SettingsSystem.ServerSettings.AgencyContactExpirySeconds = LmpCommon.Agency.VisibilityContactSettings.NormalizeExpirySeconds(msgData.AgencyContactExpirySeconds);
+            SettingsSystem.ServerSettings.AgencyActiveDetectionRangeMultiplier = LmpCommon.Agency.VisibilityContactSettings.NormalizeActiveDetectionRangeMultiplier(msgData.AgencyActiveDetectionRangeMultiplier);
             SettingsSystem.ServerSettings.ToolingCostMultiplier = msgData.ToolingCostMultiplier;
             SettingsSystem.ServerSettings.TooledLaunchMultiplier = msgData.TooledLaunchMultiplier;
             SettingsSystem.ServerSettings.ToolingCombineMultiplier = msgData.ToolingCombineMultiplier;

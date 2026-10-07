@@ -814,6 +814,54 @@ namespace ServerTest.Updater
 
         // ------------------------------------------------------------------ single instance
 
+        [TestMethod]
+        public void ManualInstallerRepairsSameBuildPreservesUserFilesButNotObsoleteBinaries()
+        {
+            InstallClient("3");
+            var mod = Path.Combine(_gameData, "LunaMultiplayer");
+            WriteFile(Path.Combine(mod, "Notes", "custom.txt"), "personal note");
+            WriteFile(Path.Combine(mod, "Plugins", "obsolete.dll"), "old binary");
+            var options = ClientOptions(ClientPayload(3));
+            var result = UpdateInstaller.Run(options, Exited, clientInstaller: true);
+            Assert.IsTrue(result.Success, result.Message);
+            CollectionAssert.AreEqual(SettingsBytes, File.ReadAllBytes(Path.Combine(mod, "Data", "settings.xml")));
+            Assert.AreEqual("personal note", File.ReadAllText(Path.Combine(mod, "Notes", "custom.txt")));
+            Assert.IsFalse(File.Exists(Path.Combine(mod, "Plugins", "obsolete.dll")));
+            Assert.IsTrue(File.Exists(Path.Combine(options.Backup, "LunaMultiplayer", "Plugins", "obsolete.dll")));
+        }
+
+        [TestMethod]
+        public void ManualInstallerNeverDowngrades()
+        {
+            InstallClient("4"); var before = Snapshot(_gameData);
+            var result = UpdateInstaller.Run(ClientOptions(ClientPayload(3)), Exited, clientInstaller: true);
+            Assert.IsFalse(result.Success); AssertSame(before, Snapshot(_gameData), "live GameData");
+        }
+
+        [TestMethod]
+        public void FinalGuardRunsAfterExtractionAndBeforeAnyLiveDirectoryChanges()
+        {
+            InstallClient(); var before = Snapshot(_gameData); var options = ClientOptions(ClientPayload(3)); var called = false;
+            var result = UpdateInstaller.Run(options, Exited, clientInstaller: true, preSwap: () =>
+            {
+                called = true;
+                Assert.IsTrue(File.Exists(Path.Combine(options.Extract, "GameData", "LunaMultiplayer", "Plugins", "LmpClient.dll")));
+                throw new InvalidOperationException("KSP started while extracting");
+            });
+            Assert.IsTrue(called); Assert.IsFalse(result.Success);
+            AssertSame(before, Snapshot(_gameData), "both live mod trees");
+            Assert.IsFalse(Directory.Exists(options.Backup), "Nothing was moved before the late guard.");
+        }
+
+        [TestMethod]
+        public void ManualInstallerFailureRollsBackCustomFilesAndSettings()
+        {
+            InstallClient(); WriteFile(Path.Combine(_gameData, "LunaMultiplayer", "my-note.txt"), "keep"); var before = Snapshot(_gameData);
+            var result = UpdateInstaller.Run(ClientOptions(ClientPayload(3)), Exited,
+                point => { if (point == UpdateInstaller.FaultClientHarmonySwapped) throw new IOException("injected"); }, clientInstaller: true);
+            Assert.IsFalse(result.Success); AssertSame(before, Snapshot(_gameData), "rolled back client");
+        }
+
         private static bool OnOtherThread(Func<bool> action)
         {
             var result = false;

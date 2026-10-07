@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>LmpAgenciesInstaller</AssemblyName>
+    <RootNamespace>LmpAgenciesInstaller</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Compile Include="..\LmpAgenciesUpdater\UpdateInstaller.cs" Link="UpdateInstaller.cs" />
+    <Compile Include="..\LmpAgenciesUpdater\HelperCommandLine.cs" Link="HelperCommandLine.cs" />
+    <EmbeddedResource Include="$(ClientPayload)" LogicalName="client.zip" Condition="'$(ClientPayload)' != ''" />
+    <EmbeddedResource Include="$(InstallerMetadata)" LogicalName="installer.txt" Condition="'$(InstallerMetadata)' != ''" />
+  </ItemGroup>
+  <Target Name="ValidateInstallerPayload" BeforeTargets="BeforeBuild" Condition="'$(ClientPayload)' != '' Or '$(InstallerMetadata)' != ''">
+    <Error Condition="!Exists('$(ClientPayload)') Or !Exists('$(InstallerMetadata)')" Text="Installer payload ZIP and metadata must both exist." />
+  </Target>
+</Project>

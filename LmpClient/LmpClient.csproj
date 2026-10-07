@@ -500,6 +500,8 @@
     <Compile Include="Systems\Agency\CommNetState.cs" />
     <Compile Include="Systems\Agency\ToolingClient.cs" />
     <Compile Include="Systems\Agency\TradeClient.cs" />
+    <Compile Include="Systems\Agency\VisibilityContacts.cs" />
+    <Compile Include="Windows\Agency\VisibilityContactOverlay.cs" />
     <Compile Include="Systems\Agency\VisibilityClient.cs" />
     <Compile Include="Systems\Agency\VisibilitySensors.cs" />
     <Compile Include="Harmony\AgencyVisibility.cs" />

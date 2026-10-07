@@ -13,6 +13,45 @@ namespace LmpCommonTest
         [DataRow(0)]
         [DataRow(1)]
         [DataRow(64)]
+        [DataRow(65)]
+        [DataRow(256)]
+        public void ContactSettingsTailIsAtomicAndActiveMultiplierIndependentlyOptional(int missingBits)
+        {
+            var factory = new ServerMessageFactory(); var peer = new NetClient(new NetPeerConfiguration("ContactSettings"));
+            var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            source.AgencyContactClassificationSeconds = 100; source.AgencyContactIdentificationDistance = 4000;
+            source.AgencyContactExpirySeconds = 200; source.AgencyActiveDetectionRangeMultiplier = 4;
+            var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
+            var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
+            incoming.LengthBits = outgoing.LengthBits - missingBits;
+            var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            parsed.AgencyContactClassificationSeconds = 99; parsed.AgencyContactIdentificationDistance = 99;
+            parsed.AgencyContactExpirySeconds = 99; parsed.AgencyActiveDetectionRangeMultiplier = 99;
+            parsed.Deserialize(incoming);
+            Assert.AreEqual(missingBits <= 64 ? 100d : 600, parsed.AgencyContactClassificationSeconds);
+            Assert.AreEqual(missingBits <= 64 ? 4000d : 2500, parsed.AgencyContactIdentificationDistance);
+            Assert.AreEqual(missingBits <= 64 ? 200d : 600, parsed.AgencyContactExpirySeconds);
+            Assert.AreEqual(missingBits == 0 ? 4d : 3, parsed.AgencyActiveDetectionRangeMultiplier);
+        }
+
+        [TestMethod]
+        public void ContactSettingsDefaultsAndInvalidValuesUseSafeRates()
+        {
+            var settings = new ServerMessageFactory().CreateNewMessageData<SettingsReplyMsgData>();
+            Assert.AreEqual(600d, settings.AgencyContactClassificationSeconds); Assert.AreEqual(2500d, settings.AgencyContactIdentificationDistance);
+            Assert.AreEqual(600d, settings.AgencyContactExpirySeconds); Assert.AreEqual(3d, settings.AgencyActiveDetectionRangeMultiplier);
+            foreach (var value in new[] { 0d, -1d, double.NaN, double.PositiveInfinity, 1e100 })
+            {
+                Assert.AreEqual(600d, VisibilityContactSettings.NormalizeClassificationSeconds(value));
+                Assert.AreEqual(2500d, VisibilityContactSettings.NormalizeIdentificationDistance(value));
+                Assert.AreEqual(600d, VisibilityContactSettings.NormalizeExpirySeconds(value));
+                Assert.AreEqual(3d, VisibilityContactSettings.NormalizeActiveDetectionRangeMultiplier(value));
+            }
+        }
+        [DataTestMethod]
+        [DataRow(0)]
+        [DataRow(1)]
+        [DataRow(64)]
         public void DetectionMultiplierRoundTripsOrResetsForOldAndPartialTails(int missingBits)
         {
             var factory = new ServerMessageFactory();
@@ -22,7 +61,7 @@ namespace LmpCommonTest
             source.UntooledLaunchMultiplier = 4;
             var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
-            incoming.LengthBits = outgoing.LengthBits - missingBits;
+            incoming.LengthBits = outgoing.LengthBits - 256 - missingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyDetectionRangeMultiplier = .9;
             parsed.Deserialize(incoming);
@@ -243,7 +282,7 @@ namespace LmpCommonTest
             var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
             // A server without the setting stops after the hide-craft flag; a double that is not fully there must not be half read either.
-            incoming.LengthBits = outgoing.LengthBits - 64 - missingTrailingBits;
+            incoming.LengthBits = outgoing.LengthBits - 320 - missingTrailingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>(); parsed.UntooledLaunchMultiplier = 9;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyTooling); Assert.IsTrue(parsed.AgencyTrade); Assert.IsTrue(parsed.AgencyHideCraft);

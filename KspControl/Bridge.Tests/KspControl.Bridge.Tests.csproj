@@ -7,5 +7,6 @@
     <ProjectReference Include="../Contracts/KspControl.Contracts.csproj" />
     <Compile Include="../Bridge/ObservationQueue.cs" Link="ObservationQueue.cs" />
     <Compile Include="../Bridge/LoopbackServer.cs" Link="LoopbackServer.cs" />
+    <Compile Include="../Bridge/ExecutionAuthority.cs" Link="ExecutionAuthority.cs" />
   </ItemGroup>
 </Project>

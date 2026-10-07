@@ -104,6 +104,7 @@ namespace KspControl.Contracts
         public const string LaunchPending = "launch_pending";
         public const string LaunchSiteInvalid = "launch_site_invalid";
         public const string LaunchRefused = "launch_refused";
+        public const string LaunchLocked = "launch_locked";
         public const string LaunchNotStarted = "launch_not_started";
         public const string LaunchRejected = "launch_rejected";
         public const string LaunchTimeout = "launch_timeout";

@@ -24,7 +24,7 @@ namespace KspControl.Bridge
             var permissions = payload.Operations.Distinct(StringComparer.Ordinal).Where(o => Array.IndexOf(KnownEffects, o) >= 0)
                 .SelectMany(o => payload.Facilities.Select(f => new EffectPermission(o, (o.StartsWith("craft.", StringComparison.Ordinal) ? "ships:" : "editor:") + f)));
             return new TrustedExecutionGrant(payload.GrantId, payload.Generation, GrantBinding.From(payload.Binding), payload.ExpiresAt, permissions,
-                payload.Facilities.Select(f => "editor:" + f));
+                payload.Facilities.Select(f => "editor:" + f), payload.SpendLimitFunds);
         }
     }
 
@@ -100,7 +100,7 @@ namespace KspControl.Bridge
             return new GrantStatusInfo
             {
                 Present = true, State = state, Detail = code, Id = valid.Id, Generation = valid.Generation, Operations = valid.Operations,
-                Facilities = valid.Facilities, UnsavedCraftPolicy = valid.UnsavedCraftPolicy, ExpiresUtc = valid.ExpiresUtc, SpendLimitFunds = valid.SpendLimitFunds
+                Facilities = valid.Facilities, UnsavedCraftPolicy = valid.UnsavedCraftPolicy, ExpiresUtc = valid.ExpiresUtc, SpendLimitFunds = valid.SpendLimitFunds, EffectiveSpendCap = valid.EffectiveSpendCap
             };
         }
 

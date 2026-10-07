@@ -86,9 +86,13 @@ namespace KspControl.Bridge
             finally { tracker.EndDispatch(); }
             if (!ok)
             {
-                // A refusal reported by the facade acted on nothing; an exception inside the launch routine may have.
-                if (threw) { job.Dispatched = true; Indeterminate(job, OperationReasons.OperationError, "the launch routine threw " + reason); return; }
-                Fail(job, MapRefusal(reason), reason);
+                // A plain refusal acted on nothing. But the launch routine itself may have run (and reserved funds) before it failed: an exception,
+                // or a reservation already pending, means it acted.
+                var acted = threw || port.LaunchPending || (reason != null && (reason.StartsWith("launch_exception", StringComparison.Ordinal) || reason.StartsWith("launch_error", StringComparison.Ordinal)));
+                if (!acted) { Fail(job, MapRefusal(reason), reason); return; }
+                job.Dispatched = true; job.SawPending = port.LaunchPending;
+                if (job.SawPending) { job.BeganAt = clock(); job.Phase = LaunchPhase.Await; Touch(job); return; } // follow the reservation that exists
+                Indeterminate(job, OperationReasons.OperationError, "the launch routine failed after it may have acted: " + reason);
                 return;
             }
             job.Dispatched = true; job.BeganAt = clock(); job.SawPending = port.LaunchPending;
@@ -101,6 +105,7 @@ namespace KspControl.Bridge
             {
                 case "launch_pending": return OperationReasons.LaunchPending;
                 case "launch_site_invalid": return OperationReasons.LaunchSiteInvalid;
+                case "launch_locked": return OperationReasons.LaunchLocked;
                 case "editor_unavailable": return ControlReasons.EditorUnavailable;
                 default: return OperationReasons.LaunchRefused;
             }
@@ -125,7 +130,15 @@ namespace KspControl.Bridge
                 if (job.SawPending && !pending) { WaitForRefund(job, JobStatuses.Failed, OperationReasons.LaunchRejected, port.LaunchStatus ?? "the launch reservation ended without a flight scene"); return; }
                 if (!job.SawPending && now - job.BeganAt > options.NotStartedMilliseconds)
                 {
-                    Fail(job, OperationReasons.LaunchNotStarted, "no launch reservation began; a pre-flight prompt may be waiting for the human");
+                    // The stock pre-flight prompt may still be open and could launch later: close it, and only call the job a no-effect failure once that is confirmed.
+                    var closed = false;
+                    try { closed = port.CloseLaunchPrompt(); } catch (Exception) { closed = false; }
+                    if (closed && !port.LaunchPending)
+                    {
+                        job.RefundConfirmed = true; // nothing was reserved, so nothing is owed
+                        Fail(job, OperationReasons.LaunchNotStarted, "no launch reservation began; the pre-flight prompt was closed");
+                    }
+                    else Indeterminate(job, OperationReasons.LaunchNotStarted, "no launch reservation began and the pre-flight prompt could not be confirmed closed");
                     return;
                 }
             }
@@ -150,7 +163,7 @@ namespace KspControl.Bridge
                 WaitForRefund(job, JobStatuses.Cancelled, reason, null);
                 return;
             }
-            if (!job.SawPending) { Finish(job, JobStatuses.Cancelled, reason, null); return; }
+            if (!job.SawPending) { job.RefundConfirmed = true; Finish(job, JobStatuses.Cancelled, reason, null); return; }
             WaitForRefund(job, JobStatuses.Cancelled, reason, null);
         }
 

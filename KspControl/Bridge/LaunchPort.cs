@@ -51,6 +51,8 @@ namespace KspControl.Bridge
         double? LastCharge { get; }
         /// <summary>Runs the editor's own launch routine for the site. False with a reason when it could not be invoked.</summary>
         bool BeginLaunch(string site, out string reason);
+        /// <summary>Closes a stock pre-flight prompt a launch left open. True only when it was closed and no reservation is pending.</summary>
+        bool CloseLaunchPrompt();
         /// <summary>Cancels a reservation that has not started loading the flight scene, through the normal cancel flow. False when there is nothing to cancel.</summary>
         bool CancelPendingLaunch();
         /// <summary>The active vessel when the flight scene is ready, otherwise null.</summary>

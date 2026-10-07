@@ -99,6 +99,16 @@ namespace KspControl.Bridge
             return ok;
         }
 
+        public bool CloseLaunchPrompt()
+        {
+            try
+            {
+                var method = Facade == null ? null : Facade.GetMethod("CloseLaunchPrompt", Static);
+                return method != null && (bool)method.Invoke(null, null);
+            }
+            catch (Exception) { return false; }
+        }
+
         public bool CancelPendingLaunch()
         {
             try

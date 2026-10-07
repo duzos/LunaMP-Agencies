@@ -23,9 +23,13 @@ namespace KspControl.BridgeTests
         public bool BeginResult = true;
         public string BeginReason;
         public bool BeginThrows;
+        /// <summary>Run OnBegin even when the routine then reports failure (it acted before it failed).</summary>
+        public bool ActsBeforeFailing;
         public int BeginCalls, CancelCalls;
         public string BeginSite;
         public bool CancelWorks = true;
+        public bool PromptCloses = true;
+        public int CloseCalls;
         public Action OnBegin, OnCancel;
         public LaunchVessel Vessel;
         public bool Owned = true;
@@ -44,9 +48,10 @@ namespace KspControl.BridgeTests
         {
             BeginCalls++; BeginSite = site; reason = BeginReason;
             if (BeginThrows) throw new InvalidOperationException("launch routine failed");
-            if (BeginResult && OnBegin != null) OnBegin();
+            if ((BeginResult || ActsBeforeFailing) && OnBegin != null) OnBegin();
             return BeginResult;
         }
+        public bool CloseLaunchPrompt() { CloseCalls++; return PromptCloses && !Pending; }
         public bool CancelPendingLaunch() { CancelCalls++; if (!CancelWorks) return false; if (OnCancel != null) OnCancel(); return true; }
         public LaunchVessel ActiveVessel { get { return SceneName == "FLIGHT" ? Vessel : null; } }
         public bool VesselOwned(string vesselId) { return Owned; }

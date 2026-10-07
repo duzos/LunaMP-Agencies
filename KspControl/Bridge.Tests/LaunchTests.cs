@@ -347,6 +347,40 @@ namespace KspControl.BridgeTests
             StartAndBegin();
             var job = rig.RunToEnd(milliseconds: 1000, maxFrames: 60);
             Assert.AreEqual(JobStatuses.Failed, job.Status); Assert.AreEqual("launch_not_started", job.ReasonCode);
+            Assert.AreEqual(1, rig.Port.CloseCalls, "the prompt is closed before the job calls it a no-effect failure"); Assert.AreEqual(true, job.RefundConfirmed);
+        }
+
+        [TestMethod] public void APromptThatCannotBeConfirmedClosedKeepsTheReservation()
+        {
+            rig.Port.OnBegin = () => { }; rig.Port.PromptCloses = false;
+            StartAndBegin();
+            var job = rig.RunToEnd(milliseconds: 1000, maxFrames: 60);
+            Assert.AreEqual(JobStatuses.Indeterminate, job.Status); Assert.AreEqual("launch_not_started", job.ReasonCode);
+        }
+
+        [TestMethod] public void AFacadeFailureAfterTheRoutineRanWithAReservationPendingIsFollowedNotReleased()
+        {
+            rig.Port.BeginResult = false; rig.Port.BeginReason = "launch_exception:NullReferenceException"; rig.Port.ActsBeforeFailing = true; // the reservation was requested before the routine threw
+            rig.Launch();
+            rig.Frame();
+            Assert.AreEqual(JobStatuses.Running, rig.Runner.Current.Status); Assert.IsTrue(rig.Runner.Current.Dispatched);
+            Assert.AreEqual("await_flight", rig.Runner.Current.ToEnvelope()["phase"].ToString());
+        }
+
+        [TestMethod] public void AFacadeExceptionWithNoReservationIsIndeterminateNotNoEffect()
+        {
+            rig.Port.BeginResult = false; rig.Port.BeginReason = "launch_exception:NullReferenceException";
+            rig.Launch();
+            var job = rig.RunToEnd();
+            Assert.AreEqual(JobStatuses.Indeterminate, job.Status); Assert.IsTrue(job.Dispatched);
+        }
+
+        [TestMethod] public void ALockedLaunchButtonIsALaunchLockedNoEffectFailure()
+        {
+            rig.Port.BeginResult = false; rig.Port.BeginReason = "launch_locked";
+            rig.Launch();
+            var job = rig.RunToEnd();
+            Assert.AreEqual(JobStatuses.Failed, job.Status); Assert.AreEqual("launch_locked", job.ReasonCode); Assert.IsFalse(job.Dispatched);
         }
 
         [TestMethod] public void AHungReservationTimesOutAndIsCancelled()

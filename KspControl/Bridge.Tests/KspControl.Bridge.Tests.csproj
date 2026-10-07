@@ -47,6 +47,7 @@
     <Compile Include="../Bridge/EditorOperationRunner.cs" Link="EditorOperationRunner.cs" />
     <Compile Include="../Bridge/EditorOperationService.cs" Link="EditorOperationService.cs" />
     <Compile Include="../Bridge/LaunchPort.cs" Link="LaunchPort.cs" />
+    <Compile Include="../Bridge/SpendCapStore.cs" Link="SpendCapStore.cs" />
     <Compile Include="../Bridge/LaunchJob.cs" Link="LaunchJob.cs" />
     <Compile Include="../Bridge/LaunchRunner.cs" Link="LaunchRunner.cs" />
     <Compile Include="../Bridge/LaunchService.cs" Link="LaunchService.cs" />

@@ -97,6 +97,9 @@ namespace KspControl.Contracts
         /// <summary>The gross funds this grant may spend across all jobs and retries, fixed when the human issued it.</summary>
         [JsonProperty("spendLimitFunds", NullValueHandling = NullValueHandling.Ignore)] public long? SpendLimitFunds { get; set; }
 
+        /// <summary>The live spend cap actually in force: min(spendLimitFunds, 100000, 25% of the confirmed balance at the grant's first acquire), fixed per grant generation. Absent until a lease was acquired with the balance known.</summary>
+        [JsonProperty("effectiveSpendCap", NullValueHandling = NullValueHandling.Ignore)] public long? EffectiveSpendCap { get; set; }
+
         public static GrantStatusInfo Missing(string detail = null) => new GrantStatusInfo { State = GrantStates.Missing, Detail = detail };
     }
 

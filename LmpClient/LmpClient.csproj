@@ -531,6 +531,7 @@
     <Compile Include="Systems\Agency\AgencyIdentityClient.cs" />
     <Compile Include="Windows\Agency\AgencyIdentityDrawer.cs" />
     <Compile Include="Systems\Agency\AgencySystem.cs" />
+    <Compile Include="Systems\Agency\ControlObservation.cs" />
     <Compile Include="Systems\Agency\AgencyMessageSender.cs" />
     <Compile Include="Systems\Agency\AgencyMessageHandler.cs" />
     <Compile Include="Properties\TypeForwarding.cs" />

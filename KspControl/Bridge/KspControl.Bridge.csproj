@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net472</TargetFramework><LangVersion>7.3</LangVersion><AssemblyName>KspControlBridge</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Contracts/KspControl.Contracts.csproj" />
+    <Reference Include="Assembly-CSharp"><HintPath>../../External/KSPLibraries/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>../../External/KSPLibraries/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>../../External/KSPLibraries/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

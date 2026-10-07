@@ -81,10 +81,10 @@ namespace LmpClient.Windows.Agency
                     radarRangeVessel = commNetSelected;
                     radarRangeExpires = DateTime.UtcNow.AddSeconds(1);
                     var vessel = FlightGlobals.Vessels?.FirstOrDefault(v => v && v.id == commNetSelected);
-                    radarRange = vessel ? VisibilityPolicy.DetectionRadius(VisibilitySensors.StrongestPower(vessel), settings.AgencyDetectionRangeMultiplier) * settings.AgencyActiveDetectionRangeMultiplier : 0;
+                    radarRange = vessel ? VisibilityPolicy.RadarRadius(VisibilitySensors.TotalPower(vessel), settings.AgencyDetectionRangeMultiplier, settings.AgencyActiveDetectionRangeMultiplier) : 0;
                 }
                 GUILayout.Label(radarRange > 0
-                    ? $"Active scan and exposure: {radarRange / 1000:N1} km. Passive listens for active scanners without emitting. Planets block both."
+                    ? $"Radar range {radarRange / 1000:N1} km, the same in both modes. Active: sees all craft in range and is heard by listeners whose range reaches you. Passive: hears only active craft. Planets block both."
                     : "No usable antenna detected. Radar needs an enabled antenna.", commNetText);
                 GUILayout.Label("Radar mode does not change communications or sharing agreements.", commNetText);
             }

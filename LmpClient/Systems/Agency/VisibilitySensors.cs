@@ -1,20 +1,22 @@
 using System;
+using System.Collections.Generic;
+using LmpCommon.Agency;
 using CommNet;
 
 namespace LmpClient.Systems.Agency
 {
     internal static class VisibilitySensors
     {
-        internal static double StrongestPower(Vessel vessel)
+        internal static double TotalPower(Vessel vessel)
         {
-            var power=0d;
+            var values=new List<double>();
             try
             {
                 if(vessel.loaded)
                 {
                     foreach(var part in vessel.parts)
                         foreach(PartModule module in part.Modules)
-                            if(module is ICommAntenna antenna && antenna.CanComm()) power=Maximum(power,antenna.CommPower);
+                            if(module is ICommAntenna antenna && antenna.CanComm()) values.Add(antenna.CommPower);
                 }
                 else if(vessel.protoVessel!=null)
                 {
@@ -25,12 +27,13 @@ namespace LmpClient.Systems.Agency
                             if(prefab.Modules[i] is ICommAntenna antenna)
                             {
                                 var saved=part.FindModule(prefab.Modules[i],i);
-                                if(saved!=null && antenna.CanCommUnloaded(saved))power=Maximum(power,antenna.CommPowerUnloaded(saved));
+                                if(saved!=null && antenna.CanCommUnloaded(saved))values.Add(antenna.CommPowerUnloaded(saved));
                             }
                     }
                 }
                 var modifier=HighLogic.CurrentGame?.Parameters.CustomParams<CommNetParams>().rangeModifier??1;
-                return Maximum(0,power*modifier);
+                var total=VisibilityPolicy.SumPower(values)*modifier;
+                return double.IsNaN(total)||double.IsInfinity(total)?0:Math.Min(VisibilityPolicy.MaxPower,Math.Max(0,total));
             }
             catch(Exception e)
             {
@@ -38,6 +41,5 @@ namespace LmpClient.Systems.Agency
                 return 0;
             }
         }
-        private static double Maximum(double current,double value)=>double.IsNaN(value)||double.IsInfinity(value)||value<0||value>1e100?current:Math.Max(current,value);
     }
 }

@@ -18,6 +18,7 @@ namespace KspControl.Bridge
         private EditorRevisionTracker tracker;
         private EditorEvents editorEvents;
         private EditorOperationRunner runner;
+        private AutopilotRunner autopilotRunner;
         private KeyCode stopKey = KeyCode.None;
         private string panelLine = "";
         private float panelRefreshed = -1f;
@@ -52,6 +53,12 @@ namespace KspControl.Bridge
                 runner = new EditorOperationRunner(editorPort, tracker, authority, source, files, paths, jobs, () => MonotonicClock.Milliseconds, () => observations.WorldEpoch);
                 var operations = new EditorOperationService(editorPort, tracker, authority, runner, jobs, () => new UnityConstructionCatalogReader(), paths, files, () => observations.WorldEpoch);
                 observations.Operations = operations;
+                // MechJeb autopilot: a guarded reflection adapter (no compile-time reference) and the stock-side flight port.
+                var autopilotJobs = new AutopilotJobs();
+                var flightPort = new UnityFlightPort();
+                var mechjeb = new MechJebAdapter(MechJebSources.Core, MechJebSources.Vessel);
+                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, flightPort, () => MonotonicClock.Milliseconds);
+                observations.Autopilot = new MechJebService(authority, autopilotRunner, autopilotJobs, mechjeb, flightPort, () => observations.WorldEpoch);
                 observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");
@@ -64,6 +71,12 @@ namespace KspControl.Bridge
             }
             catch { Debug.LogWarning("[KspControl] Bridge unavailable; no control enabled."); }
         }
+        /// <summary>Stop burns the grant and, in the same call, releases MechJeb and cuts the throttle: the runner does not wait for its next frame.</summary>
+        private void StopAll()
+        {
+            authority.Stop();
+            try { autopilotRunner?.Abort(KspControl.Contracts.AutopilotReasons.StoppedByRequest); } catch { /* the next frame's validation ends the job anyway */ }
+        }
         private void ReadStopKey()
         {
             var text = Environment.GetEnvironmentVariable("KSP_CONTROL_STOP_KEY");
@@ -75,11 +88,12 @@ namespace KspControl.Bridge
         {
             if (server == null) return;
             // Stop is independent of everything below, so a failing context refresh can never swallow it.
-            if (stopKey != KeyCode.None && Input.GetKeyDown(stopKey)) authority.Stop();
+            if (stopKey != KeyCode.None && Input.GetKeyDown(stopKey)) StopAll();
             try { observations.RefreshContext(); }
             catch { return; } // Scene teardown can invalidate game objects; pending requests expire without disclosure.
             try { pump.Update(); } catch { /* the trust layer must never break the frame */ }
             try { runner.Update(); } catch { /* the runner reports its own failures in the job; it must never break the frame */ }
+            try { autopilotRunner?.Update(); } catch { /* the autopilot runner releases MechJeb itself; it must never break the frame */ }
             queue.Drain(observations.Execute);
         }
         public void OnGUI()
@@ -87,7 +101,7 @@ namespace KspControl.Bridge
             if (watcher == null || authority == null) return;
             if (Time.unscaledTime - panelRefreshed > 0.25f) { panelRefreshed = Time.unscaledTime; panelLine = Describe(authority.Status()); }
             GUI.Label(new Rect(8f, 4f, 640f, 22f), panelLine);
-            if (GUI.Button(new Rect(8f, 26f, 72f, 22f), "Stop")) authority.Stop();
+            if (GUI.Button(new Rect(8f, 26f, 72f, 22f), "Stop")) StopAll();
         }
         private static string Describe(ControlStatusInfo status)
         {
@@ -102,6 +116,7 @@ namespace KspControl.Bridge
         {
             server?.Dispose(); queue.Stop();
             try { runner?.Abort(); } catch { /* teardown: the locks are released best effort */ }
+            try { autopilotRunner?.Abort(KspControl.Contracts.AutopilotReasons.StoppedByRequest); } catch { /* teardown: MechJeb is released best effort */ }
             editorEvents?.Dispose();
         }
     }

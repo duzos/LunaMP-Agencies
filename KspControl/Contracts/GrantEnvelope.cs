@@ -89,7 +89,7 @@ namespace KspControl.Contracts
         public const int MaxPayloadBytes = 16384;
         private static readonly string[] UtcFormats = { UtcFormat, "yyyy-MM-dd'T'HH:mm:ss'Z'" };
         private static readonly string[] AllowedPolicies = { "refuse", "snapshot_then_replace" };
-        private static readonly string[] AllowedFacilities = { "VAB", "SPH" };
+        private static readonly string[] AllowedFacilities = { "VAB", "SPH", "FLIGHT" };
 
         public static byte[] SerializePayload(GrantPayload payload)
         {
@@ -169,7 +169,7 @@ namespace KspControl.Contracts
             var b = p.Binding;
             if (b == null || !IsText(b.InstallId, 64) || !IsText(b.SaveFolder, 256) || !IsText(b.Agency, 300)) return "binding";
             if (p.Operations == null || p.Operations.Length > 32 || p.Operations.Any(o => !IsIdentifier(o, 64, true))) return "operations";
-            if (p.Facilities == null || p.Facilities.Length == 0 || p.Facilities.Length > 2 || p.Facilities.Any(f => Array.IndexOf(AllowedFacilities, f) < 0)) return "facilities";
+            if (p.Facilities == null || p.Facilities.Length == 0 || p.Facilities.Length > 3 || p.Facilities.Any(f => Array.IndexOf(AllowedFacilities, f) < 0)) return "facilities";
             if (Array.IndexOf(AllowedPolicies, p.UnsavedCraftPolicy) < 0) return "unsaved_policy";
             if (p.MaxParts < 1 || p.MaxParts > 1000) return "max_parts";
             if (p.SpendLimitFunds < 0) return "spend_limit";

@@ -92,8 +92,14 @@ namespace KspControl.Bridge
             if (this.permissions.Length > 1024 || this.permissions.Any(p => p == null)) throw new ArgumentException("invalid_permissions");
             this.entities = (entities ?? throw new ArgumentNullException(nameof(entities))).Select(e => Identifiers.Required(e)).ToArray();
         }
-        internal bool Allows(ClassifiedEffect effect) => permissions.Any(p => p.Operation == effect.Operation && p.Recipient == effect.Recipient);
-        internal bool AllowsEntity(string entity) => entities.Contains(entity, StringComparer.Ordinal);
+        internal bool Allows(ClassifiedEffect effect) => permissions.Any(p => p.Operation == effect.Operation && Matches(p.Recipient, effect.Recipient));
+        internal bool AllowsEntity(string entity) => entities.Any(e => Matches(e, entity));
+        /// <summary>Exact match, or a trailing "*" meaning "this prefix" (used by the flight grant, whose vessel is not known when it is issued).</summary>
+        private static bool Matches(string pattern, string value)
+        {
+            if (pattern.Length > 1 && pattern[pattern.Length - 1] == '*') return value.StartsWith(pattern.Substring(0, pattern.Length - 1), StringComparison.Ordinal);
+            return string.Equals(pattern, value, StringComparison.Ordinal);
+        }
     }
 
     internal sealed class ExecutionTicket
@@ -384,7 +390,7 @@ namespace KspControl.Bridge
                 if (now < cooldownUntil) throw new InvalidOperationException(ControlReasons.HumanActivityCooldown);
                 if (durationMilliseconds < ControlLimits.DurationMinSeconds * 1000L || durationMilliseconds > ControlLimits.DurationMaxSeconds * 1000L) throw new ArgumentException("invalid_lease_duration");
                 // A stalled main thread cannot vouch for the scene, so new leases are refused. Existing leases keep their heartbeats.
-                if (context == null || now - contextPublishedAt > ControlLimits.ContextStaleMilliseconds || !context.SceneReady) throw new InvalidOperationException(ControlReasons.EditorUnavailable);
+                if (context == null || now - contextPublishedAt > ControlLimits.ContextStaleMilliseconds || !context.SceneReady) throw new InvalidOperationException(NotReadyReason(context));
                 if (!grant.AllowsEntity(context.Entity)) throw new InvalidOperationException(ControlReasons.FacilityMismatch);
                 leaseId = Guid.NewGuid().ToString("N"); leasePurpose = purpose ?? ""; leaseEpoch = context.Epoch; leaseEntity = context.Entity;
                 leaseDeadline = Math.Min(now + durationMilliseconds, grantDeadline); heartbeatDeadline = Deadline(now);
@@ -417,6 +423,12 @@ namespace KspControl.Bridge
         /// <summary>Why a lease id is not usable, as a reason code. Unknown ids are lease_invalid.</summary>
         public string LeaseFailureReason(string id)
         { lock (gate) return EndedReason(id); }
+
+        /// <summary>
+        /// Raised whenever a held lease ends for any reason (stop, expiry, watchdog, takeover, context change, grant drop). It runs on
+        /// whichever thread ended the lease, with the gate held, so a handler may only set flags and must never call back in.
+        /// </summary>
+        public event Action<string> LeaseEnded;
 
         public ControlStatusInfo Status()
         {
@@ -467,8 +479,12 @@ namespace KspControl.Bridge
         {
             if (leaseId == null || leaseId != id || grant == null || context == null) throw new InvalidOperationException("authority_unavailable");
             // Not ready is a refusal, not a revocation: the editor may simply be restarting.
-            if (!context.SceneReady) throw new InvalidOperationException(ControlReasons.EditorUnavailable);
+            if (!context.SceneReady) throw new InvalidOperationException(NotReadyReason(context));
         }
+
+        /// <summary>A flight scene that is not ready is flight_unavailable; the editor keeps its own code.</summary>
+        private static string NotReadyReason(LeaseContext current)
+        { return current.Entity.StartsWith(FlightEffects.EntityPrefix, StringComparison.Ordinal) ? FlightReasons.FlightUnavailable : ControlReasons.EditorUnavailable; }
 
         private void RequireTicketCurrent(ExecutionTicket ticket)
         {
@@ -495,8 +511,10 @@ namespace KspControl.Bridge
         private void RevokeLease(string reason)
         {
             generation = checked(generation + 1);
+            var ended = leaseId != null;
             if (leaseId != null) { lastEndedLeaseId = leaseId; lastEndedReason = reason; }
             leaseId = null; leasePurpose = null; leaseEpoch = null; leaseEntity = null; operationId = null;
+            if (ended) { try { LeaseEnded?.Invoke(reason); } catch (Exception) { /* a listener must never break the trust layer */ } }
         }
 
         private string EndedReason(string id)

@@ -18,6 +18,8 @@ namespace KspControl.Bridge
         private EditorRevisionTracker tracker;
         private EditorEvents editorEvents;
         private EditorOperationRunner runner;
+        private FlightControlGuard flightGuard;
+        private FlightTakeoverWatcher flightTakeover;
         private KeyCode stopKey = KeyCode.None;
         private string panelLine = "";
         private float panelRefreshed = -1f;
@@ -52,6 +54,13 @@ namespace KspControl.Bridge
                 runner = new EditorOperationRunner(editorPort, tracker, authority, source, files, paths, jobs, () => MonotonicClock.Milliseconds, () => observations.WorldEpoch);
                 var operations = new EditorOperationService(editorPort, tracker, authority, runner, jobs, () => new UnityConstructionCatalogReader(), paths, files, () => observations.WorldEpoch);
                 observations.Operations = operations;
+                // Flight: telemetry and the lease-bound controls. The guard owns the fly-by-wire hook only while a lease is held.
+                var flightPort = new UnityFlightPort(observations.MayInspect);
+                flightGuard = new FlightControlGuard(flightPort, () => authority.LeaseHeld);
+                authority.LeaseEnded += flightGuard.OnLeaseEnded;
+                observations.FlightState = new FlightStateService(flightPort, () => observations.WorldEpoch);
+                observations.FlightMutations = new FlightOperationService(flightPort, flightGuard, authority, source, () => observations.WorldEpoch);
+                flightTakeover = new FlightTakeoverWatcher(flightPort, authority);
                 observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");
@@ -60,7 +69,7 @@ namespace KspControl.Bridge
                 pump = new ControlPump(authority, watcher, source, tracker);
                 ReadStopKey();
                 server = new LoopbackServer(queue, token, port, new ControlDispatcher(authority).Handle);
-                Debug.Log("[KspControl] Bridge ready (read-only observations; control leases inline).");
+                Debug.Log("[KspControl] Bridge ready (observations, flight telemetry; control leases inline).");
             }
             catch { Debug.LogWarning("[KspControl] Bridge unavailable; no control enabled."); }
         }
@@ -75,10 +84,12 @@ namespace KspControl.Bridge
         {
             if (server == null) return;
             // Stop is independent of everything below, so a failing context refresh can never swallow it.
-            if (stopKey != KeyCode.None && Input.GetKeyDown(stopKey)) authority.Stop();
+            if (stopKey != KeyCode.None && Input.GetKeyDown(stopKey)) StopNow();
             try { observations.RefreshContext(); }
             catch { return; } // Scene teardown can invalidate game objects; pending requests expire without disclosure.
             try { pump.Update(); } catch { /* the trust layer must never break the frame */ }
+            try { if (HighLogic.LoadedSceneIsFlight) flightTakeover?.Update(); } catch { /* takeover detection must never break the frame */ }
+            try { flightGuard?.Update(); } catch { /* the guard releases on its own next frame */ }
             try { runner.Update(); } catch { /* the runner reports its own failures in the job; it must never break the frame */ }
             queue.Drain(observations.Execute);
         }
@@ -87,7 +98,13 @@ namespace KspControl.Bridge
             if (watcher == null || authority == null) return;
             if (Time.unscaledTime - panelRefreshed > 0.25f) { panelRefreshed = Time.unscaledTime; panelLine = Describe(authority.Status()); }
             GUI.Label(new Rect(8f, 4f, 640f, 22f), panelLine);
-            if (GUI.Button(new Rect(8f, 26f, 72f, 22f), "Stop")) authority.Stop();
+            if (GUI.Button(new Rect(8f, 26f, 72f, 22f), "Stop")) StopNow();
+        }
+        /// <summary>Stop (hotkey or panel): revoke the authority, then neutralise the controls in the same frame without waiting for the next tick.</summary>
+        private void StopNow()
+        {
+            try { authority.Stop(); }
+            finally { try { flightGuard?.Release("stop"); } catch { /* the lease is already revoked */ } }
         }
         private static string Describe(ControlStatusInfo status)
         {
@@ -101,6 +118,7 @@ namespace KspControl.Bridge
         public void OnDestroy()
         {
             server?.Dispose(); queue.Stop();
+            try { flightGuard?.Release("destroyed"); } catch { /* teardown: the vessel may be gone */ }
             try { runner?.Abort(); } catch { /* teardown: the locks are released best effort */ }
             editorEvents?.Dispose();
         }

@@ -16,7 +16,7 @@ namespace KspControl.Bridge
     /// </summary>
     internal sealed partial class EditorOperationRunner
     {
-        /// <summary>The largest ship file this service writes. Real modded craft are a few hundred KB.</summary>
+        /// <summary>The largest ship file this service writes or replaces. Real modded craft are a few hundred KB.</summary>
         public const int MaxSaveBytes = 2 * 1024 * 1024;
 
         private void DoSave(OperationJob job, long now)
@@ -44,11 +44,22 @@ namespace KspControl.Bridge
             var ledgerPath = paths.LedgerPath();
             if (!target.Ok || !ledgerPath.Ok) { Fail(job, OperationReasons.PathOutsideSave, target.Ok ? ledgerPath.ReasonCode : target.ReasonCode); return; }
             var ledger = CraftLedger.Load(files, ledgerPath.FullPath);
+            var shipsDirectory = paths.ShipsDirectory(request.Facility);
+            if (shipsDirectory != null) ShipsSweeper.Sweep(files, shipsDirectory, utcNow().ToUniversalTime(), job.Declared);
             bool exists; string currentHash = null; byte[] previous = null;
             try
             {
                 exists = files.Exists(target.FullPath);
-                if (exists) { previous = files.ReadAllBytes(target.FullPath); currentHash = OperationHash.Sha256Hex(previous); }
+                if (exists)
+                {
+                    // Hashing is main-thread work: a replace of an oversize file is refused unread, and without a replace token the file is only "there".
+                    var length = files.FileLength(target.FullPath);
+                    if (length > MaxSaveBytes)
+                    {
+                        if (request.ReplaceExpectedSha256 != null) { Fail(job, OperationReasons.CraftTooLarge, "the existing file is " + length + " bytes"); return; }
+                    }
+                    else { previous = files.ReadAllBytes(target.FullPath); currentHash = OperationHash.Sha256Hex(previous); }
+                }
             }
             catch (IOException) { exists = true; previous = null; currentHash = null; } // unreadable: the policy refuses to replace it
             var owned = ledger.Find(request.Facility, request.FileName + Pure.CraftPaths.CraftExtension);
@@ -63,10 +74,21 @@ namespace KspControl.Bridge
                 if (decision.Action == SaveAction.Create) files.CreateNew(target.FullPath, bytes);
                 else files.ReplaceExisting(target.FullPath, bytes);
             }
+            catch (FileStateChangedException error)
+            {
+                // The replace touched the target (moved aside, or new bytes landed) before it failed: the file system was changed, so this is
+                // not a clean write_failed. The previous bytes were put back where possible; the ledger is left alone and the caller must look.
+                job.Dispatched = true;
+                job.Declared.Add(new DeclaredOutput { Path = target.FullPath, Class = "ships", Action = "reported", Detail = "replace failed after touching the file: " + error.Outcome });
+                job.PendingStatus = JobStatuses.Indeterminate; job.PendingReason = OperationReasons.OperationError; job.PendingDetail = "replace_partial: " + error.Outcome;
+                SetPhase(job, OperationPhase.Finalize, now);
+                return;
+            }
             catch (IOException error)
             {
-                // Neither call can leave a half-written target: the write failed before the move, or the move itself was refused.
-                if (error.Message == "exists") Fail(job, OperationReasons.FileExists, "the file appeared during the save");
+                // A plain IOException leaves the target as it was: the write failed before the move, or the move itself was refused.
+                // A create whose move failed because the file appeared meanwhile is file_exists, whatever the exception text says.
+                if (error.Message == "exists" || (decision.Action == SaveAction.Create && files.Exists(target.FullPath))) Fail(job, OperationReasons.FileExists, "the file appeared during the save");
                 else Fail(job, OperationReasons.WriteFailed, error.GetType().Name);
                 return;
             }
@@ -180,7 +202,8 @@ namespace KspControl.Bridge
             if (job.Kind != OperationKind.Save || job.ShipsBaseline == null) return;
             try
             {
-                var targetName = job.SavedPath == null ? null : Path.GetFileName(job.SavedPath);
+                // The target is declared on its own (created, replaced, restored or deleted), so it is never also reported as a sidecar.
+                var targetName = job.Save.FileName + Pure.CraftPaths.CraftExtension;
                 var after = ListShips(pathsFactory(), job.Save.Facility);
                 foreach (var entry in after.Values.OrderBy(e => e.Name, StringComparer.Ordinal))
                 {

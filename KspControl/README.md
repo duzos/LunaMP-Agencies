@@ -219,8 +219,12 @@ The runner decides the same thing again in the step that writes. That step runs 
 
 1. capture the live craft (`SaveShip`) with the header `ship`, `description` and `missionFlag` taken from the editor fields, the UI field
    itself untouched; refuse `craft_identifiers_invalid` unless every `PART.part` ends in a unique unsigned integer (the
-   `ToolingClient.CraftIndices` rule), `craft_too_large` over 2 MiB;
-2. create-only write (`<target>.kspcontrol.<guid>.tmp` then `File.Move`, which never overwrites) or, for a replace, `File.Replace`;
+   `ToolingClient.CraftIndices` rule), `craft_too_large` over 2 MiB (also when the existing file to be replaced is over 2 MiB: it is refused unread);
+2. create-only write (`kc-<guid>.tmp` beside the target, then `File.Move`, which never overwrites) or, for a replace, `File.Replace` with a
+   `kc-<guid>.bak` backup. If `File.Replace` fails after touching the target (ReplaceFileW 1176/1177), the backup (or the temporary file) is
+   moved back and the job is `indeterminate` (`operation_error`, detail `replace_partial: <outcome>`, dispatched), never `write_failed`;
+   stale `kc-*.tmp`, legacy `*.kspcontrol.*.tmp` and leftover backups of this process older than 5 minutes are swept from `Ships/<facility>`
+   at the start of a save (a backup with no known target is reported and left);
 3. read the file back and check: hash, parse, identifier rule, the comparator against the capture (`comparison`, equal expected, zero
    unregistered differences) and `ShipConstruction.AllPartsFound`. A failure removes the new file (or puts the replaced bytes back) and
    returns `save_verify_failed` (`indeterminate` if even the revert fails);
@@ -239,7 +243,8 @@ Declared outputs: the `.craft` (`created` or `replaced`), the ledger, and anythi
 during the job (`.craft.original`, `.loadmeta`), which is reported and never a failure. No thumbnail is captured.
 
 `craft_list(facility, offset, limit, filter)` is read-only and needs no lease: `{fileName, sizeBytes, modifiedUtc, sha256, kspControlOwned}`
-for the `.craft` files of the current save, name-ordered and paged (at most 50, hashed per page). `kspControlOwned` is true only when the
+for the `.craft` files of the current save, name-ordered and paged (at most 50, hashed per page; files over 2 MiB, or past a 32 MiB
+per-page budget, are listed with `sha256: null` and `hashSkipped: true`). `kspControlOwned` is true only when the
 ledger lists the file and its current hash equals the recorded one. Names the tools cannot address and linked files are counted, not listed.
 
 **Not in this slice.** `editor_verify_roundtrip` is not a tool: R1-section 4 and every later revision dropped it. The roundtrip gate

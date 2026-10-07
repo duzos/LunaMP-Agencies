@@ -48,6 +48,27 @@ namespace KspControl.BridgeTests
             Assert.AreEqual("VAB", (string)data["facility"]);
         }
 
+        [TestMethod] public void AnOversizeFileIsListedWithoutAHashAndWithoutBeingRead()
+        {
+            var big = rig.ShipFile("Big"); rig.Files.Put(big, new byte[CraftListService.MaxHashedBytes + 1]); Put("Small.craft", "abc");
+            rig.Files.Reads.Clear();
+            var data = Ok(Args());
+            var bigItem = data["crafts"].Single(c => (string)c["fileName"] == "Big.craft"); var small = data["crafts"].Single(c => (string)c["fileName"] == "Small.craft");
+            Assert.AreEqual(JTokenType.Null, bigItem["sha256"].Type); Assert.AreEqual(true, (bool)bigItem["hashSkipped"]); Assert.AreEqual(false, (bool)bigItem["kspControlOwned"]);
+            Assert.AreEqual(false, (bool)small["hashSkipped"]); Assert.IsNotNull((string)small["sha256"]);
+            Assert.IsFalse(rig.Files.Reads.Contains(big));
+        }
+
+        [TestMethod] public void APageStopsHashingWhenItsByteBudgetIsSpent()
+        {
+            var each = (int)CraftListService.MaxHashedBytes;
+            var count = (int)(CraftListService.MaxHashedBytesPerPage / each) + 2;
+            for (var i = 0; i < count; i++) rig.Files.Put(rig.ShipFile("F" + i.ToString("D2")), new byte[each]);
+            var data = Ok(Args(limit: count));
+            var skipped = data["crafts"].Count(c => (bool)c["hashSkipped"]);
+            Assert.AreEqual(2, skipped, "the files past the budget are listed unhashed");
+        }
+
         [TestMethod] public void SidecarsAndOtherFilesAreNotListed()
         {
             Put("Real.craft"); rig.Files.Put(rig.ShipFile("Real") + ".original", "x"); rig.Files.Put(rig.ShipFile("Real") + ".loadmeta", "x");

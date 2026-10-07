@@ -240,10 +240,10 @@ MechJeb to end its own circularization (up to 2 minutes) and completes with `asc
 module (an unreadable AtmosphereAutopilot fails closed). Each frame the runner revalidates the authority, the vessel id and the controls before it reads MechJeb:
 Every MechJeb, AtmosphereAutopilot and throttle call names the vessel the job was admitted on (never whichever is active now); the throttle of the live input state is only
 touched while that vessel is still active. A user counts as ours if it is the bridge user, the ascent window module the ascent is engaged through (so MechJeb's own
-Disengage button stops it; switching it off before orbit is a takeover), or a MechJeb module whose user set contains ours, which is how the ascent hands over to the node
+Disengage button stops it; switching it off before orbit ends the job cancelled as `ascent_disengaged`, not a takeover; the window counts as ours for ascent jobs only, so a person engaging it during a node burn is a competitor), or a MechJeb module whose user set contains ours, which is how the ascent hands over to the node
 executor and attitude controller. Attitude, thrust and rover are scanned for foreign users on every pass. The node executor is aborted only when nobody else holds it, and
 its Autowarp is restored on release. An orbit needs periapsis above the higher of the atmosphere top and the body's safe altitude (`minOrbitalDistance - radius`), and a target at
-or below that safe altitude is refused; when MechJeb has ended, the orbit is judged at once.
+below the higher of the atmosphere top and the safe altitude plus 5 km is refused; when MechJeb has ended, the orbit is judged at once.
 Stop (button, hotkey, same call) and any loss of authority remove the user, abort the executor and cut the throttle at once; a switch of vessel or scene ends the job;
 two consecutive frames of flight-control input (keys or axes), another user entering the module, or another controller engaging is a human takeover
 (`human_input_during_operation`, `ExecutionAuthority.HumanTakeover`, lease revoked, 30 s cooldown, throttle cut).

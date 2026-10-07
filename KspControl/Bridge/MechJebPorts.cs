@@ -75,8 +75,10 @@ namespace KspControl.Bridge
         /// Names of other controllers that are engaged: any MechJeb autopilot or support module (attitude, thrust, rover) with a user that is not ours, or
         /// AtmosphereAutopilot. A user is ours if it is the bridge's user, the ascent window module the bridge engages through, or a MechJeb module whose own
         /// user set contains ours (the ascent hands over to the node executor and the attitude controller with itself as the user).
+        /// The ascent window module is ours only when <paramref name="includeWindow"/> (ascent jobs): for any other job, a person engaging the ascent through
+        /// the window is a competitor.
         /// </summary>
-        List<string> FindCompetitors(string vesselId, object ownUser);
+        List<string> FindCompetitors(string vesselId, object ownUser, bool includeWindow);
         /// <summary>Writes the ascent settings, then reads them back. Throws if a value did not take.</summary>
         AscentSettingsView ConfigureAscent(string vesselId, double altitudeMeters, double inclinationDegrees, bool autostage);
         void EngageAscent(string vesselId, object user);

@@ -26,6 +26,7 @@ namespace KspControl.BridgeTests
         /// <summary>The vessel id every call was made for: a job must only ever name its own vessel.</summary>
         public List<string> Vessels = new List<string>();
         public bool ViaWindow;
+        public List<bool> WindowFlags = new List<bool>();
         public bool SavedAutowarp = true; public bool? RestoredAutowarp; public bool RestoreSeen;
         public List<string> CompetitorQueries = new List<string>();
 
@@ -37,9 +38,9 @@ namespace KspControl.BridgeTests
         public bool HasCore(string vesselId) { Vessels.Add(vesselId); return Core; }
         public JObject ReadStatus() { return new JObject { ["mechjeb"] = Caps.State, ["installed"] = Caps.Installed, ["version"] = Caps.Version, ["vesselCore"] = Core }; }
 
-        public List<string> FindCompetitors(string vesselId, object ownUser)
+        public List<string> FindCompetitors(string vesselId, object ownUser, bool includeWindow)
         {
-            Vessels.Add(vesselId); CompetitorQueries.Add(vesselId);
+            Vessels.Add(vesselId); CompetitorQueries.Add(vesselId); WindowFlags.Add(includeWindow);
             return Competitors.ToList();
         }
 

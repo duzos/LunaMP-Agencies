@@ -336,7 +336,7 @@ namespace KspControl.Bridge
 
         // ---------------------------------------------------------------- competitors
 
-        public List<string> FindCompetitors(string vesselId, object ownUser)
+        public List<string> FindCompetitors(string vesselId, object ownUser, bool includeWindow)
         {
             var found = new List<string>();
             if (Capabilities.Installed)
@@ -345,7 +345,7 @@ namespace KspControl.Bridge
                 {
                     var core = Core(vesselId);
                     // The window module is ours only for a caller that has an identity; a new caller sees an engaged ascent as someone else's.
-                    var window = ownUser == null ? null : Window(core);
+                    var window = ownUser != null && includeWindow ? Window(core) : null;
                     if (core != null)
                         foreach (var spec in Specs.Where(s => s.Scanned && Capabilities.Has(s.Name)))
                         {
@@ -456,7 +456,7 @@ namespace KspControl.Bridge
             var errors = 0;
             try
             {
-                bool direct; int ours, others; Users(node, user, Window(Core(vesselId)), out direct, out ours, out others);
+                bool direct; int ours, others; Users(node, user, null, out direct, out ours, out others);
                 if (others > 0) RemoveUsers(node, user); // someone else is using the executor: leave their burn alone
                 else
                 {
@@ -472,7 +472,7 @@ namespace KspControl.Bridge
         public NodeReading ReadNode(string vesselId, object user)
         {
             var node = Require(vesselId, "node");
-            bool direct; int ours, others; Users(node, user, Window(Core(vesselId)), out direct, out ours, out others);
+            bool direct; int ours, others; Users(node, user, null, out direct, out ours, out others);
             var reading = new NodeReading { Enabled = Enabled(node), OwnUserPresent = direct, OtherUsers = others };
             try { reading.State = Convert.ToString(Reflect.Get(node, "State"), CultureInfo.InvariantCulture); } catch (Exception) { }
             try { reading.Autowarp = (bool)Reflect.Get(node, "Autowarp"); } catch (Exception) { }
@@ -502,7 +502,7 @@ namespace KspControl.Bridge
             object core = null;
             try { core = caps.Installed ? Core(null) : null; } catch (Exception) { }
             status["vesselCore"] = core != null;
-            if (core == null || !caps.Usable) { status["competingControllers"] = new JArray(FindCompetitors(null, null)); return status; }
+            if (core == null || !caps.Usable) { status["competingControllers"] = new JArray(FindCompetitors(null, null, false)); return status; }
             foreach (var spec in Specs.Where(s => caps.Has(s.Name)))
             {
                 var entry = (JObject)modules[spec.Name];
@@ -531,7 +531,7 @@ namespace KspControl.Bridge
                 }
                 catch (Exception error) { entry["ready"] = false; entry["error"] = error is TargetInvocationException ? "read_failed" : error.GetType().Name; }
             }
-            status["competingControllers"] = new JArray(FindCompetitors(null, null));
+            status["competingControllers"] = new JArray(FindCompetitors(null, null, false));
             return status;
         }
 

@@ -107,7 +107,7 @@ namespace KspControl.Bridge
             // 4. Someone else engaged a controller (a person in the MechJeb window, AtmosphereAutopilot).
             if (options.ScanEveryFrames > 0 && job.Frames % options.ScanEveryFrames == 0)
             {
-                var others = mechjeb.FindCompetitors(job.VesselId, job.User);
+                var others = mechjeb.FindCompetitors(job.VesselId, job.User, job.Kind == AutopilotKind.Ascent);
                 if (others.Count > 0) { Takeover(job, "another controller engaged: " + string.Join(",", others)); return; }
             }
 
@@ -128,8 +128,9 @@ namespace KspControl.Bridge
                 {
                     // MechJeb is done: judge the orbit as it is now, there is nothing left to wait for.
                     if (inOrbit) { job.OrbitReached = true; job.AscentFinished = true; Finish(job, JobStatuses.Completed, null, "periapsis is above the orbit floor and MechJeb ended its ascent"); return; }
-                    // Engaged through the ascent window, an end before orbit is the Disengage button (or MechJeb giving up): leave the vessel to the person.
-                    if (reading.ViaWindow) { Takeover(job, "the ascent was switched off in MechJeb before the orbit was reached"); return; }
+                    // Engaged through the ascent window, an end before orbit is the Disengage button or MechJeb clearing its users at a normal end just short of the
+                    // floor: indistinguishable, so it is not a takeover (no lease revocation, no cooldown). The job ends cancelled and the throttle is cut.
+                    if (reading.ViaWindow) { Finish(job, JobStatuses.Cancelled, AutopilotReasons.AscentDisengaged, "the ascent module was switched off before the orbit was reached (a person pressed Disengage, or MechJeb ended)"); return; }
                     Finish(job, JobStatuses.Failed, AutopilotReasons.AscentEndedWithoutOrbit, "MechJeb ended or was switched off before periapsis cleared the orbit floor"); return;
                 }
                 if (inOrbit)

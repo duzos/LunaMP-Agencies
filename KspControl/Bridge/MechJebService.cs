@@ -160,13 +160,15 @@ namespace KspControl.Bridge
             if (!mechjeb.HasCore(telemetry.VesselId)) return Refuse(request, AutopilotReasons.MechJebUnavailable, "the active vessel carries no MechJeb core (part module)");
             if (kind == AutopilotKind.Ascent && !(caps.Has("ascent") && caps.Has("ascentSettings"))) return Refuse(request, AutopilotReasons.MechJebModuleUnavailable, "ascent module members were not found");
             if (kind == AutopilotKind.ExecuteNode && !caps.Has("node")) return Refuse(request, AutopilotReasons.MechJebModuleUnavailable, "node executor members were not found");
-            var competitors = mechjeb.FindCompetitors(telemetry.VesselId, null);
+            var competitors = mechjeb.FindCompetitors(telemetry.VesselId, null, false);
             if (competitors.Count > 0) return Refuse(request, AutopilotReasons.CompetingController, "another controller is engaged: " + string.Join(", ", competitors), new JObject { ["competitors"] = new JArray(competitors) });
             if (kind == AutopilotKind.ExecuteNode && telemetry.ManeuverNodes <= 0) return Refuse(request, AutopilotReasons.NoManeuverNode, "the active vessel has no maneuver node");
             if (kind == AutopilotKind.Ascent && telemetry.Orbiting && telemetry.PeriapsisMeters > telemetry.OrbitFloorMeters)
                 return Refuse(request, AutopilotReasons.NotApplicable, "the vessel is already in orbit around " + telemetry.BodyName);
-            if (kind == AutopilotKind.Ascent && telemetry.SafeAltitudeMeters > 0 && job.TargetAltitudeMeters <= telemetry.SafeAltitudeMeters)
-                return Refuse(request, ControlReasons.InvalidArgument, "targetAltitudeMeters must be above the safe orbit altitude of " + telemetry.BodyName + " (" + Math.Round(telemetry.SafeAltitudeMeters) + " m)");
+            // MechJeb may end its circularization a little under the target; a margin keeps "periapsis above the floor" reachable and an early end distinguishable.
+            var minimum = telemetry.OrbitFloorMeters + AutopilotLimits.OrbitMarginMeters;
+            if (kind == AutopilotKind.Ascent && job.TargetAltitudeMeters < minimum)
+                return Refuse(request, ControlReasons.InvalidArgument, "targetAltitudeMeters must be at least " + Math.Round(minimum) + " m for " + telemetry.BodyName + ": the higher of the atmosphere top and the safe orbit altitude, plus " + AutopilotLimits.OrbitMarginMeters + " m");
             return null;
         }
 

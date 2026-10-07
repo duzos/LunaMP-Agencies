@@ -167,25 +167,25 @@ namespace KspControl.BridgeTests
         [TestMethod] public void OurOwnHoldIsNotACompetitorButAnyoneElsesIs()
         {
             var ours = new object(); var adapter = Make();
-            Assert.AreEqual(0, adapter.FindCompetitors(null, ours).Count);
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours, true).Count);
             adapter.EngageAscent(null, ours);
-            Assert.AreEqual(0, adapter.FindCompetitors(null, ours).Count, "only our user holds the ascent module");
-            CollectionAssert.AreEqual(new[] { "mechjeb.ascent" }, adapter.FindCompetitors(null, null).ToArray(), "to a new caller it is engaged");
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours, true).Count, "only our user holds the ascent module");
+            CollectionAssert.AreEqual(new[] { "mechjeb.ascent" }, adapter.FindCompetitors(null, null, false).ToArray(), "to a new caller it is engaged");
             core.Node.Users.Add(new object());
-            CollectionAssert.AreEqual(new[] { "mechjeb.node" }, adapter.FindCompetitors(null, ours).ToArray());
+            CollectionAssert.AreEqual(new[] { "mechjeb.node" }, adapter.FindCompetitors(null, ours, true).ToArray());
         }
 
         [TestMethod] public void AnEnabledAutopilotWithNoUsersIsStillACompetitor()
         {
             core.Landing.Enabled = true;
-            CollectionAssert.AreEqual(new[] { "mechjeb.landing" }, Make().FindCompetitors(null, new object()).ToArray());
+            CollectionAssert.AreEqual(new[] { "mechjeb.landing" }, Make().FindCompetitors(null, new object(), true).ToArray());
         }
 
         [TestMethod] public void SupportModulesCountOnlyAtAdmission()
         {
             core.Attitude.Users.Add(new object()); core.Rover.Users.Add(new object()); core.Thrust.Users.Add(new object());
             var adapter = Make();
-            CollectionAssert.AreEquivalent(new[] { "mechjeb.attitude", "mechjeb.rover", "mechjeb.thrust" }, adapter.FindCompetitors(null, new object()).ToArray(), "a foreign user of a support module is a competitor, in the running scan too");
+            CollectionAssert.AreEquivalent(new[] { "mechjeb.attitude", "mechjeb.rover", "mechjeb.thrust" }, adapter.FindCompetitors(null, new object(), true).ToArray(), "a foreign user of a support module is a competitor, in the running scan too");
         }
 
         [TestMethod] public void TheAscentHandingOverToTheNodeExecutorAndAttitudeControllerIsNotACompetitor()
@@ -194,11 +194,30 @@ namespace KspControl.BridgeTests
             adapter.EngageAscent(null, ours);
             core.HandOffToNode(); // MechJeb's circularization: node executor and attitude controller with the ascent module as the user
             Assert.IsTrue(core.Node.Enabled);
-            Assert.AreEqual(0, adapter.FindCompetitors(null, ours).Count, "the ascent module acts for us");
-            var reading = adapter.ReadNode(null, ours);
-            Assert.AreEqual(0, reading.OtherUsers, "no foreign user on the node executor"); Assert.IsFalse(reading.OwnUserPresent, "not a direct user of ours");
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours, true).Count, "the ascent module acts for us");
+            Assert.AreEqual(1, adapter.ReadNode(null, ours).OtherUsers, "to a node job the ascent module is someone else: only ascent jobs own the window");
             core.Node.Users.Add(new object());
-            CollectionAssert.AreEqual(new[] { "mechjeb.node" }, adapter.FindCompetitors(null, ours).ToArray(), "a foreign user next to the ascent is still caught");
+            CollectionAssert.AreEqual(new[] { "mechjeb.node" }, adapter.FindCompetitors(null, ours, true).ToArray(), "a foreign user next to the ascent is still caught");
+        }
+
+        [TestMethod] public void ForANodeJobTheAscentWindowIsNotOursAndAPersonEngagingItIsACompetitor()
+        {
+            var ours = new object(); var adapter = Make();
+            adapter.EngageNode(null, ours, false);
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours, false).Count);
+            core.Ascent.Users.Add(core.AscentMenu); // a person presses Engage in the MechJeb ascent window
+            CollectionAssert.AreEqual(new[] { "mechjeb.ascent" }, adapter.FindCompetitors(null, ours, false).ToArray());
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours, true).Count, "the same state is our own engagement for an ascent job");
+        }
+
+        [TestMethod] public void ForANodeJobAHandoffFromAWindowEngagedAscentIsForeignAndReleaseLeavesItBurning()
+        {
+            var ours = new object(); var adapter = Make();
+            core.Ascent.Users.Add(core.AscentMenu); core.HandOffToNode(); // a person's ascent is now using the node executor
+            adapter.EngageNode(null, ours, false);
+            Assert.AreEqual(1, adapter.ReadNode(null, ours).OtherUsers);
+            adapter.DisengageNode(null, ours, null);
+            Assert.AreEqual(0, core.Node.Aborts, "their burn is left alone"); Assert.IsTrue(core.Node.Enabled);
         }
 
         [TestMethod] public void AnAscentModuleThatDoesNotActForUsIsAForeignUser()
@@ -206,7 +225,7 @@ namespace KspControl.BridgeTests
             var adapter = Make();
             core.Ascent.Users.Add(new object()); // someone else started the ascent
             core.HandOffToNode();
-            CollectionAssert.AreEquivalent(new[] { "mechjeb.ascent", "mechjeb.node", "mechjeb.attitude" }, adapter.FindCompetitors(null, new object()).ToArray());
+            CollectionAssert.AreEquivalent(new[] { "mechjeb.ascent", "mechjeb.node", "mechjeb.attitude" }, adapter.FindCompetitors(null, new object(), true).ToArray());
         }
 
         [TestMethod] public void WithoutAWindowModuleTheBridgeUserItselfEngagesTheAscent()
@@ -260,7 +279,7 @@ namespace KspControl.BridgeTests
         [TestMethod] public void ModulesFoundThroughTheGenericLookupAreScannedToo()
         {
             core.Rendezvous.Users.Add(new object());
-            CollectionAssert.AreEqual(new[] { "mechjeb.rendezvous" }, Make().FindCompetitors(null, null).ToArray());
+            CollectionAssert.AreEqual(new[] { "mechjeb.rendezvous" }, Make().FindCompetitors(null, null, false).ToArray());
         }
 
         [TestMethod] public void AnActiveAtmosphereAutopilotModuleIsACompetitor()
@@ -269,15 +288,15 @@ namespace KspControl.BridgeTests
             aa.Modules[typeof(string)] = new FakeAtmosphere.AutopilotModule { Active = false, ModuleName = "Cruise" };
             var adapter = Make(atmosphere: typeof(AtmosphereAutopilot));
             Assert.IsTrue(adapter.Capabilities.AtmosphereAutopilotInstalled);
-            Assert.AreEqual(0, adapter.FindCompetitors(null, null).Count);
+            Assert.AreEqual(0, adapter.FindCompetitors(null, null, false).Count);
             aa.Modules[typeof(int)] = new FakeAtmosphere.AutopilotModule { Active = true, ModuleName = "Fly By Wire" };
-            CollectionAssert.AreEqual(new[] { "atmosphere_autopilot.Fly By Wire" }, adapter.FindCompetitors(null, null).ToArray());
+            CollectionAssert.AreEqual(new[] { "atmosphere_autopilot.Fly By Wire" }, adapter.FindCompetitors(null, null, false).ToArray());
         }
 
         [TestMethod] public void AnUnreadableAtmosphereAutopilotFailsClosed()
         {
             var aa = new AtmosphereAutopilot { Throw = true }; AtmosphereAutopilot.Instance = aa;
-            var found = Make(atmosphere: typeof(AtmosphereAutopilot)).FindCompetitors(null, null);
+            var found = Make(atmosphere: typeof(AtmosphereAutopilot)).FindCompetitors(null, null, false);
             CollectionAssert.AreEqual(new[] { "atmosphere_autopilot:unreadable" }, found.ToArray());
         }
 

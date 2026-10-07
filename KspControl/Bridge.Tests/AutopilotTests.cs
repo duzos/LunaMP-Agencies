@@ -56,12 +56,19 @@ namespace KspControl.BridgeTests
             Refused(rig.Service.Handle(rig.PlanCircularize()), "vessel_changed");
         }
 
-        [TestMethod] public void ATargetBelowTheBodysSafeOrbitAltitudeIsRefused()
+        [TestMethod] public void ATargetWithinTheMarginOfTheOrbitFloorIsRefused()
         {
             rig.Flight.Telemetry.AtmosphereTopMeters = 0; rig.Flight.Telemetry.SafeAltitudeMeters = 90000; rig.Flight.Telemetry.BodyName = "Eve-like";
-            var response = Refused(rig.Service.Handle(rig.Ascent(altitude: 90000)), "invalid_argument");
-            StringAssert.Contains((string)response.Data["detail"], "safe orbit altitude");
-            Assert.AreEqual("running", rig.Service.Handle(rig.Ascent(requestId: "ascent-0002", altitude: 90001)).Status);
+            var response = Refused(rig.Service.Handle(rig.Ascent(altitude: 94999)), "invalid_argument");
+            StringAssert.Contains((string)response.Data["detail"], "95000");
+            Refused(rig.Service.Handle(rig.Ascent(requestId: "ascent-0003", altitude: 90000)), "invalid_argument");
+            Assert.AreEqual("running", rig.Service.Handle(rig.Ascent(requestId: "ascent-0002", altitude: 95000)).Status);
+        }
+
+        [TestMethod] public void TheMarginAppliesToTheAtmosphereTopToo()
+        {
+            Refused(rig.Service.Handle(rig.Ascent(altitude: 74999)), "invalid_argument"); // Kerbin-like: atmosphere 70 km
+            Assert.AreEqual("running", rig.Service.Handle(rig.Ascent(requestId: "ascent-0002", altitude: 75000)).Status);
         }
 
         [TestMethod] public void ARevokedLeaseIsAuthorityRevoked()
@@ -102,8 +109,10 @@ namespace KspControl.BridgeTests
                 Refused(rig.Service.Handle(request), "invalid_argument");
         }
 
-        [TestMethod] public void TheEdgesOfTheRangesAreAccepted()
+        [TestMethod] public void TheEdgesOfTheRangesAreAcceptedWhereTheBodyAllowsThem()
         {
+            Refused(rig.Service.Handle(rig.Ascent(altitude: 70000, inclination: -180)), "invalid_argument");
+            rig.Flight.Telemetry.AtmosphereTopMeters = 0; // an airless stand-in where the tool's own minimum is reachable
             Assert.AreEqual("running", rig.Service.Handle(rig.Ascent(altitude: 70000, inclination: -180)).Status);
             rig.Runner.Abort("stopped"); rig.Authority.ReleaseLease(rig.Lease); rig.AcquireLease();
             Assert.AreEqual("running", rig.Service.Handle(rig.Ascent(requestId: "ascent-0002", altitude: 500000, inclination: 180)).Status);
@@ -330,12 +339,32 @@ namespace KspControl.BridgeTests
             Assert.IsTrue(job.OrbitReached);
         }
 
-        [TestMethod] public void SwitchingTheAscentOffInMechJebBeforeOrbitIsATakeoverWhenEngagedThroughTheWindow()
+        [TestMethod] public void SwitchingTheAscentOffBeforeOrbitWhenEngagedThroughTheWindowEndsTheJobWithoutATakeover()
         {
             rig.MechJeb.ViaWindow = true;
             var job = StartAscent();
-            rig.Telemetry(40000, 60000, -100000, false); rig.Frame();
+            rig.Telemetry(90000, 100000, 60000, true); rig.Frame();
             rig.MechJeb.AscentEnabled = false; rig.MechJeb.AscentOwn = false; rig.Frame();
+            Assert.AreEqual("cancelled", job.Status); Assert.AreEqual("ascent_disengaged", job.ReasonCode);
+            Assert.IsTrue(rig.Authority.LeaseHeld, "not a takeover: the lease stays"); Assert.AreEqual(0, rig.Authority.Status().CooldownSeconds);
+            AssertReleased(throttleCut: true);
+            CollectionAssert.AreEqual(new[] { "vessel-1" }, rig.Flight.CutVessels);
+        }
+
+        [TestMethod] public void OnlyAscentJobsTreatTheAscentWindowAsOurs()
+        {
+            StartAscent(); rig.MechJeb.WindowFlags.Clear();
+            rig.Options.ScanEveryFrames = 1; rig.Frame();
+            Assert.IsTrue(rig.MechJeb.WindowFlags.Count > 0 && rig.MechJeb.WindowFlags.All(f => f), "an ascent job includes the window");
+            rig.Runner.Abort("stopped"); rig.Authority.ReleaseLease(rig.Lease); rig.AcquireLease(); rig.MechJeb.WindowFlags.Clear();
+            StartNode(); rig.MechJeb.WindowFlags.Clear(); rig.Frame();
+            Assert.IsTrue(rig.MechJeb.WindowFlags.Count > 0 && rig.MechJeb.WindowFlags.All(f => !f), "a node job does not");
+        }
+
+        [TestMethod] public void ASomeoneEngagingTheAscentWindowDuringANodeBurnIsATakeover()
+        {
+            var job = StartNode(); rig.Options.ScanEveryFrames = 1;
+            rig.MechJeb.Competitors.Add("mechjeb.ascent"); rig.Frame();
             Assert.AreEqual("cancelled", job.Status); Assert.AreEqual("human_input_during_operation", job.ReasonCode); Assert.IsFalse(rig.Authority.LeaseHeld);
             Assert.IsTrue(rig.Authority.Status().CooldownSeconds > 0); AssertReleased(throttleCut: true);
         }

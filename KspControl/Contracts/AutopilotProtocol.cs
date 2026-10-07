@@ -40,6 +40,8 @@ namespace KspControl.Contracts
         public const int InclinationMinDegrees = -180;
         public const int InclinationMaxDegrees = 180;
         public const int BodyNameMax = 64;
+        /// <summary>Added to the body's orbit floor (atmosphere top or safe altitude) for the lowest target the bridge accepts.</summary>
+        public const int OrbitMarginMeters = 5000;
         private static readonly Regex BodyName = new Regex("^[A-Za-z0-9 _'-]{1,64}$", RegexOptions.CultureInvariant);
         public static bool IsBodyName(string value) { return value != null && BodyName.IsMatch(value); }
     }
@@ -64,5 +66,7 @@ namespace KspControl.Contracts
         public const string PlanUnavailable = "plan_unavailable";
         public const string StoppedByRequest = "stopped";
         public const string NotApplicable = "not_applicable";
+        /// <summary>The ascent module was switched off before the orbit was reached (MechJeb's Disengage button, or MechJeb ending its own ascent). Not a takeover.</summary>
+        public const string AscentDisengaged = "ascent_disengaged";
     }
 }

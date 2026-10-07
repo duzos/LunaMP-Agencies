@@ -497,6 +497,7 @@
     <Compile Include="Network\NetworkStatistics.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Harmony\CommNet_AgencyFilter.cs" />
+    <Compile Include="Harmony\CommNetDenialLogGate.cs" />
     <Compile Include="Systems\Agency\CommNetState.cs" />
     <Compile Include="Systems\Agency\ToolingClient.cs" />
     <Compile Include="Systems\Agency\TradeClient.cs" />

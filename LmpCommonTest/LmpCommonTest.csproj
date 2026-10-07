@@ -25,6 +25,7 @@
     <Compile Include="..\LmpClient\Systems\Agency\VesselPublicationGuard.cs" Link="ClientLogic\VesselPublicationGuard.cs" />
     <Compile Include="..\LmpClient\Systems\Agency\SplitOrbitSnapshot.cs" Link="ClientLogic\SplitOrbitSnapshot.cs" />
     <Compile Include="..\LmpClient\Harmony\ContractPreLoader_Filter.cs" Link="ClientLogic\ContractPreLoader_Filter.cs" />
+    <Compile Include="..\LmpClient\Harmony\CommNetDenialLogGate.cs" Link="ClientLogic\CommNetDenialLogGate.cs" />
   </ItemGroup>
 
 </Project>

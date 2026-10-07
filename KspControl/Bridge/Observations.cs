@@ -16,6 +16,10 @@ namespace KspControl.Bridge
         private Guid agency;
         private long revision;
         private readonly Type facade = Type.GetType("LmpClient.Systems.Agency.ControlObservation, LmpClient", false);
+        private bool FacadeCompatible
+        {
+            get { try { return (int?)facade?.GetField("ApiVersion", BindingFlags.Public | BindingFlags.Static)?.GetRawConstantValue() == 1; } catch { return false; } }
+        }
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -25,12 +29,12 @@ namespace KspControl.Bridge
         }
         private Guid Agency()
         {
-            try { return (Guid)(facade?.GetProperty("AgencyId", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) ?? Guid.Empty); }
+            try { return FacadeCompatible ? (Guid)(facade.GetProperty("AgencyId", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) ?? Guid.Empty) : Guid.Empty; }
             catch { return Guid.Empty; }
         }
         private bool MayInspect(Vessel vessel)
         {
-            try { return vessel != null && agency != Guid.Empty && (bool)(facade?.GetMethod("MayInspectActiveVessel")?.Invoke(null, new object[] { vessel.id }) ?? false); }
+            try { return FacadeCompatible && vessel != null && agency != Guid.Empty && (bool)(facade.GetMethod("MayInspectActiveVessel")?.Invoke(null, new object[] { vessel.id }) ?? false); }
             catch { return false; }
         }
         public BridgeResponse Execute(BridgeRequest request)
@@ -48,6 +52,7 @@ namespace KspControl.Bridge
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch == null || EditorLogic.fetch.ship == null) return Fail(request, "editor_unavailable");
                     var ship = EditorLogic.fetch.ship;
                     data = new JObject { ["name"] = Text(ship.shipName), ["partsTotal"] = ship.Parts.Count,
+                        ["offset"] = Offset(request.Arguments), ["nextOffset"] = NextOffset(ship.Parts.Count, request.Arguments),
                         ["parts"] = DescribeParts(ship.Parts, request.Arguments), ["massTonnes"] = Finite(ship.GetTotalMass()),
                         ["allPartsConnected"] = ship.AreAllPartsConnected(), ["deltaV"] = "unavailable_until_provider_validated" }; break;
                 case "vessel.inspect":
@@ -58,6 +63,7 @@ namespace KspControl.Bridge
                         ["body"] = Text(vessel.mainBody?.bodyName), ["altitudeMetres"] = Finite(vessel.altitude),
                         ["surfaceSpeedMetresPerSecond"] = Finite(vessel.srfSpeed), ["situation"] = vessel.situation.ToString(),
                         ["partsTotal"] = vessel.parts.Count, ["parts"] = DescribeParts(vessel.parts, request.Arguments),
+                        ["offset"] = Offset(request.Arguments), ["nextOffset"] = NextOffset(vessel.parts.Count, request.Arguments),
                         ["actionGroups"] = ActionGroups(vessel) }; break;
                 case "part.controls": case "science.inspect":
                     var parts = AccessibleParts();
@@ -77,7 +83,7 @@ namespace KspControl.Bridge
         private JObject Context() => new JObject
         {
             ["scene"] = HighLogic.LoadedScene.ToString(), ["agencyId"] = agency == Guid.Empty ? null : agency.ToString(),
-            ["agencyAdapterAvailable"] = facade != null, ["processId"] = Process.GetCurrentProcess().Id,
+            ["agencyAdapterAvailable"] = FacadeCompatible, ["processId"] = Process.GetCurrentProcess().Id,
             ["protocolVersion"] = 1, ["bridgeVersion"] = "0.1.0", ["universalTimeSeconds"] = game == null ? null : Finite(Planetarium.GetUniversalTime()),
             ["mutationAuthority"] = "unavailable", ["revisionSemantics"] = "observation_sequence_not_mutation_precondition"
         };
@@ -177,6 +183,8 @@ namespace KspControl.Bridge
         }
         private static int Offset(JObject args) => Math.Max(0, Math.Min(100000, (int?)args?["offset"] ?? 0));
         private static int Limit(JObject args) => Math.Max(1, Math.Min(50, (int?)args?["limit"] ?? 20));
+        private static JToken NextOffset(int total, JObject args)
+        { var next = Offset(args) + Limit(args); return next < total ? (JToken)new JValue(next) : JValue.CreateNull(); }
         private static string Text(string value) => value == null ? null : value.Substring(0, Math.Min(256, value.Length));
         private static JToken Finite(double value) => double.IsNaN(value) || double.IsInfinity(value) ? JValue.CreateNull() : new JValue(value);
     }

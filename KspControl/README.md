@@ -47,7 +47,7 @@ logs. `KSP_CONTROL_PORT` optionally overrides loopback TCP port 43819. Provision
 installation, game lifecycle and client configuration are orchestrator tasks, not
 MCP tools. An absent credential produces `credential_not_configured`.
 
-Current tools are `editor_state`, `editor_engineering`, `craft_plan`, `editor_apply_craft`, `editor_restore_snapshot`, `job_status`, `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
+Current tools are `editor_state`, `editor_engineering`, `craft_plan`, `editor_apply_craft`, `editor_restore_snapshot`, `editor_save_craft`, `craft_list`, `job_status`, `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
 `part_controls`, `science`, `part_definition` and `editor_snapshot`. The latter two provide bounded configured-part and native editor snapshots; they do not import or create craft. Part and vessel pages are bounded. Part controls
 and science require a part ID from an accessible craft observation. Controls are
 descriptors only; field values/invocation are not available. Flight inspection
@@ -204,6 +204,52 @@ Not live-verified: that `EditorLogic.LoadShipFromFile` from the staging path lea
 settle and grace timings, whether the control locks (and the separate `EditorLogic.Lock` id) survive the load, that the unsaved marker
 and sentinel produce the stock overwrite prompt, the thumbnail naming (staging path or ship name), that `SaveShip` on an empty editor
 still carries `_modVersions`, and the crew and `ShipConstruct.SaveShip` header facts the snapshot records.
+
+## Save (editor_save_craft, craft_list)
+
+`editor_save_craft(requestId, leaseId, expectedRevision, fileName, replaceExpectedSha256?)` writes the editor craft as a ship file in
+`saves/<Save>/Ships/<facility>` (the editor's facility; a VAB grant covers only VAB). It needs a held lease, a grant that lists
+`craft.write` (recipient `ships:<facility>`, separate from the `editor.*` family) and a fresh `editorRevision`. `fileName` is a bare name
+(1..64 of `A-Z a-z 0-9 space . _ -`, no leading dot, no `..`, no `.craft` suffix); the extension is implied. Same host path and job
+envelope as apply (`requestId` dedupe, journal, `job_status`).
+
+Admission refuses before any write: `craft_empty`, `path_outside_save` (outside Ships, a reparse point anywhere up to `saves`, a save
+named `control` has no ledger), `ledger_unavailable` (a corrupt `ledger.json` is never overwritten or guessed at), and the overwrite rules.
+The runner decides the same thing again in the step that writes. That step runs under the operation lock and does, in one frame:
+
+1. capture the live craft (`SaveShip`) with the header `ship`, `description` and `missionFlag` taken from the editor fields, the UI field
+   itself untouched; refuse `craft_identifiers_invalid` unless every `PART.part` ends in a unique unsigned integer (the
+   `ToolingClient.CraftIndices` rule), `craft_too_large` over 2 MiB;
+2. create-only write (`<target>.kspcontrol.<guid>.tmp` then `File.Move`, which never overwrites) or, for a replace, `File.Replace`;
+3. read the file back and check: hash, parse, identifier rule, the comparator against the capture (`comparison`, equal expected, zero
+   unregistered differences) and `ShipConstruction.AllPartsFound`. A failure removes the new file (or puts the replaced bytes back) and
+   returns `save_verify_failed` (`indeterminate` if even the revert fails);
+4. record ownership in `KspControlData/<save>/ledger.json` (entries for files that no longer exist are pruned; a failed ledger write is
+   reported as `ledger: write_failed` and leaves the file saved but never replaceable);
+5. set `vesselNameAtLastSave` and `vesselNameAtLastSave_Sanitized` to the base name written and `undoIndexAtLastSave = undoLevel`
+   (`saveBookkeeping: synced | partial | write_failed | unavailable`), so a later human Save of that same file proceeds without a prompt
+   and a human Save to any other existing file still prompts.
+
+**Overwrite rule.** An existing file is never overwritten: `file_exists` without `replaceExpectedSha256`. With it, the file must be in the
+ledger (`file_not_kspcontrol_owned` otherwise), its current hash must equal `replaceExpectedSha256` (`file_changed`) and the hash the
+ledger recorded (`file_changed`, "modified since KspControl wrote it"). A human file is never replaced, whatever hash is supplied. Names
+compare case-insensitively (Windows).
+
+Declared outputs: the `.craft` (`created` or `replaced`), the ledger, and anything else that appears or changes in the Ships folder
+during the job (`.craft.original`, `.loadmeta`), which is reported and never a failure. No thumbnail is captured.
+
+`craft_list(facility, offset, limit, filter)` is read-only and needs no lease: `{fileName, sizeBytes, modifiedUtc, sha256, kspControlOwned}`
+for the `.craft` files of the current save, name-ordered and paged (at most 50, hashed per page). `kspControlOwned` is true only when the
+ledger lists the file and its current hash equals the recorded one. Names the tools cannot address and linked files are counted, not listed.
+
+**Not in this slice.** `editor_verify_roundtrip` is not a tool: R1-section 4 and every later revision dropped it. The roundtrip gate
+(save, then `editor_load_craft` of the saved file with a comparison) belongs to the load slice (P2.9); this slice's file-level
+comparison is the part that can be checked without loading. The LunaMP `FromFile` versus `Build(ship)` fingerprint check needs the facade
+v2 members that R1-section 12 deferred to P3; the pure `CraftIndices` rule is checked here.
+
+Not live-verified: that a file written this way loads through the craft browser and `LoadShipFromFile` with no `.craft.original`, that the
+save-name fields and marker produce no prompt for a human Save of the same file and a prompt for another existing one, that
+`File.Replace` and `File.Move` behave the same under KSP's Mono as under .NET, and the sidecars and `.loadmeta` timing beside a save.
 
 ## Offline preview packaging
 

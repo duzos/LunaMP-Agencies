@@ -154,8 +154,7 @@ namespace KspControl.HostTests;
   var rig=await Acquire(8000);
   using var shortWait=new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
   var first=JObject.Parse(await rig.Tools.EditorLaunch("launch-0001",Lease,Token,"LaunchPad",5000,shortWait.Token));
-  // The short wait may end on a cancelled poll, which is reported as that poll's failure; what matters is that the launch has not completed and its reservation is held.
-  Assert.AreNotEqual("completed",(string?)first["Status"],first.ToString()); Assert.AreEqual((0m,5000m),Spend(rig),"reserved while running");
+  Assert.AreEqual("running",(string?)first["Status"],first.ToString()); Assert.AreEqual((0m,5000m),Spend(rig),"reserved while running");
   finished=true;
   var status=JObject.Parse(await new MutationTools(rig.Service).JobStatus("launch-0001",5));
   Assert.AreEqual("completed",(string?)status["Status"],status.ToString());

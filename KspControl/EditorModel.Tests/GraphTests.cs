@@ -28,7 +28,12 @@ namespace KspControl.EditorModel.Tests;
  [TestMethod] public void AttachmentPositionUsesBothRotations(){var identity=new Rotation(0,0,0,1);var rotated=new Rotation(0,0,1,0);var result=AttachmentGeometry.StackPosition(new(5,5,0),rotated,new(0,-1,0),identity,new(0,2,0));Assert.AreEqual(5,result.X,1e-9);Assert.AreEqual(4,result.Y,1e-9);}
  [TestMethod] public void InvalidCatalogEntriesProduceDiagnostics() { var c=Catalog();c["tank"]=null!;Has(Rocket(),"unknown_part",c);c=Catalog();c["tank"].Nodes[0].Orientation=new();Has(Rocket(),"invalid_catalog_nodes",c); }
  [TestMethod] public void ExtremeFiniteGeometryAndOversizeNodeCatalogRejected() { Assert.ThrowsException<ArgumentException>(()=>AttachmentGeometry.Rotate(new(double.MaxValue,0,0),new(0,0,0,1))); var c=Catalog();c["tank"].Nodes.AddRange(Enumerable.Range(0,129).Select(i=>new AttachNodeDefinition {Name="node"+i,Orientation=new(0,1,0)}));Has(Rocket(),"invalid_catalog_nodes",c); }
+ [TestMethod] public void ValidStackPassesGeometryGate() { Assert.AreEqual(0,StackGeometryValidator.Validate(Rocket(),Catalog()).Count); }
+ [TestMethod] public void MisplacedAndSameFacingStackRejected() { var g=Rocket();g.Parts[1].Position=new(0,-10,0);Assert.IsTrue(StackGeometryValidator.Validate(g,Catalog()).Any(i=>i.Code=="stack_nodes_misaligned"));var c=Catalog();c["tank"].Nodes[0].Orientation=new(0,-1,0);Assert.IsTrue(StackGeometryValidator.Validate(Rocket(),c).Any(i=>i.Code=="stack_normals_not_opposed")); }
+ [TestMethod] public void RotatedStackUsesCraftSpaceNodes() { var g=Rocket();g.Parts=g.Parts.Take(3).ToList();foreach(var p in g.Parts) { p.Position=new(-p.Position.X,-p.Position.Y,p.Position.Z);p.Rotation=new(0,0,1,0); } Assert.AreEqual(0,StackGeometryValidator.Validate(g,Catalog()).Count); }
+ [TestMethod] public void GeometryTolerancesMustBeBounded() { Assert.ThrowsException<ArgumentException>(()=>StackGeometryValidator.Validate(Rocket(),Catalog(),double.NaN));Assert.ThrowsException<ArgumentException>(()=>StackGeometryValidator.Validate(Rocket(),Catalog(),10)); }
  [TestMethod] public void GeometryRejectsInvalidQuaternion(){Assert.ThrowsException<ArgumentException>(()=>AttachmentGeometry.StackPosition(new(),new(),new(),new(0,0,0,1),new()));}
 }
+
 
 

@@ -17,7 +17,7 @@ checks; passing protocol tests is not proof of game operation.
   part/module snapshots, ID allocation and game roundtrip proof; it is not safe to
   invent those defaults from a graph alone. Graph validation does not establish
   aerodynamic stability, collision clearance, fuel compatibility or launchability.
-  Stack node alignment and opposing normals require a separate geometry gate;
+  Stack node alignment and opposing normals use the separate StackGeometryValidator gate;
   graph validation alone is not permission to import.
 - `Host/ControlJournal`: unexposed authority/job primitive. Reservations and request
   identities persist; in-flight work becomes indeterminate after restart. Grants
@@ -54,5 +54,6 @@ requires a ready LunaMP ownership record belonging to the current agency. No
 foreign-vessel enumeration is exposed. Revision values are observation sequences,
 not mutation preconditions. Screenshots, MechJeb, contacts and write operations are
 explicitly unavailable pending their implementations and acceptance gates.
+
 
 

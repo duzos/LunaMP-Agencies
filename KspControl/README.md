@@ -47,7 +47,7 @@ logs. `KSP_CONTROL_PORT` optionally overrides loopback TCP port 43819. Provision
 installation, game lifecycle and client configuration are orchestrator tasks, not
 MCP tools. An absent credential produces `credential_not_configured`.
 
-Current tools are `editor_state`, `editor_engineering`, `craft_plan`, `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
+Current tools are `editor_state`, `editor_engineering`, `craft_plan`, `editor_apply_craft`, `editor_restore_snapshot`, `job_status`, `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
 `part_controls`, `science`, `part_definition` and `editor_snapshot`. The latter two provide bounded configured-part and native editor snapshots; they do not import or create craft. Part and vessel pages are bounded. Part controls
 and science require a part ID from an accessible craft observation. Controls are
 descriptors only; field values/invocation are not available. Flight inspection
@@ -171,6 +171,39 @@ Not live-verified: the FSM state names, the reflection targets (`fsm`, `undoLeve
 `vesselNameAtLastSave_Sanitized`, `SetLastSanitizedSaveName`), the `SaveShip` cost per poll and the resulting polling mode, that an
 idle editor (including deployable-panel animation and a KSPCF re-fire) keeps a stable fingerprint, and the stock part-research,
 delta-V, mass and node-gap readings.
+
+## Apply (editor_apply_craft, editor_restore_snapshot, job_status)
+
+These change the editor, so they need a held lease (`control_acquire_lease`), a grant that lists the operation family
+(`editor.replace_craft`, `editor.restore_snapshot`) and a fresh `editorRevision` token. They never take grant content or keys.
+
+Host path (`MutationService`): argument checks with no socket (`invalid_argument`), then `lease_required` / `lease_invalid` /
+`grant_operation_denied`, then the journal admits the request (same `requestId` and arguments returns the same job, a different request
+under the same id is `request_id_conflict`, a host restart turns in-flight jobs `indeterminate`), then the bridge is asked and the job is
+polled for up to 20 s; after that the call returns `running` and `job_status(requestId, waitSeconds 0..20)` continues it. When the host
+cannot tell whether the game acted (connection lost, bridge restarted) the job is `indeterminate` and the id stays reserved.
+
+Bridge path: admission runs in one frame on the queued observation path (`editor.apply_craft`, `editor.restore_snapshot`,
+`editor.operation_status`): authority admit, token and fresh fingerprint, idle check, unsaved-craft policy, overwrite-guard refusals
+(`save_overwrite_guard_unavailable`, `name_collision_unguarded`), then the bridge **re-plans** the graph against the live catalog and
+refuses with `plan_changed` unless `planHash` matches, renders the structural craft with the live `_modVersions` and persistent ids, and
+hands the job to `EditorOperationRunner`, a pure state machine behind `IEditorPort` that advances one step per frame:
+lock, verified snapshot (`KspControlData/<save>/recovery/kc-snap-<id>.craft` plus metadata), stage (`staging/kc-<requestId>.craft`),
+dispatch (`EditorLogic.LoadShipFromFile` inside the tracker's dispatch window), settle, plan-versus-loaded verify, a locked grace that ends
+once the fingerprint has been stable for 2 s (at most 20 s, then `settleUnstable`), thumbnail settle inside the lock, unlock, terminal.
+A failed load or verify reloads the snapshot (`restore.result`); Stop or authority loss after dispatch is `cancelled` with no automatic
+restore; a scene change or human input inside the lock is `indeterminate`. After an apply the craft is flagged unsaved under a sentinel
+save name so KSP prompts before a human Save overwrites a same-named file; a restore writes the name, description, flag, both save-name
+fields and the undo marker back. A craft this service generated and nobody has touched since is not treated as unsaved human work.
+
+`KspControlData/control/` (suspensions) is never reachable from a tool path, and neither is a save literally named `control`.
+Staging files go at the terminal state; recovery files stay (newest 50; the latest snapshot of an unsaved craft is never pruned).
+Thumbnails KSP writes for staging or recovery names are deleted, a ship-named one is restored from a backup, anything else is only reported.
+
+Not live-verified: that `EditorLogic.LoadShipFromFile` from the staging path leaves the editor in `st_idle` with every part started, the
+settle and grace timings, whether the control locks (and the separate `EditorLogic.Lock` id) survive the load, that the unsaved marker
+and sentinel produce the stock overwrite prompt, the thumbnail naming (staging path or ship name), that `SaveShip` on an empty editor
+still carries `_modVersions`, and the crew and `ShipConstruct.SaveShip` header facts the snapshot records.
 
 ## Offline preview packaging
 

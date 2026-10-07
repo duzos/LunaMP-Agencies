@@ -103,9 +103,9 @@ namespace KspControl.HostTests;
 }
 [TestClass] public class BridgeClientAllowlistTests
 {
- [TestMethod] public void ReadControlAndMutationAllowlistsAreDisjointAndMutationsAreExactlyTheEditorFlightAndAutopilotOperations()
+ [TestMethod] public void ReadControlAndMutationAllowlistsAreDisjointAndMutationsAreExactlyTheEditorLaunchFlightAndAutopilotOperations()
  {
-  CollectionAssert.AreEquivalent(new[]{ "editor.apply_craft","editor.restore_snapshot","editor.save_craft","editor.load_craft","flight.set_controls","flight.stage","flight.action_group","flight.abort","flight.warp" }.Concat(AutopilotOperations.Mutations).ToArray(),BridgeClient.MutationOperations.ToArray());
+  CollectionAssert.AreEquivalent(new[]{ "editor.apply_craft","editor.restore_snapshot","editor.save_craft","editor.load_craft","editor.launch","flight.set_controls","flight.stage","flight.action_group","flight.abort","flight.warp" }.Concat(AutopilotOperations.Mutations).ToArray(),BridgeClient.MutationOperations.ToArray());
   Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ReadOperations)); Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ControlOperationSet));
   Assert.IsFalse(BridgeClient.ReadOperations.Overlaps(BridgeClient.ControlOperationSet)); Assert.IsFalse(BridgeClient.ReadOperations.Any(ControlOperations.IsControl));
   CollectionAssert.AreEquivalent(ControlOperations.All,BridgeClient.ControlOperationSet.ToArray());

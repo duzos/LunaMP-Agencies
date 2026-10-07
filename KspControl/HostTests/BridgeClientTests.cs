@@ -25,6 +25,18 @@ namespace KspControl.HostTests;
    Assert.IsTrue(BridgeClient.ReadOperations.Contains(operation)); Assert.IsFalse(BridgeClient.MutationOperations.Contains(operation)); Assert.IsFalse(BridgeClient.ControlOperationSet.Contains(operation));
   }
  }
+ [TestMethod] public async Task ACallerCancellingMidReadIsACancellationNotABridgeFailure()
+ {
+  // The bridge has the request and is still working when the caller gives up: cancelling disposes the socket under the blocking read.
+  var received=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var never=new TaskCompletionSource<BridgeResponse>();
+  using var bridge=new FakeBridge(async r=>{ received.TrySetResult(); return await never.Task; });
+  using var cancel=new CancellationTokenSource();
+  var call=new BridgeClient().ReadAsync(EditorOperations.OperationStatus,new JObject { ["requestId"]="apply-0001" },cancel.Token);
+  await received.Task.WaitAsync(TimeSpan.FromSeconds(5)); cancel.Cancel();
+  string? reply=null;
+  try { reply=await call.WaitAsync(TimeSpan.FromSeconds(5)); } catch(OperationCanceledException) { return; }
+  Assert.Fail("a cancelled call must not be reported as a bridge answer: "+reply);
+ }
  [TestMethod] public async Task ArbitraryOperationRefusedBeforeConnection()
  { await Assert.ThrowsExceptionAsync<ArgumentException>(()=>new BridgeClient().ReadAsync("launch",null,CancellationToken.None)); }
 }

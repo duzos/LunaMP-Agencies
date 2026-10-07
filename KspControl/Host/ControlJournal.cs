@@ -13,7 +13,7 @@ public sealed record Job(string RequestId,string Fingerprint,string GrantId,long
 }
 public sealed class ControlJournal : IDisposable
 {
- private sealed class State { public Dictionary<string,Job> Jobs {get;set;}=new(); public decimal Charged {get;set;} public HashSet<string> GrantKeys {get;set;}=new(StringComparer.Ordinal); public HashSet<string> RevokedGrantKeys {get;set;}=new(StringComparer.Ordinal); }
+ private sealed class State { public Dictionary<string,Job> Jobs {get;set;}=new(); public decimal Charged {get;set;} public Dictionary<string,decimal> ChargedByGrant {get;set;}=new(StringComparer.Ordinal); public HashSet<string> GrantKeys {get;set;}=new(StringComparer.Ordinal); public HashSet<string> RevokedGrantKeys {get;set;}=new(StringComparer.Ordinal); }
  private bool faulted; private readonly object gate=new(); private readonly string path; private readonly FileStream exclusive; private State state;
  private readonly Dictionary<string,MissionGrant> grants=new(StringComparer.Ordinal); private static string Key(string id,long generation)=>id+"#"+generation; private ControlLease? lease;
  public ControlJournal(string directory)
@@ -55,14 +55,17 @@ public sealed class ControlJournal : IDisposable
  public Job Admit(string requestId,string grantId,long grantGeneration,string leaseId,string world,string operation,string entity,string canonicalArguments,decimal maximumCost,DateTimeOffset now)
  {
   if(string.IsNullOrWhiteSpace(requestId)||requestId.Length>128||canonicalArguments.Length>1048576||maximumCost<0) throw new ArgumentException("invalid_request");
-  var fingerprint=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {grantId,grantGeneration,leaseId,world,operation,entity,canonicalArguments,maximumCost}))));
+  string Fingerprint(string epoch)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {grantId,grantGeneration,leaseId,world=epoch,operation,entity,canonicalArguments,maximumCost}))));
+  var fingerprint=Fingerprint(world);
   lock(gate) {
    if(faulted) throw new IOException("journal_unavailable");
-   if(state.Jobs.TryGetValue(requestId,out var previous)) { if(previous.Fingerprint!=fingerprint) throw new InvalidOperationException("request_id_conflict"); return previous; }
+   // A retry is the same request even if a launch moved the same lease to a new world epoch since: compare against the epoch it was admitted under.
+   if(state.Jobs.TryGetValue(requestId,out var previous)) { var comparable=previous.LeaseId==leaseId && previous.WorldEpoch!=world ? Fingerprint(previous.WorldEpoch) : fingerprint; if(previous.Fingerprint!=comparable) throw new InvalidOperationException("request_id_conflict"); return previous; }
    var grant=Authorize(grantId,grantGeneration,leaseId,world,operation,entity,now);
-   // Gross spend is never replenished by income. Indeterminate reservations remain held.
-   decimal reserved=state.Jobs.Values.Where(j=>j.Status is "accepted" or "running" or "indeterminate").Sum(j=>j.ReservedCost);
-   if(state.Charged+reserved+maximumCost>grant.SpendingLimit) throw new InvalidOperationException("budget_exceeded");
+   // Gross spend is never replenished by income. Indeterminate reservations remain held. The cap belongs to the grant (all its generations):
+   // a freshly issued grant starts a fresh cap, a re-armed one keeps what it already spent.
+   decimal reserved=state.Jobs.Values.Where(j=>j.GrantId==grantId && j.Status is "accepted" or "running" or "indeterminate").Sum(j=>j.ReservedCost);
+   if(ChargedFor(grantId)+reserved+maximumCost>grant.SpendingLimit) throw new InvalidOperationException("budget_exceeded");
    var job=new Job(requestId,fingerprint,grantId,grantGeneration,leaseId,world,operation,entity,maximumCost,"accepted",""); state.Jobs.Add(requestId,job); Save(); return job;
   }
  }
@@ -72,7 +75,42 @@ public sealed class ControlJournal : IDisposable
  }
  public Job Complete(string id,decimal actualCost)
  {
-  lock(gate) { var job=Get(id); if(job.Status!="running"||actualCost<0||actualCost>job.ReservedCost) throw new InvalidOperationException("invalid_completion"); state.Charged+=actualCost; return Set(job with { Status="completed",Reason="observed" }); }
+  lock(gate) { var job=Get(id); if(job.Status!="running"||actualCost<0||actualCost>job.ReservedCost) throw new InvalidOperationException("invalid_completion"); AddCharge(job.GrantId,actualCost); return Set(job with { Status="completed",Reason="observed" }); }
+ }
+ private decimal ChargedFor(string grantId) => state.ChargedByGrant.TryGetValue(grantId,out var spent) ? spent : 0m;
+ private void AddCharge(string grantId,decimal amount) { state.Charged+=amount; state.ChargedByGrant[grantId]=ChargedFor(grantId)+amount; }
+ /// <summary>The gross funds this grant has spent so far (completed charges only), and what its in-flight and indeterminate jobs still hold.</summary>
+ public (decimal Charged,decimal Reserved) SpendFor(string grantId)
+ {
+  lock(gate) return (ChargedFor(grantId),state.Jobs.Values.Where(j=>j.GrantId==grantId && j.Status is "accepted" or "running" or "indeterminate").Sum(j=>j.ReservedCost));
+ }
+ /// <summary>
+ /// Ends a job that was accepted or running and records what it actually cost. A completed job adds <paramref name="charged"/> to the grant's gross
+ /// spend whatever its reservation was (the server's charge is the truth) and releases the rest of the reservation; every other status releases the
+ /// whole reservation except "indeterminate", which keeps it. Never call it with a charge for a status other than completed unless the funds really left.
+ /// </summary>
+ public Job Settle(string id,string status,string reason,string result,decimal charged)
+ {
+  if(status is not ("completed" or "failed" or "cancelled" or "indeterminate") || charged<0) throw new ArgumentException("invalid_status");
+  lock(gate)
+  {
+   // An indeterminate job may be settled once, by the caller's proof that the bridge's own envelope for this request id now says what happened.
+   var job=Get(id); if(job.Status is not ("accepted" or "running" or "indeterminate")) throw new InvalidOperationException("not_in_flight");
+   if(charged>0 && status!="indeterminate") AddCharge(job.GrantId,charged);
+   return Set(job with { Status=status,Reason=reason,Result=result.Length>MaxResult ? "" : result });
+  }
+ }
+ /// <summary>Sets the spending limit of the provisioned grant (same id and generation). The bridge fixes the live cap at the first acquire, which can be after the grant was first mirrored.</summary>
+ public void SetSpendingLimit(string grantId,long generation,decimal limit)
+ {
+  if(limit<0) throw new ArgumentException("invalid_limit");
+  lock(gate) { if(grants.TryGetValue(grantId,out var held) && held.Generation==generation) grants[grantId]=held with { SpendingLimit=limit }; }
+ }
+ /// <summary>After a launch moved the bridge's lease to a new scene: adopt the bridge's new world epoch for the same lease so later requests stay admissible.</summary>
+ public void RebaseLease(string leaseId,string newWorldEpoch)
+ {
+  if(string.IsNullOrWhiteSpace(newWorldEpoch)) throw new ArgumentException("invalid_epoch");
+  lock(gate) { if(lease==null||lease.Id!=leaseId) throw new InvalidOperationException("lease_revoked_or_expired"); lease=lease with { WorldEpoch=newWorldEpoch }; }
  }
  /// <summary>Records the terminal outcome of a job that was accepted or running. Cancelling a running job is only valid when the bridge proved it never dispatched.</summary>
  public Job Finish(string id,string status,string reason,string result)

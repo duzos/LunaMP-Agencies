@@ -71,7 +71,7 @@ public sealed partial class MutationService(BridgeClient bridge,LeaseKeeper keep
   return RunAsync(OperationEffects.WriteCraft,EditorOperations.SaveCraft,requestId,leaseId.ToLowerInvariant(),args,OperationLimits.WaitSecondsMax,cancellationToken);
  }
 
- internal async Task<string> RunAsync(string effect,string bridgeOperation,string requestId,string leaseId,JObject args,int waitSeconds,CancellationToken cancellationToken,string entity=Entity)
+ internal async Task<string> RunAsync(string effect,string bridgeOperation,string requestId,string leaseId,JObject args,int waitSeconds,CancellationToken cancellationToken,string entity=Entity,decimal reserve=0m)
  {
   var j=journal.TryGet();
   if(j==null) return Fail(journal.State=="locked_by_other_host" ? OperationReasons.JournalLockedByOtherHost : OperationReasons.JournalUnavailable,null,requestId);
@@ -82,7 +82,7 @@ public sealed partial class MutationService(BridgeClient bridge,LeaseKeeper keep
   if(grant==null) return Fail(ControlReasons.GrantMissing,null,requestId);
   if(!grant.Operations.Contains(effect,StringComparer.Ordinal)) return Fail(OperationReasons.GrantOperationDenied,"the grant does not list "+effect,requestId);
   Job job;
-  try { job=j.Admit(requestId,grant.Id,grant.Generation,leaseId,lease.WorldEpoch,effect,entity,Canonical(args),0m,DateTimeOffset.UtcNow); }
+  try { job=j.Admit(requestId,grant.Id,grant.Generation,leaseId,lease.WorldEpoch,effect,entity,Canonical(args),reserve,DateTimeOffset.UtcNow); }
   catch(InvalidOperationException e) { return Fail(MapAdmission(e.Message),null,requestId); }
   catch(IOException) { return Fail(OperationReasons.JournalUnavailable,null,requestId); }
   catch(ArgumentException e) { return CraftPlanService.Invalid(e.Message); }
@@ -151,7 +151,8 @@ public sealed partial class MutationService(BridgeClient bridge,LeaseKeeper keep
   if(status is "accepted" or "running") return null;
   string Finish(string terminal,string why)
   {
-   Safely(()=>j.Finish(job.RequestId,terminal,why,text));
+   if(job.Operation==OperationEffects.Launch) SettleLaunch(j,job,reply,terminal,why,text);
+   else Safely(()=>j.Finish(job.RequestId,terminal,why,text));
    if(reason!=null && (LeaseGone.Contains(reason) || reason==OperationReasons.HumanInputDuringOperation)) { keeper.Untrack(); journal.MirrorEnd(job.LeaseId); }
    return text;
   }
@@ -171,7 +172,7 @@ public sealed partial class MutationService(BridgeClient bridge,LeaseKeeper keep
  private string Indeterminate(ControlJournal j,Job job,string reason,string detail)
  {
   Safely(()=>j.Finish(job.RequestId,"indeterminate",reason,""));
-  var data=new JObject { ["operation"]=job.Operation==AutopilotOperations.Effect ? "autopilot" : OperationLabel(job),["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
+  var data=new JObject { ["operation"]=OperationLabel(job),["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
   return JsonConvert.SerializeObject(new BridgeResponse { Status="indeterminate",ReasonCode=reason,Data=data });
  }
 
@@ -196,7 +197,7 @@ public sealed partial class MutationService(BridgeClient bridge,LeaseKeeper keep
   "request_id_conflict" => OperationReasons.RequestIdConflict,
   "lease_revoked_or_expired" => ControlReasons.LeaseInvalid,
   "grant_denied" => OperationReasons.GrantOperationDenied,
-  "budget_exceeded" => OperationReasons.GrantOperationDenied,
+  "budget_exceeded" => OperationReasons.SpendCapExceeded,
   "journal_unavailable" => OperationReasons.JournalUnavailable,
   _ => OperationReasons.ReconcileRequired
  };
@@ -220,6 +221,8 @@ public static class MutationArguments
   return null;
  }
  public static string? PlanHash(string? hash) => OperationLimits.IsPlanHash(hash) ? null : $"expectedPlanHash must be {OperationLimits.PlanHashLength} lower-case hex characters (the planHash from craft_plan)";
+ public static string? LaunchSite(string? site) => OperationLimits.IsLaunchSite(site) ? null : $"launchSite must be 1..{OperationLimits.LaunchSiteMax} printable characters";
+ public static string? MaxSpend(long funds) => funds<0 || funds>OperationLimits.MaxSpendFunds ? $"maxSpendFunds must be 0..{OperationLimits.MaxSpendFunds}" : null;
  public static string? Wait(int seconds) => seconds<0 || seconds>OperationLimits.WaitSecondsMax ? $"waitSeconds must be 0..{OperationLimits.WaitSecondsMax}" : null;
  public static string? Common(string? requestId,string? leaseId,string? revision) => RequestId(requestId) ?? Lease(leaseId) ?? Revision(revision);
 }

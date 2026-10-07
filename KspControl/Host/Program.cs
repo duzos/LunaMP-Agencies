@@ -16,6 +16,6 @@ builder.Services.AddSingleton<JournalAccess>();
 builder.Services.AddSingleton<MutationService>();
 builder.Services.AddSingleton<FlightService>();
 builder.Services.AddSingleton<AutopilotService>();
-builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>().WithTools<MutationTools>().WithTools<LoadTools>().WithTools<FlightTools>().WithTools<AutopilotTools>();
+builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>().WithTools<MutationTools>().WithTools<LoadTools>().WithTools<FlightTools>().WithTools<AutopilotTools>().WithTools<LaunchTools>();
 await builder.Build().RunAsync();
 return 0;

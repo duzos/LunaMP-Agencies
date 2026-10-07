@@ -83,9 +83,13 @@ namespace KspControl.Bridge
         public DateTime ExpiresUtc { get; }
         private readonly EffectPermission[] permissions;
         private readonly string[] entities;
+        /// <summary>The signed gross spend limit of the grant, in funds.</summary>
+        public long SpendLimitFunds { get; }
         /// <param name="entities">Lease entities this grant may bind to, for example "editor:VAB".</param>
-        public TrustedExecutionGrant(string id, long generation, GrantBinding binding, DateTime expiresUtc, IEnumerable<EffectPermission> permissions, IEnumerable<string> entities)
+        public TrustedExecutionGrant(string id, long generation, GrantBinding binding, DateTime expiresUtc, IEnumerable<EffectPermission> permissions, IEnumerable<string> entities, long spendLimitFunds = 0)
         {
+            if (spendLimitFunds < 0) throw new ArgumentException("invalid_spend_limit");
+            SpendLimitFunds = spendLimitFunds;
             Id = Identifiers.Required(id); if (generation <= 0) throw new ArgumentException("invalid_grant_generation");
             Generation = generation; Binding = binding ?? throw new ArgumentNullException(nameof(binding)); ExpiresUtc = expiresUtc.ToUniversalTime();
             this.permissions = (permissions ?? throw new ArgumentNullException(nameof(permissions))).Take(1025).ToArray();
@@ -93,7 +97,10 @@ namespace KspControl.Bridge
             this.entities = (entities ?? throw new ArgumentNullException(nameof(entities))).Select(e => Identifiers.Required(e)).ToArray();
         }
         internal bool Allows(ClassifiedEffect effect) => permissions.Any(p => p.Operation == effect.Operation && Matches(p.Recipient, effect.Recipient));
+        internal bool AllowsOperation(string operation) => permissions.Any(p => p.Operation == operation);
         internal bool AllowsEntity(string entity) => entities.Any(e => Matches(e, entity));
+        /// <summary>True when the grant lists any flight operation, so a lease may follow a launched vessel into the flight scene.</summary>
+        internal bool AllowsFlight => permissions.Any(p => p.Operation.StartsWith("flight.", StringComparison.Ordinal));
         /// <summary>Exact match, or a trailing "*" meaning "this prefix" (used by the flight grant, whose vessel is not known when it is issued).</summary>
         private static bool Matches(string pattern, string value)
         {
@@ -159,6 +166,14 @@ namespace KspControl.Bridge
         private long grantDeadline;
         private string leaseId, leasePurpose, leaseEpoch, leaseEntity, lastEndedLeaseId, lastEndedReason, operationId;
         private long leaseDeadline, heartbeatDeadline, generation, lastClock, cooldownUntil;
+        // A launch moves the lease from the editor entity to the scene it loads. While it runs, a context change carries the lease along instead of revoking it.
+        private string transitionLease, transitionFrom;
+        // The standing live spend cap, fixed per (grant id, generation) at the first acquire and persisted so retries and restarts cannot move it.
+        internal const long StandingCapFunds = 100000;
+        private ISpendCapStore capStore;
+        private Func<double?> confirmedFunds;
+        private Dictionary<string, long> caps;
+        private bool capsUnreadable;
 
         public ExecutionAuthority(Func<long> monotonicMilliseconds, IEnumerable<string> knownEffects, long watchdogMilliseconds = ControlLimits.WatchdogMilliseconds,
             ISuspensionStore store = null, Func<DateTime> utcNow = null)
@@ -201,9 +216,39 @@ namespace KspControl.Bridge
                 context = observed; contextPublishedAt = now;
                 if (previous != null && observed.SameIdentity(previous) && observed.Revision < previous.Revision)
                 { RevokeLease("revision_regressed"); throw new InvalidOperationException("revision_regressed"); }
-                if (previous != null && !observed.SameIdentity(previous)) RevokeLease("context_changed");
-                else if (leaseId != null && (leaseEpoch != observed.Epoch || leaseEntity != observed.Entity)) RevokeLease("context_changed");
+                if (previous != null && !observed.SameIdentity(previous)) { if (!CarryLease(observed)) RevokeLease("context_changed"); }
+                else if (leaseId != null && (leaseEpoch != observed.Epoch || leaseEntity != observed.Entity)) { if (!CarryLease(observed)) RevokeLease("context_changed"); }
             }
+        }
+
+        /// <summary>Wires the standing spend cap: where it is persisted and where the confirmed agency balance comes from.</summary>
+        public void ConfigureSpendCap(ISpendCapStore store, Func<double?> fundsProvider)
+        { lock (gate) { capStore = store; confirmedFunds = fundsProvider; caps = null; capsUnreadable = false; } }
+
+        private Dictionary<string, long> LoadCaps()
+        {
+            if (caps != null) return caps;
+            if (capStore == null || capsUnreadable) return null;
+            try { caps = capStore.Load(); } catch (Exception) { capsUnreadable = true; }
+            return caps;
+        }
+
+        /// <summary>
+        /// At a lease acquire for a grant that lists the launch operation: fixes this generation's cap as min(grant limit, 100000, 25% of the confirmed
+        /// balance) the first time the balance is known. Later acquires, retries and restarts read the persisted value.
+        /// </summary>
+        private void EnsureSpendCap()
+        {
+            if (capStore == null || grant == null || !grant.AllowsOperation("editor.launch")) return;
+            var stored = LoadCaps(); if (stored == null) return;
+            var key = Key(grant.Id, grant.Generation);
+            if (stored.ContainsKey(key)) return;
+            double? funds = null;
+            try { funds = confirmedFunds == null ? null : confirmedFunds(); } catch (Exception) { funds = null; }
+            if (!funds.HasValue || double.IsNaN(funds.Value) || double.IsInfinity(funds.Value)) return; // unknown balance: no cap yet, so no launch spend
+            var share = (long)Math.Floor(Math.Max(0, funds.Value) * 0.25);
+            stored[key] = Math.Min(Math.Min(grant.SpendLimitFunds, StandingCapFunds), share);
+            try { capStore.Save(stored); } catch (Exception) { /* the value holds for this session */ }
         }
 
         public void PublishGrantStatus(GrantStatusInfo status)
@@ -363,6 +408,68 @@ namespace KspControl.Bridge
         public void EndOperation(string id)
         { lock (gate) { if (operationId == id) operationId = null; } }
 
+        /// <summary>
+        /// Declares that this ticket's operation is about to change the scene (a launch). Until <see cref="FinishTransition"/> the lease follows
+        /// the observed context instead of being revoked. Only valid inside the operation's lock.
+        /// </summary>
+        public void BeginTransition(ExecutionTicket ticket)
+        {
+            if (ticket == null) throw new ArgumentNullException(nameof(ticket));
+            lock (gate)
+            {
+                CheckExpiry(); RequireAuthority(ticket.LeaseId); RequireTicketCurrent(ticket);
+                if (operationId == null) throw new InvalidOperationException("transition_outside_operation");
+                transitionLease = ticket.LeaseId; transitionFrom = leaseEntity;
+            }
+        }
+
+        /// <summary>True while the ticket's lease and grant are still the ones that admitted it. Unlike dispatch validation it ignores the scene, which is expected to change.</summary>
+        public bool TicketCurrent(ExecutionTicket ticket)
+        {
+            if (ticket == null) return false;
+            lock (gate)
+            {
+                try { CheckExpiry(); } catch (InvalidOperationException) { return false; }
+                return leaseId != null && leaseId == ticket.LeaseId && grant != null && ticket.AuthorityGeneration == generation && ticket.GrantId == grant.Id && ticket.GrantGeneration == grant.Generation;
+            }
+        }
+
+        /// <summary>
+        /// Ends a transition. With <paramref name="successEntity"/> (for example "vessel:&lt;guid&gt;") the lease continues on that entity only if the grant
+        /// lists flight operations, otherwise it is released; true means it continues. With null (the scene did not change) the lease stays if it never
+        /// moved and is released if it did. A lease that is already gone returns false.
+        /// </summary>
+        public bool FinishTransition(ExecutionTicket ticket, string successEntity)
+        {
+            if (ticket == null) throw new ArgumentNullException(nameof(ticket));
+            lock (gate)
+            {
+                var from = transitionFrom; var armed = transitionLease == ticket.LeaseId;
+                transitionLease = null; transitionFrom = null;
+                if (!armed) return false;
+                try { CheckExpiry(); } catch (InvalidOperationException) { return false; }
+                if (leaseId == null || leaseId != ticket.LeaseId || grant == null || ticket.AuthorityGeneration != generation) return false;
+                if (successEntity == null)
+                {
+                    if (leaseEntity != from) { RevokeLease("launch_aborted"); return false; }
+                    return true;
+                }
+                if (grant.AllowsFlight) { leaseEntity = Identifiers.Required(successEntity); return true; }
+                RevokeLease("launch_complete");
+                return false;
+            }
+        }
+
+        private bool CarryLease(LeaseContext observed)
+        {
+            if (leaseId == null) return false;
+            // A lease that was deliberately moved to this very identity (a finished launch) stays when the published context catches up with it.
+            if (leaseEpoch == observed.Epoch && leaseEntity == observed.Entity) return true;
+            if (transitionLease != leaseId || operationId == null) return false;
+            leaseEpoch = observed.Epoch; leaseEntity = observed.Entity;
+            return true;
+        }
+
         /// <summary>Replaces the ticket's revision after the operation's own edit. Only valid during that operation's lock or grace.</summary>
         public void RebaseUnderOperation(ExecutionTicket ticket, string id, long newRevision)
         {
@@ -392,6 +499,7 @@ namespace KspControl.Bridge
                 // A stalled main thread cannot vouch for the scene, so new leases are refused. Existing leases keep their heartbeats.
                 if (context == null || now - contextPublishedAt > ControlLimits.ContextStaleMilliseconds || !context.SceneReady) throw new InvalidOperationException(NotReadyReason(context));
                 if (!grant.AllowsEntity(context.Entity)) throw new InvalidOperationException(ControlReasons.FacilityMismatch);
+                EnsureSpendCap();
                 leaseId = Guid.NewGuid().ToString("N"); leasePurpose = purpose ?? ""; leaseEpoch = context.Epoch; leaseEntity = context.Entity;
                 leaseDeadline = Math.Min(now + durationMilliseconds, grantDeadline); heartbeatDeadline = Deadline(now);
                 return leaseId;
@@ -440,8 +548,9 @@ namespace KspControl.Bridge
                 var shown = new GrantStatusInfo
                 {
                     Present = info.Present, State = info.State, Detail = info.Detail, Id = info.Id, Generation = info.Generation, Operations = info.Operations,
-                    Facilities = info.Facilities, UnsavedCraftPolicy = info.UnsavedCraftPolicy, ExpiresUtc = info.ExpiresUtc
+                    Facilities = info.Facilities, UnsavedCraftPolicy = info.UnsavedCraftPolicy, ExpiresUtc = info.ExpiresUtc, SpendLimitFunds = info.SpendLimitFunds
                 };
+                if (shown.Id != null && shown.Generation.HasValue) { var known = LoadCaps(); long cap; if (known != null && known.TryGetValue(Key(shown.Id, shown.Generation.Value), out cap)) shown.EffectiveSpendCap = cap; }
                 if (shown.State == GrantStates.Valid && shown.Id != null && shown.Generation.HasValue && IsBurnedLocked(shown.Id, shown.Generation.Value))
                 { shown.State = GrantStates.Suspended; shown.Detail = suspensionsUnreadable ? "suspensions_unreadable" : null; }
                 var lease = new LeaseStatusInfo { Held = leaseId != null };
@@ -513,7 +622,7 @@ namespace KspControl.Bridge
             generation = checked(generation + 1);
             var ended = leaseId != null;
             if (leaseId != null) { lastEndedLeaseId = leaseId; lastEndedReason = reason; }
-            leaseId = null; leasePurpose = null; leaseEpoch = null; leaseEntity = null; operationId = null;
+            leaseId = null; leasePurpose = null; leaseEpoch = null; leaseEntity = null; operationId = null; transitionLease = null; transitionFrom = null;
             if (ended) { try { LeaseEnded?.Invoke(reason); } catch (Exception) { /* a listener must never break the trust layer */ } }
         }
 

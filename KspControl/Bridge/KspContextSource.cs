@@ -14,6 +14,7 @@ namespace KspControl.Bridge
         {
             if (HighLogic.LoadedSceneIsFlight) return FlightContext();
             var editor = HighLogic.LoadedSceneIsEditor;
+            // Flight returned above (FlightContext), so a launch that loads the flight scene moves the lease to "vessel:<guid>" there.
             var entity = editor ? "editor:" + (EditorDriver.editorFacility == EditorFacility.SPH ? "SPH" : "VAB") : "scene:" + HighLogic.LoadedScene;
             // Scene readiness is deliberately independent of the editor state machine; idle checks belong to admission.
             var ready = editor && EditorLogic.fetch != null && EditorDriver.fetch != null && !EditorDriver.fetch.restartingEditor;

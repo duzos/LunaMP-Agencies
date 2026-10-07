@@ -17,7 +17,7 @@ namespace KspControl.Bridge
     internal static class GrantMapping
     {
         /// <summary>Effects the bridge knows how to classify. The flight families (flight.control, flight.autopilot) need the FLIGHT facility.</summary>
-        internal static readonly string[] KnownEffects = { "editor.replace_craft", "editor.restore_snapshot", "craft.write", FlightEffects.Family, AutopilotOperations.Effect };
+        internal static readonly string[] KnownEffects = { "editor.replace_craft", "editor.restore_snapshot", "editor.launch", "craft.write", FlightEffects.Family, AutopilotOperations.Effect };
 
         internal static TrustedExecutionGrant ToGrant(GrantPayload payload)
         {
@@ -32,7 +32,7 @@ namespace KspControl.Bridge
                 entities.Add(FlightEffects.EntityWildcard);
                 permissions.AddRange(known.Where(o => o.StartsWith("flight.", StringComparison.Ordinal)).Select(o => new EffectPermission(o, FlightEffects.EntityWildcard)));
             }
-            return new TrustedExecutionGrant(payload.GrantId, payload.Generation, GrantBinding.From(payload.Binding), payload.ExpiresAt, permissions, entities);
+            return new TrustedExecutionGrant(payload.GrantId, payload.Generation, GrantBinding.From(payload.Binding), payload.ExpiresAt, permissions, entities, payload.SpendLimitFunds);
         }
     }
 
@@ -108,7 +108,7 @@ namespace KspControl.Bridge
             return new GrantStatusInfo
             {
                 Present = true, State = state, Detail = code, Id = valid.Id, Generation = valid.Generation, Operations = valid.Operations,
-                Facilities = valid.Facilities, UnsavedCraftPolicy = valid.UnsavedCraftPolicy, ExpiresUtc = valid.ExpiresUtc
+                Facilities = valid.Facilities, UnsavedCraftPolicy = valid.UnsavedCraftPolicy, ExpiresUtc = valid.ExpiresUtc, SpendLimitFunds = valid.SpendLimitFunds, EffectiveSpendCap = valid.EffectiveSpendCap
             };
         }
 

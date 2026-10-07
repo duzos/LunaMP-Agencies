@@ -38,6 +38,9 @@ public sealed class BridgeClient
  private async Task<string> Call(string operation,string? leaseId,JObject? arguments,TimeSpan timeout,CancellationToken cancellationToken,string? expectedWorldEpoch=null)
  {
   try { return await Roundtrip(operation,leaseId,arguments,timeout,cancellationToken,expectedWorldEpoch); }
+  // The caller's cancellation disposes the socket, so it can surface as any socket, stream or disposal error. It says nothing about the
+  // bridge: report it as the cancellation it is, never as bridge_timeout or bridge_unreachable (which callers treat as a dead game).
+  catch(Exception error) when(cancellationToken.IsCancellationRequested && error is not OperationCanceledException) { throw new OperationCanceledException("the call was cancelled",error,cancellationToken); }
   catch(OperationCanceledException) when(!cancellationToken.IsCancellationRequested) { return Failure("bridge_timeout"); }
   catch(SocketException) { return Failure("bridge_unreachable"); }
   catch(ObjectDisposedException) { return Failure("bridge_timeout"); }

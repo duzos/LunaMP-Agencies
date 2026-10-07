@@ -24,6 +24,7 @@ namespace KspControl.BridgeTests
             {
                 permissions.Add(new EffectPermission("editor.replace_craft", "editor:" + f));
                 permissions.Add(new EffectPermission("editor.restore_snapshot", "editor:" + f));
+                permissions.Add(new EffectPermission("editor.launch", "editor:" + f));
                 permissions.Add(new EffectPermission("craft.write", "ships:" + f));
             }
             return new TrustedExecutionGrant(id, generation, binding ?? Bind(), Utc0.AddHours(hours), permissions, facilities.Select(f => "editor:" + f));

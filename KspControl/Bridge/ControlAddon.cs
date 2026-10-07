@@ -21,6 +21,7 @@ namespace KspControl.Bridge
         private FlightControlGuard flightGuard;
         private FlightTakeoverWatcher flightTakeover;
         private AutopilotRunner autopilotRunner;
+        private LaunchRunner launchRunner;
         private KeyCode stopKey = KeyCode.None;
         private string panelLine = "";
         private float panelRefreshed = -1f;
@@ -56,6 +57,11 @@ namespace KspControl.Bridge
                 var operations = new EditorOperationService(editorPort, tracker, authority, runner, jobs, () => new UnityConstructionCatalogReader(), paths, files, () => observations.WorldEpoch);
                 observations.Operations = operations;
                 observations.CraftList = new CraftListService(paths, files);
+                var launchPort = new UnityLaunchPort();
+                authority.ConfigureSpendCap(new FileSpendCapStore(Path.Combine(KSPUtil.ApplicationRootPath, "KspControlData", "control", "spendcaps.json")), () => launchPort.Funds);
+                launchRunner = new LaunchRunner(launchPort, editorPort, tracker, authority, source, () => MonotonicClock.Milliseconds, () => observations.WorldEpoch);
+                observations.Launches = new LaunchService(launchPort, editorPort, launchRunner, new LaunchJobs(), operations, () => observations.WorldEpoch);
+                operations.ExtraBusy = () => launchRunner.Busy;
                 // Flight: telemetry and the lease-bound controls. The guard owns the fly-by-wire hook only while a lease is held.
                 var flightPort = new UnityFlightPort(observations.MayInspect);
                 flightGuard = new FlightControlGuard(flightPort, () => authority.LeaseHeld);
@@ -100,6 +106,7 @@ namespace KspControl.Bridge
             try { flightGuard?.Update(); } catch { /* the guard releases on its own next frame */ }
             try { runner.Update(); } catch { /* the runner reports its own failures in the job; it must never break the frame */ }
             try { autopilotRunner?.Update(); } catch { /* the autopilot runner releases MechJeb itself; it must never break the frame */ }
+            try { launchRunner?.Update(); } catch { /* likewise for the launch runner */ }
             queue.Drain(observations.Execute);
         }
         public void OnGUI()

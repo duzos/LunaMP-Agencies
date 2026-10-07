@@ -15,16 +15,16 @@ public static class GrantCli
 {
  public const int Ok=0,Usage=1,Failed=2;
  public static readonly string[] DefaultOperations={ "editor.replace_craft","editor.restore_snapshot","craft.write" };
- /// <summary>Every operation family a grant may list: the defaults plus the flight families flight.control and flight.autopilot (ask for them with --ops and use
+ /// <summary>Every operation family a grant may list: the defaults, editor.launch (--ops launch, with --spend) and the flight families flight.control and flight.autopilot (with
  /// --facilities FLIGHT). Defaults stay editor-only. The bridge's effect map must know each one.</summary>
- public static readonly string[] AllowedOperations={ "editor.replace_craft","editor.restore_snapshot","craft.write",FlightEffects.Family,AutopilotOperations.Effect };
+ public static readonly string[] AllowedOperations={ "editor.replace_craft","editor.restore_snapshot","craft.write",OperationEffects.Launch,FlightEffects.Family,AutopilotOperations.Effect };
  private const int DefaultHours=8,MaxHours=168;
- private static readonly HashSet<string> Flags=new(StringComparer.Ordinal) { "--trust-dir","--grant-file","--key-file","--ksp-root","--save","--agency","--ops","--facilities","--policy","--max-parts","--hours" };
+ private static readonly HashSet<string> Flags=new(StringComparer.Ordinal) { "--trust-dir","--grant-file","--key-file","--ksp-root","--save","--agency","--ops","--facilities","--policy","--max-parts","--hours","--spend" };
 
  public static int Run(string[] args,TextWriter output,TextWriter error,Func<string,string?>? environment=null,Func<DateTime>? utcNow=null)
  {
   environment??=Environment.GetEnvironmentVariable; utcNow??=()=>DateTime.UtcNow;
-  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b (default editor families; add flight.control and/or flight.autopilot for flight)] [--facilities VAB,SPH,FLIGHT] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]) (rearm: [--hours H])"); return Usage; }
+  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b (default editor families; add launch, flight.control and/or flight.autopilot)] [--facilities VAB,SPH,FLIGHT] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H] [--spend FUNDS]) (rearm: [--hours H])"); return Usage; }
   var options=new Dictionary<string,string>(StringComparer.Ordinal);
   for(int i=1;i<args.Length;i+=2)
   {
@@ -55,16 +55,17 @@ public static class GrantCli
   if(!TryHours(o,out var hours)) { error.WriteLine($"--hours must be 1..{MaxHours}"); return Usage; }
   string agency=GrantBindingKey.OfflinePrefix+save;
   if(o.TryGetValue("--agency",out var supplied)) { if(!Guid.TryParse(supplied,out var guid)||guid==Guid.Empty) { error.WriteLine("--agency must be a non-empty GUID"); return Usage; } agency=guid.ToString("D"); }
-  var operations=Split(o.GetValueOrDefault("--ops"),DefaultOperations);
+  var operations=ExpandFamilies(Split(o.GetValueOrDefault("--ops"),DefaultOperations));
   var unknown=operations.FirstOrDefault(op=>Array.IndexOf(AllowedOperations,op)<0);
-  if(unknown!=null) { error.WriteLine("--ops lists an unknown operation family: "+unknown+" (allowed: "+string.Join(", ",AllowedOperations)+")"); return Usage; }
+  if(unknown!=null) { error.WriteLine("--ops lists an unknown operation family: "+unknown+" (allowed: "+string.Join(", ",AllowedOperations)+", or launch for "+OperationEffects.Launch+")"); return Usage; }
+  long spend=0; if(o.TryGetValue("--spend",out var spendText)&&(!long.TryParse(spendText,out spend)||spend<0||spend>OperationLimits.MaxSpendFunds*1000)) { error.WriteLine("--spend must be a whole number of funds, 0 or more"); return Usage; }
   int maxParts=250; if(o.TryGetValue("--max-parts",out var parts)&&!int.TryParse(parts,out maxParts)) { error.WriteLine("--max-parts must be an integer"); return Usage; }
   var payload=new GrantPayload
   {
    GrantId=Guid.NewGuid().ToString("N"),Generation=NextGeneration(grantPath,keyPath),IssuedUtc=GrantPayload.FormatUtc(now),ExpiresUtc=GrantPayload.FormatUtc(now.AddHours(hours)),
    Binding=new GrantBindingInfo { InstallId=GrantBindingKey.InstallId(root),SaveFolder=save,Agency=agency },
    Operations=operations,Facilities=Split(o.GetValueOrDefault("--facilities"),new[]{"VAB"}),
-   UnsavedCraftPolicy=o.GetValueOrDefault("--policy") ?? "refuse",MaxParts=maxParts,SpendLimitFunds=0,Revoked=false
+   UnsavedCraftPolicy=o.GetValueOrDefault("--policy") ?? "refuse",MaxParts=maxParts,SpendLimitFunds=spend,Revoked=false
   };
   return Write(payload,grantPath,keyPath,create:true,output,error,"issued");
  }
@@ -132,6 +133,9 @@ public static class GrantCli
   hours=DefaultHours;
   return !o.TryGetValue("--hours",out var text) || (int.TryParse(text,out hours) && hours>=1 && hours<=MaxHours);
  }
+ /// <summary>Operation families a human may name instead of the full effect: "launch" is editor.launch. Anything else passes through unchanged.</summary>
+ public static string[] ExpandFamilies(string[] operations) =>
+  operations.Select(o=>o==OperationEffects.LaunchFamily ? OperationEffects.Launch : o).Distinct(StringComparer.Ordinal).ToArray();
  private static string[] Split(string? text,string[] fallback) =>
   string.IsNullOrWhiteSpace(text) ? fallback : text.Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
 

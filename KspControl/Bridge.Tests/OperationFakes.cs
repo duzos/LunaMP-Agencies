@@ -89,12 +89,14 @@ namespace KspControl.BridgeTests
         private readonly Func<EditorRevisionTracker> tracker;
         private readonly Func<IEditorPort> port;
         public string Epoch = "epoch1";
+        /// <summary>The lease entity the fake publishes; launch tests change it to model the scene change.</summary>
+        public string Entity = "editor:VAB";
         public bool Throws;
         public FakeContextSource(Func<EditorRevisionTracker> tracker, Func<IEditorPort> port) { this.tracker = tracker; this.port = port; }
         public LeaseContext CurrentContext()
         {
             if (Throws) throw new InvalidOperationException("scene teardown");
-            return new LeaseContext(Epoch, "editor:VAB", tracker().EditRevision, port().SceneReady);
+            return new LeaseContext(Epoch, Entity, tracker().EditRevision, port().SceneReady);
         }
         public GrantBinding CurrentBinding() { return new GrantBinding("install", "save", "agency"); }
     }

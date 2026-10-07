@@ -12,8 +12,10 @@ public sealed partial class MutationService
  /// <summary>The operation name an indeterminate envelope reports: the journal stores the effect, which an apply and a load share.</summary>
  private string OperationLabel(Job job)
  {
-  if(job.Operation=="editor.restore_snapshot") return "restore_snapshot";
+  if(job.Operation==OperationEffects.RestoreSnapshot) return "restore_snapshot";
   if(job.Operation==OperationEffects.WriteCraft) return "save_craft";
+  if(job.Operation==OperationEffects.Launch) return "launch";
+  if(job.Operation==AutopilotOperations.Effect) return "autopilot";
   return operationLabels.TryGetValue(job.RequestId,out var label) ? label : "apply_craft";
  }
 

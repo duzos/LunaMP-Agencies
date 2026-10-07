@@ -24,6 +24,7 @@ namespace Server.Message
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
             var messageData = message.Data as VesselBaseMsgData;
+            _answeredSplit = Guid.Empty; // every path below, including these early refusals, answers a split at most once
             if (!AgencyEconomyStore.MayPublish(client)) { RejectSplit(client, messageData, "Publication is blocked."); return; }
             if ((VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled) && (VesselOwnershipSystem.IsRejected(client) || !AgencyVesselMap.Ready || (messageData != null && AgencyVesselMap.IsAbsorbed(messageData.VesselId) && messageData.VesselMessageType != VesselMessageType.Couple))) { RejectSplit(client, messageData, "Split was rejected by the server."); return; }
             switch (messageData?.VesselMessageType)
@@ -130,7 +131,7 @@ namespace Server.Message
         private static void HandleVesselProtoAnswered(ClientStructure client, VesselBaseMsgData message)
         {
             var msgData = (VesselProtoMsgData)message;
-            _answeredSplit = Guid.Empty;
+            // A throw after the split committed still answers failure: the client reconnects into the committed state.
             try { HandleVesselProto(client, message); }
             catch (Exception e)
             {

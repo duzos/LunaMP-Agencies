@@ -48,8 +48,8 @@ namespace KspControl.Bridge
         public void ClearOperationLock()
         {
             InputLockManager.RemoveControlLock(EditorIdle.OperationLockId);
-            var editor = EditorLogic.fetch;
-            if (editor != null) editor.Unlock(EditorLockId);
+            // EditorLogic.Unlock(id) is InputLockManager.RemoveControlLock(id): call it directly so a scene change (fetch == null) cannot leak the lock.
+            InputLockManager.RemoveControlLock(EditorLockId);
         }
 
         public EditorHeader ReadHeader()

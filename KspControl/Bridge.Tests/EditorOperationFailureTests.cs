@@ -178,6 +178,94 @@ namespace KspControl.BridgeTests
             Assert.AreEqual("restore_failed", job.ReasonCode); Assert.AreEqual("fingerprint_mismatch", job.Restore.Result);
         }
 
+        // ---- the generated craft left behind is guarded ----
+
+        private OperationJob StartOnEmptyEditor()
+        {
+            rig = new OperationRig(lease: false);
+            rig.Port.Parts = 0; rig.Port.Craft = ""; rig.Port.Ship = new object(); rig.Port.Fsm = "st_podSelect"; rig.Run(20); rig.AcquireLease();
+            return Start();
+        }
+
+        private void AssertGuarded(OperationJob job)
+        {
+            Assert.AreEqual(EditorObservationService.GuardSentinel, rig.Port.LastSaved, "a human Save over a same-named file must prompt");
+            Assert.AreEqual(true, rig.Port.UnsavedValue);
+            Assert.AreEqual("sentinel_and_unsaved_marker", (string)job.ToEnvelope()["observed"]["overwriteGuard"]);
+        }
+
+        [TestMethod] public void AVerifyFailureOnAnEmptyEditorGuardsTheGeneratedCraftLeftInPlace()
+        {
+            rig = new OperationRig(lease: false);
+            rig.Port.Parts = 0; rig.Port.Craft = ""; rig.Port.Ship = new object(); rig.Port.Fsm = "st_podSelect"; rig.Run(20); rig.AcquireLease();
+            rig.Port.OnLoad = (f, p) => f.Craft = CraftEdit.SetPartKey(f.Craft, 1, "istg", "9");
+            var job = Start(); rig.RunToEnd();
+            Assert.AreEqual("structure_mismatch_after_load", job.ReasonCode);
+            Assert.AreEqual("previous_editor_empty_generated_craft_left_in_place", job.Restore.Result);
+            AssertGuarded(job);
+            AssertUnlockedAndClean(job);
+        }
+
+        [TestMethod] public void ACancelAfterDispatchGuardsTheGeneratedCraft()
+        {
+            var job = StartAndReach(OperationPhase.Grace);
+            rig.Authority.Stop(); rig.RunToEnd();
+            Assert.AreEqual("cancelled", job.Status);
+            Assert.AreEqual(EditorObservationService.GuardSentinel, rig.Port.LastSaved);
+            Assert.AreEqual(true, rig.Port.UnsavedValue);
+        }
+
+        [TestMethod] public void ARestoredPreviousCraftIsNotOverwrittenByTheGuard()
+        {
+            rig.Port.OnLoad = (f, p) => { if (!p.Contains("kc-snap-")) f.Craft = CraftEdit.SetPartKey(f.Craft, 1, "istg", "9"); };
+            var second = Start(); rig.RunToEnd();
+            Assert.AreEqual("restored", second.Restore.Result);
+            Assert.AreEqual("Probe", rig.Port.LastSaved, "the restore wrote the original save name back; the guard does not touch it");
+        }
+
+        // ---- locks ----
+
+        [TestMethod] public void ASceneChangeNeverLeaksTheEditorLock()
+        {
+            var job = StartAndReach(OperationPhase.Settle);
+            Assert.IsTrue(rig.Port.EditorLockHeld);
+            rig.Port.InEditorValue = false; rig.RunToEnd();
+            Assert.IsFalse(rig.Port.EditorLockHeld, "the editor lock is removed by id even though the editor logic is gone");
+            AssertUnlockedAndClean(job);
+        }
+
+        [TestMethod] public void ALockThatThrowsAfterItWasSetIsStillCleared()
+        {
+            rig.Port.SetLockThrowsAfterSet = true;
+            var job = Start(); rig.RunToEnd();
+            Assert.AreEqual("failed", job.Status); Assert.AreEqual(0, rig.Port.LoadCalls);
+            Assert.IsTrue(rig.Port.LockClears >= 1);
+            Assert.IsFalse(rig.Port.EditorLockHeld); AssertUnlockedAndClean(job);
+        }
+
+        // ---- interrupted recovery ----
+
+        [TestMethod] public void StopDuringRecoveryReportsTheRestoreAsInterruptedNotInProgress()
+        {
+            var first = true;
+            rig.Port.OnLoad = (f, p) => { if (first) { first = false; f.Craft = CraftEdit.SetPartKey(f.Craft, 1, "istg", "9"); } };
+            var job = StartAndReach(OperationPhase.RestoreSettle);
+            rig.Authority.Stop(); rig.RunToEnd();
+            Assert.AreEqual("cancelled", job.Status);
+            Assert.AreEqual("interrupted_grant_suspended", job.Restore.Result);
+            Assert.AreEqual("interrupted_grant_suspended", (string)job.ToEnvelope()["restore"]["result"]);
+        }
+
+        [TestMethod] public void ASceneChangeDuringRecoveryReportsTheRestoreAsInterrupted()
+        {
+            var first = true;
+            rig.Port.OnLoad = (f, p) => { if (first) { first = false; f.Craft = CraftEdit.SetPartKey(f.Craft, 1, "istg", "9"); } };
+            var job = StartAndReach(OperationPhase.RestoreSettle);
+            rig.Port.InEditorValue = false; rig.RunToEnd();
+            Assert.AreEqual("indeterminate", job.Status);
+            Assert.AreEqual("interrupted_scene_changed", job.Restore.Result);
+        }
+
         // ---- Stop, scene change, human input ----
 
         private OperationJob StartAndReach(OperationPhase phase)

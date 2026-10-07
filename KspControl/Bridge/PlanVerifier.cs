@@ -66,7 +66,9 @@ namespace KspControl.Bridge
                         add(OperationReasons.StructureMismatchAfterLoad, key + " " + part.Ref + " " + (h ?? "absent") + " expected " + (w ?? "absent"));
                 }
             }
+            var hasStackLinks = expected.Parts.Any(part => part.Links.Count != 0 || part.AttN.Any(a => a.Partner != null));
             if (allPartsConnected == false) add(OperationReasons.StructureMismatchAfterLoad, "parts_not_connected");
+            else if (allPartsConnected == null && hasStackLinks) add(OperationReasons.StructureMismatchAfterLoad, "unmeasured");
             if (problems.Count != 0) return problems;
 
             // Geometry, in the root part's frame so the absolute spawn height never matters.
@@ -97,6 +99,7 @@ namespace KspControl.Bridge
             }
             if (maxStackNodeGap.HasValue && !(maxStackNodeGap.Value <= NodeGapTolerance))
                 add(OperationReasons.GeometryMismatchAfterLoad, "stack_node_gap " + maxStackNodeGap.Value.ToString("0.#####", CultureInfo.InvariantCulture) + " m");
+            else if (!maxStackNodeGap.HasValue && hasStackLinks) add(OperationReasons.GeometryMismatchAfterLoad, "unmeasured");
             return problems;
         }
 

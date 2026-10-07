@@ -84,14 +84,8 @@ namespace KspControl.Bridge
 
             // Unsaved-craft policy: the human's unsaved work is never replaced under "refuse". A craft this service generated and nobody touched since is not human work.
             var capabilities = port.Capabilities ?? EditorCapabilities.None();
-            var nonEmpty = port.PartCount > 0;
-            var unsaved = port.Unsaved;
-            if (nonEmpty && unsaved != false && !IsOwnUntouchedCraft())
-            {
-                var policy = authority.Status().Grant.UnsavedCraftPolicy ?? "refuse";
-                if (policy != "snapshot_then_replace") return Refuse(request, OperationReasons.UnsavedHumanCraft, "the editor holds unsaved work and the grant policy is " + policy);
-                if (!capabilities.SaveOverwriteGuard) return Refuse(request, OperationReasons.SaveOverwriteGuardUnavailable, "snapshot_then_replace needs the save-name guard");
-            }
+            var policyRefusal = UnsavedCraftGate(request, capabilities);
+            if (policyRefusal != null) return policyRefusal;
             if (!capabilities.SaveOverwriteGuard && CollidesWithShipFile(parsed.Name))
                 return Refuse(request, OperationReasons.NameCollisionUnguarded, "a ship file with this name exists and the save-name guard is unavailable");
 
@@ -109,6 +103,18 @@ namespace KspControl.Bridge
             job.Plan = plan;
             job.ModVersions = header != null && !string.IsNullOrEmpty(header.ModVersions) ? "copied_from_live_header" : "unavailable";
             return StartJob(request, job);
+        }
+
+        /// <summary>The unsaved-craft policy shared by every replacing mutation: unsaved human work is never replaced under "refuse".</summary>
+        private BridgeResponse UnsavedCraftGate(BridgeRequest request, EditorCapabilities capabilities)
+        {
+            var nonEmpty = port.PartCount > 0;
+            var unsaved = port.Unsaved;
+            if (!nonEmpty || unsaved == false || IsOwnUntouchedCraft()) return null;
+            var policy = authority.Status().Grant.UnsavedCraftPolicy ?? "refuse";
+            if (policy != "snapshot_then_replace") return Refuse(request, OperationReasons.UnsavedHumanCraft, "the editor holds unsaved work and the grant policy is " + policy);
+            if (!capabilities.SaveOverwriteGuard) return Refuse(request, OperationReasons.SaveOverwriteGuardUnavailable, "snapshot_then_replace needs the save-name guard");
+            return null;
         }
 
         // ---------------------------------------------------------------- editor.restore_snapshot
@@ -142,6 +148,8 @@ namespace KspControl.Bridge
             if (!string.Equals(record.Facility, port.Facility, StringComparison.Ordinal)) return Refuse(request, ControlReasons.FacilityMismatch, "the snapshot is a " + record.Facility + " craft");
             string missing;
             if (!port.AllPartsFound(record.CraftPath, out missing)) return Refuse(request, OperationReasons.CraftPartsMissing, missing);
+            var policyRefusal = UnsavedCraftGate(request, port.Capabilities ?? EditorCapabilities.None());
+            if (policyRefusal != null) return policyRefusal;
 
             var job = NewJob(request, OperationKind.Restore, requestId, fingerprint, lease.Id, revision, ticket, effects);
             job.RestoreSource = record;

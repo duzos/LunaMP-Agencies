@@ -265,74 +265,88 @@ namespace KspControl.BridgeTests
         {
             Assert.AreEqual(0, PlanVerifier.Verify(plan, Live(), 0.0, true).Count);
             var withModules = Live(); withModules.Children("PART").First().AddNode("MODULE").AddValue("name", "ModuleProbe");
-            Assert.AreEqual(0, PlanVerifier.Verify(plan, withModules, null, null).Count, "native modules are not the plan's business");
+            Assert.AreEqual(0, PlanVerifier.Verify(plan, withModules, 0.0, true).Count, "native modules are not the plan's business");
+        }
+
+        [TestMethod] public void UnmeasuredConnectivityFailsAPlanWithStackLinks()
+        {
+            var problems = PlanVerifier.Verify(plan, Live(), 0.0, null);
+            Assert.AreEqual(1, problems.Count, Codes(problems));
+            Assert.AreEqual("structure_mismatch_after_load", problems[0].Code); Assert.AreEqual("unmeasured", problems[0].Detail);
+        }
+
+        [TestMethod] public void AnUnmeasuredNodeGapFailsAPlanWithStackLinks()
+        {
+            var problems = PlanVerifier.Verify(plan, Live(), null, true);
+            Assert.AreEqual(1, problems.Count, Codes(problems));
+            Assert.AreEqual("geometry_mismatch_after_load", problems[0].Code); Assert.AreEqual("unmeasured", problems[0].Detail);
         }
 
         [TestMethod] public void ADifferentPartCountIsAStructureMismatch()
         {
             var live = Live(); live.Entries.RemoveAt(live.Entries.FindLastIndex(e => !e.IsValue));
-            var problems = PlanVerifier.Verify(plan, live, null, null);
+            var problems = PlanVerifier.Verify(plan, live, 0.0, true);
             Assert.AreEqual("structure_mismatch_after_load", problems[0].Code); StringAssert.Contains(problems[0].Detail, "part_count");
         }
 
         [TestMethod] public void AMissingOrRenamedPartIsAStructureMismatch()
         {
             var live = Edit(Live(), 1, "part", "fuelTankSmall_999999");
-            Assert.IsTrue(PlanVerifier.Verify(plan, live, null, null).Any(p => p.Detail.StartsWith("missing_part")));
+            Assert.IsTrue(PlanVerifier.Verify(plan, live, 0.0, true).Any(p => p.Detail.StartsWith("missing_part")));
             var renamed = Edit(Live(), 1, "part", "otherTank_" + plan.Parts[1].Cid);
-            Assert.IsTrue(PlanVerifier.Verify(plan, renamed, null, null).Any(p => p.Detail.StartsWith("part_name")));
+            Assert.IsTrue(PlanVerifier.Verify(plan, renamed, 0.0, true).Any(p => p.Detail.StartsWith("part_name")));
         }
 
         [DataTestMethod]
         [DataRow("istg", "9")] [DataRow("dstg", "4")] [DataRow("sidx", "3")] [DataRow("sqor", "2")] [DataRow("sepI", "5")] [DataRow("attm", "1")]
         public void EveryStagingIntegerIsChecked(string key, string value)
         {
-            var problems = PlanVerifier.Verify(plan, Edit(Live(), 1, key, value), null, null);
+            var problems = PlanVerifier.Verify(plan, Edit(Live(), 1, key, value), 0.0, true);
             Assert.AreEqual(1, problems.Count, Codes(problems)); StringAssert.Contains(problems[0].Detail, key); Assert.AreEqual("structure_mismatch_after_load", problems[0].Code);
         }
 
         [TestMethod] public void MissingStagingValuesAreAMismatch()
         {
-            Assert.IsTrue(PlanVerifier.Verify(plan, Edit(Live(), 0, "istg", null, remove: true), null, null).Any(p => p.Detail.Contains("istg")));
+            Assert.IsTrue(PlanVerifier.Verify(plan, Edit(Live(), 0, "istg", null, remove: true), 0.0, true).Any(p => p.Detail.Contains("istg")));
         }
 
         [TestMethod] public void LinksAndAttachPartnersAreChecked()
         {
             var live = Live(); var tank = live.Children("PART").ElementAt(1);
             tank.Entries.RemoveAll(e => e.IsValue && e.Key == "link");
-            Assert.IsTrue(PlanVerifier.Verify(plan, live, null, null).Any(p => p.Detail.StartsWith("link")));
+            Assert.IsTrue(PlanVerifier.Verify(plan, live, 0.0, true).Any(p => p.Detail.StartsWith("link")));
             var attn = Live(); var pod = attn.Children("PART").First();
             pod.Entries.RemoveAll(e => e.IsValue && e.Key == "attN");
-            Assert.IsTrue(PlanVerifier.Verify(plan, attn, null, null).Any(p => p.Detail.StartsWith("attN")));
+            Assert.IsTrue(PlanVerifier.Verify(plan, attn, 0.0, true).Any(p => p.Detail.StartsWith("attN")));
         }
 
         [TestMethod] public void SymmetryAndSurfaceAttachmentAreChecked()
         {
             var live = Live(); live.Children("PART").ElementAt(1).AddValue("sym", "fuelTankSmall_100000");
-            Assert.IsTrue(PlanVerifier.Verify(plan, live, null, null).Any(p => p.Detail.StartsWith("sym")));
+            Assert.IsTrue(PlanVerifier.Verify(plan, live, 0.0, true).Any(p => p.Detail.StartsWith("sym")));
             var srf = Live(); srf.Children("PART").ElementAt(2).AddValue("srfN", "srfAttach,mk1pod.v2_100000");
-            Assert.IsTrue(PlanVerifier.Verify(plan, srf, null, null).Any(p => p.Detail.StartsWith("srfN")));
+            Assert.IsTrue(PlanVerifier.Verify(plan, srf, 0.0, true).Any(p => p.Detail.StartsWith("srfN")));
         }
 
         [TestMethod] public void PositionsAreComparedRootRelativeSoASpawnOffsetNeverMatters()
         {
             var live = Live();
             foreach (var part in live.Children("PART").ToList()) { var v = part.First("pos").Split(','); var y = double.Parse(v[1], System.Globalization.CultureInfo.InvariantCulture) + 37.5; part.Entries[part.Entries.FindIndex(e => e.IsValue && e.Key == "pos")] = new Pure.ConfigEntry("pos", v[0] + "," + y.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + v[2]); }
-            Assert.AreEqual(0, PlanVerifier.Verify(plan, live, null, null).Count);
+            Assert.AreEqual(0, PlanVerifier.Verify(plan, live, 0.0, true).Count);
         }
 
         [TestMethod] public void AMisplacedPartIsAGeometryMismatchBeyondOneCentimetre()
         {
             var pos = plan.Parts[2].Position;
             string Moved(double dx) { return string.Join(",", new[] { pos.X + dx, pos.Y, pos.Z }.Select(d => d.ToString(System.Globalization.CultureInfo.InvariantCulture))); }
-            Assert.AreEqual(0, PlanVerifier.Verify(plan, Edit(Live(), 2, "pos", Moved(0.005)), null, null).Count, "5 mm is within tolerance");
-            var problems = PlanVerifier.Verify(plan, Edit(Live(), 2, "pos", Moved(0.02)), null, null);
+            Assert.AreEqual(0, PlanVerifier.Verify(plan, Edit(Live(), 2, "pos", Moved(0.005)), 0.0, true).Count, "5 mm is within tolerance");
+            var problems = PlanVerifier.Verify(plan, Edit(Live(), 2, "pos", Moved(0.02)), 0.0, true);
             Assert.AreEqual("geometry_mismatch_after_load", problems[0].Code); StringAssert.Contains(problems[0].Detail, "position");
         }
 
         [TestMethod] public void ARotatedPartIsAGeometryMismatch()
         {
-            var problems = PlanVerifier.Verify(plan, Edit(Live(), 1, "rot", "0,0.7071068,0,0.7071068"), null, null);
+            var problems = PlanVerifier.Verify(plan, Edit(Live(), 1, "rot", "0,0.7071068,0,0.7071068"), 0.0, true);
             Assert.IsTrue(problems.Any(p => p.Code == "geometry_mismatch_after_load" && p.Detail.StartsWith("rotation")), Codes(problems));
         }
 
@@ -347,7 +361,7 @@ namespace KspControl.BridgeTests
         {
             var live = Live();
             for (var i = 0; i < 3; i++) foreach (var key in new[] { "istg", "dstg", "sidx", "sqor", "sepI", "attm" }) Edit(live, i, key, "77");
-            Assert.IsTrue(PlanVerifier.Verify(plan, live, null, null).Count <= 32);
+            Assert.IsTrue(PlanVerifier.Verify(plan, live, 0.0, true).Count <= 32);
         }
     }
 

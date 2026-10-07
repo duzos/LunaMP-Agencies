@@ -46,7 +46,7 @@ namespace KspControl.BridgeTests
         public EditorCapabilities Caps = new EditorCapabilities { Fsm = true, UnsavedMarker = true, SaveOverwriteGuard = true, VesselNameAtLastSave = true, VesselNameAtLastSaveSanitized = true, UndoLevel = true, UndoIndexAtLastSave = true, SetLastSanitizedSaveName = true };
         public bool? UnsavedValue = false;
         public string LastSaved = "Probe";
-        public EngineeringData Engineering = new EngineeringData { PartTotal = 3, DeltaVRequested = true };
+        public EngineeringData Engineering = new EngineeringData { PartTotal = 3, DeltaVRequested = true, AllPartsConnected = true, MaxStackNodeGapMetres = 0.0 };
         public int Parts = 3;
 
         public bool EditorScene => InEditorValue;
@@ -99,8 +99,16 @@ namespace KspControl.BridgeTests
         public bool AllPartsStarted => PartsStarted;
         public bool DeltaVReady => DeltaVDone;
         public bool OperationLockHeld => Locks.Contains(EditorIdle.OperationLockId);
-        public void SetOperationLock() { LockSets++; if (!Locks.Contains(EditorIdle.OperationLockId)) Locks.Add(EditorIdle.OperationLockId); }
-        public void ClearOperationLock() { LockClears++; Locks.Remove(EditorIdle.OperationLockId); }
+        /// <summary>The editor's own lock (EditorLogic.Lock): it can only be set while an editor logic instance exists, but is removed by id whatever the scene.</summary>
+        public bool EditorLockHeld;
+        public bool SetLockThrowsAfterSet;
+        public void SetOperationLock()
+        {
+            LockSets++; if (!Locks.Contains(EditorIdle.OperationLockId)) Locks.Add(EditorIdle.OperationLockId);
+            if (InEditorValue) EditorLockHeld = true;
+            if (SetLockThrowsAfterSet) throw new InvalidOperationException("lock_boom");
+        }
+        public void ClearOperationLock() { LockClears++; Locks.Remove(EditorIdle.OperationLockId); EditorLockHeld = false; }
         public EditorHeader ReadHeader() { return Header; }
         public uint NextPersistentId() { return ++PersistentCounter; }
         public string SanitizeFileName(string name)

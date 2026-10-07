@@ -425,6 +425,87 @@ namespace KspControl.BridgeTests
             Refused2(rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId, requestId: "restore-0002")), "snapshot_unverified");
         }
 
+        [TestMethod] public void RestoreRefusesASnapshotFromTheOtherFacility()
+        {
+            rig.Apply(); var apply = rig.RunToEnd();
+            var metaPath = rig.Paths.RecoveryMetaPath(apply.Snapshot.SnapshotId).FullPath;
+            var meta = JObject.Parse(rig.Files.Text(metaPath)); meta["facility"] = "SPH";
+            rig.Files.Put(metaPath, meta.ToString());
+            Refused2(rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId, requestId: "restore-0003")), "facility_mismatch");
+        }
+
+        private OperationJob ApplyThenHumanEdit(string policy)
+        {
+            rig = new OperationRig(policy: policy);
+            rig.Apply(); var apply = rig.RunToEnd();
+            rig.Port.Craft = CraftEdit.SetPartKey(rig.Port.Craft, 0, "probeValue", "7"); rig.Run(70, 500); // takeover, cooldown passes
+            rig.AcquireLease();
+            return apply;
+        }
+
+        [TestMethod] public void RestoreOverUnsavedHumanWorkIsRefusedUnderRefuseBeforeDispatch()
+        {
+            var apply = ApplyThenHumanEdit("refuse");
+            Refused(rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId)), "unsaved_human_craft", 1);
+        }
+
+        [TestMethod] public void RestoreOverUnsavedHumanWorkNeedsTheGuardUnderSnapshotThenReplace()
+        {
+            var apply = ApplyThenHumanEdit("snapshot_then_replace");
+            rig.Port.Caps.SaveOverwriteGuard = false;
+            Refused(rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId)), "save_overwrite_guard_unavailable", 1);
+        }
+
+        [TestMethod] public void RestoreOverOurOwnUntouchedCraftIsAllowedUnderRefuse()
+        {
+            rig = new OperationRig(policy: "refuse");
+            rig.Apply(); var apply = rig.RunToEnd();
+            Assert.AreEqual("running", rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId)).Status);
+        }
+
+        [TestMethod] public void RestoreOverNonEmptyWorkSnapshotsItFirst()
+        {
+            var apply = ApplyThenHumanEdit("snapshot_then_replace");
+            var humanCraft = rig.Port.Craft;
+            Assert.AreEqual("running", rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId)).Status);
+            var job = rig.RunToEnd();
+            Assert.AreEqual("completed", job.Status, job.ReasonCode + " " + job.Detail);
+            Assert.IsNotNull(job.Snapshot, "a restore over existing work takes its own snapshot");
+            Assert.AreNotEqual(apply.Snapshot.SnapshotId, job.Snapshot.SnapshotId);
+            Assert.AreEqual("true", job.Snapshot.WasUnsaved);
+            Assert.IsTrue(job.EffectsApplied.Contains("snapshot_taken"));
+            Assert.AreEqual(2, ((JArray)rig.Observation.State().Data["recentSnapshots"]).Count);
+            Assert.AreEqual(apply.Snapshot.CraftPath, rig.Port.LoadedPaths.Last(), "the requested snapshot stays the load target");
+            Assert.AreEqual("restored", job.Restore.Result);
+        }
+
+        [TestMethod] public void ARestoreOverAnEmptyEditorTakesNoSnapshot()
+        {
+            rig.Apply(); var apply = rig.RunToEnd();
+            rig.Port.Parts = 0; rig.Port.Craft = ""; rig.Port.Ship = new object(); rig.Port.Fsm = "st_podSelect"; rig.Port.UnsavedValue = false;
+            rig.Run(70, 500); rig.AcquireLease();
+            rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId));
+            var job = rig.RunToEnd();
+            Assert.AreEqual("completed", job.Status, job.ReasonCode + " " + job.Detail);
+            Assert.IsNull(job.Snapshot);
+        }
+
+        [TestMethod] public void AFailedRestoreGoesBackToTheSnapshotItTookFirst()
+        {
+            var apply = ApplyThenHumanEdit("snapshot_then_replace");
+            var humanCraft = rig.Port.Craft;
+            var humanFingerprint = SnapshotStore.Fingerprint(Pure.ConfigText.Parse(humanCraft), rig.Port.ReadUi());
+            rig.Port.Mode = EditorFake.LoadMode.EmptyAfterLoad;
+            rig.Port.OnLoad = (f, p) => f.Mode = EditorFake.LoadMode.Normal; // the target loads empty, the recovery load works
+            rig.Service.Handle(rig.RestoreRequest(apply.Snapshot.SnapshotId));
+            var job = rig.RunToEnd();
+            Assert.AreEqual("failed", job.Status);
+            Assert.IsNotNull(job.Snapshot);
+            Assert.AreEqual(job.Snapshot.CraftPath, rig.Port.LoadedPaths.Last(), "the recovery load is the snapshot taken before the restore");
+            Assert.AreEqual(humanFingerprint, SnapshotStore.Fingerprint(Pure.ConfigText.Parse(rig.Port.Craft), rig.Port.ReadUi()), "the human's craft is back");
+            Assert.IsFalse(rig.Port.Locks.Contains(EditorIdle.OperationLockId));
+        }
+
         private void Refused2(BridgeResponse response, string reason)
         {
             Assert.AreEqual("failed", response.Status); Assert.AreEqual(reason, response.ReasonCode, response.Data.ToString());

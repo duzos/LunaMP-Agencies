@@ -36,6 +36,7 @@ namespace LmpClient.Harmony
         private const string Tag = "[LMP]: [UiGuard] ";
         private const double SummaryIntervalSeconds = 60;
         private const double ProbeIntervalSeconds = 5;
+        private const double PruneIntervalSeconds = 5;
 
         private static readonly UiFaultLogThrottle Throttle = new UiFaultLogThrottle(SummaryIntervalSeconds);
         private static readonly UiFaultRepairPolicy Policy = new UiFaultRepairPolicy(graceSeconds: 1, healthyAfterSeconds: 10, maxRestarts: 2);
@@ -45,10 +46,14 @@ namespace LmpClient.Harmony
         private static FieldInfo _materialsField, _parametersField, _dirtyField, _maskTransformField, _canvasField, _globalReplacersField;
         private static ConstructorInfo _replacerImplCtor, _chainCtor, _replacementsCtor;
         private static MethodInfo _applyMethod, _globalReplacersGetter, _invalidateChildren;
+        private static readonly Dictionary<int, Behaviour> TrackedMasks = new Dictionary<int, Behaviour>();
+        private static double _nextPruneAt;
         private static readonly List<Behaviour> PendingInvalidations = new List<Behaviour>();
         private static Type _replacerInterface, _replacerAttribute;
         private static MethodBase _navBallLateUpdate;
         private static bool _repairAvailable;
+        private static Action<object, Material> _applyInvoker;
+        private static bool _applyInvokerResolved;
 
         private static bool _wasInFlight;
         private static double _nextProbeAt;
@@ -170,7 +175,8 @@ namespace LmpClient.Harmony
         private static Exception RaycastFinalizer(Exception __exception, object __instance, MethodBase __originalMethod, ref bool __result)
         {
             if (__exception == null) return null;
-            // A broken mask must never swallow clicks: let the raycast through.
+            // A broken mask must never swallow clicks: returning true means the element receives the raycast
+            // (ICanvasRaycastFilter semantics), i.e. it behaves like an unmasked graphic.
             __result = true;
             Handle(__originalMethod, __exception, __instance);
             return null;
@@ -180,11 +186,11 @@ namespace LmpClient.Harmony
         {
             try
             {
-                var key = method == null ? "unknown" : method.DeclaringType?.Name + "." + method.Name;
+                var key = method == null ? "unknown" : method.DeclaringType?.Name + "." + method.Name + "/" + exception.GetType().Name;
                 var now = Time.realtimeSinceStartup;
                 if (Throttle.Record(key, now))
                 {
-                    LunaLog.LogWarning(Tag + "Suppressed " + exception.GetType().Name + " in " + key + " (stock KSP UI code or another mod's patch, not LMP). " +
+                    LunaLog.LogWarning(Tag + "Suppressed " + exception.GetType().Name + " in " + (method == null ? "unknown" : method.DeclaringType?.Name + "." + method.Name) + " (stock KSP UI code or another mod's patch, not LMP). " +
                                        "LMP is containing it so the rest of the UI keeps working; repeats are counted and summarised at most every " +
                                        SummaryIntervalSeconds + " s.\n" + exception);
                 }
@@ -194,6 +200,7 @@ namespace LmpClient.Harmony
                 if (mask == null) return; // destroyed Unity object
 
                 var id = mask.GetInstanceID();
+                TrackedMasks[id] = mask;
                 var action = Policy.OnFailure(id, now);
                 if (action == UiFaultAction.SoftRepair) SoftRepair(mask);
                 else if (action != UiFaultAction.None) PendingActions[id] = new KeyValuePair<Behaviour, UiFaultAction>(mask, action);
@@ -246,8 +253,41 @@ namespace LmpClient.Harmony
             var replacers = GlobalReplacers();
             var impl = _replacerImplCtor.Invoke(new object[] { mask });
             var chain = _chainCtor.Invoke(new[] { replacers, impl });
-            Action<Material> apply = material => _applyMethod.Invoke(_parametersField.GetValue(mask), new object[] { material });
+            var invoker = GetApplyInvoker();
+            Action<Material> apply = invoker != null
+                ? (Action<Material>)(material => invoker(mask, material))
+                : material => _applyMethod.Invoke(_parametersField.GetValue(mask), new object[] { material });
             return _replacementsCtor.Invoke(new[] { chain, apply });
+        }
+
+        /// <summary>
+        /// Compiles <c>((SoftMask)m)._parameters.Apply(material)</c> once. The reflective path boxes the parameters struct and
+        /// allocates an argument array for every replacement material every frame; this does neither. Null when emitting fails.
+        /// </summary>
+        private static Action<object, Material> GetApplyInvoker()
+        {
+            if (_applyInvokerResolved) return _applyInvoker;
+            _applyInvokerResolved = true;
+            try
+            {
+                var paramsType = _parametersField.FieldType;
+                var method = new DynamicMethod("LmpSoftMaskApply", typeof(void), new[] { typeof(object), typeof(Material) }, typeof(SoftMaskGuard).Module, true);
+                var il = method.GetILGenerator();
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Castclass, _softMaskType);
+                il.Emit(paramsType.IsValueType ? OpCodes.Ldflda : OpCodes.Ldfld, _parametersField);
+                il.Emit(OpCodes.Ldarg_1);
+                il.Emit(paramsType.IsValueType ? OpCodes.Call : OpCodes.Callvirt, _applyMethod);
+                if (_applyMethod.ReturnType != typeof(void)) il.Emit(OpCodes.Pop);
+                il.Emit(OpCodes.Ret);
+                _applyInvoker = (Action<object, Material>)method.CreateDelegate(typeof(Action<object, Material>));
+            }
+            catch (Exception e)
+            {
+                _applyInvoker = null;
+                LunaLog.LogWarning(Tag + "Could not compile the SoftMask apply delegate (" + e.Message + "); using the slower reflective path.");
+            }
+            return _applyInvoker;
         }
 
         private static object GlobalReplacers()
@@ -364,12 +404,31 @@ namespace LmpClient.Harmony
         #region Pump and diagnostics
 
         /// <summary>Called once per frame from <c>MainSystem.Update</c>. Never throws.</summary>
+        private static void PruneDestroyedMasks()
+        {
+            if (TrackedMasks.Count == 0) return;
+            List<int> dead = null;
+            foreach (var entry in TrackedMasks)
+                if (entry.Value == null) (dead ?? (dead = new List<int>())).Add(entry.Key);
+            if (dead == null) return;
+            foreach (var id in dead)
+            {
+                TrackedMasks.Remove(id);
+                Policy.Forget(id);
+            }
+        }
+
         public static void Pump()
         {
             try
             {
                 var now = Time.realtimeSinceStartup;
                 ApplyPendingActions();
+                if (now >= _nextPruneAt)
+                {
+                    _nextPruneAt = now + PruneIntervalSeconds;
+                    PruneDestroyedMasks();
+                }
 
                 var summary = Throttle.TakeSummary(now);
                 if (summary != null)

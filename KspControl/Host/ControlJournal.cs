@@ -6,7 +6,11 @@ namespace KspControl.Host;
 // Binding is an opaque label of what the bridge said the grant is bound to; the world epoch lives on the lease, not the grant.
 public sealed record MissionGrant(string Id,long Generation,string Binding,DateTimeOffset ExpiresAt,decimal SpendingLimit,string[] Operations,string[] Entities);
 public sealed record ControlLease(string Id,string Owner,string WorldEpoch,DateTimeOffset ExpiresAt);
-public sealed record Job(string RequestId,string Fingerprint,string GrantId,long GrantGeneration,string LeaseId,string WorldEpoch,string Operation,string EntityId,decimal ReservedCost,string Status,string Reason);
+public sealed record Job(string RequestId,string Fingerprint,string GrantId,long GrantGeneration,string LeaseId,string WorldEpoch,string Operation,string EntityId,decimal ReservedCost,string Status,string Reason)
+{
+ /// <summary>The terminal job envelope exactly as the bridge reported it, so a retried request or job_status answers from the journal without asking the game again.</summary>
+ public string Result { get; init; } = "";
+}
 public sealed class ControlJournal : IDisposable
 {
  private sealed class State { public Dictionary<string,Job> Jobs {get;set;}=new(); public decimal Charged {get;set;} public HashSet<string> GrantKeys {get;set;}=new(StringComparer.Ordinal); public HashSet<string> RevokedGrantKeys {get;set;}=new(StringComparer.Ordinal); }
@@ -70,6 +74,14 @@ public sealed class ControlJournal : IDisposable
  {
   lock(gate) { var job=Get(id); if(job.Status!="running"||actualCost<0||actualCost>job.ReservedCost) throw new InvalidOperationException("invalid_completion"); state.Charged+=actualCost; return Set(job with { Status="completed",Reason="observed" }); }
  }
+ /// <summary>Records the terminal outcome of a job that was accepted or running. Cancelling a running job is only valid when the bridge proved it never dispatched.</summary>
+ public Job Finish(string id,string status,string reason,string result)
+ {
+  if(status is not ("completed" or "failed" or "cancelled" or "indeterminate")) throw new ArgumentException("invalid_status");
+  lock(gate) { var job=Get(id); if(job.Status is not ("accepted" or "running")) throw new InvalidOperationException("not_in_flight"); return Set(job with { Status=status,Reason=reason,Result=result.Length>MaxResult ? "" : result }); }
+ }
+ public bool TryGetJob(string id,out Job? job) { lock(gate) { if(faulted) throw new IOException("journal_unavailable"); return state.Jobs.TryGetValue(id,out job); } }
+ private const int MaxResult=262144;
  public Job CancelBeforeDispatch(string id)
  {
   lock(gate) { var job=Get(id); if(job.Status!="accepted") throw new InvalidOperationException("reconciliation_required"); return Set(job with {Status="cancelled",Reason="not_dispatched"}); }

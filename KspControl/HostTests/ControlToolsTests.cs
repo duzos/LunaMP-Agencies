@@ -103,9 +103,10 @@ namespace KspControl.HostTests;
 }
 [TestClass] public class BridgeClientAllowlistTests
 {
- [TestMethod] public void ReadControlAndMutationAllowlistsAreDisjointAndMutationsAreEmpty()
+ [TestMethod] public void ReadControlAndMutationAllowlistsAreDisjointAndMutationsAreExactlyApplyAndRestore()
  {
-  Assert.AreEqual(0,BridgeClient.MutationOperations.Count);
+  CollectionAssert.AreEquivalent(new[]{ "editor.apply_craft","editor.restore_snapshot" },BridgeClient.MutationOperations.ToArray());
+  Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ReadOperations)); Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ControlOperationSet));
   Assert.IsFalse(BridgeClient.ReadOperations.Overlaps(BridgeClient.ControlOperationSet)); Assert.IsFalse(BridgeClient.ReadOperations.Any(ControlOperations.IsControl));
   CollectionAssert.AreEquivalent(ControlOperations.All,BridgeClient.ControlOperationSet.ToArray());
  }

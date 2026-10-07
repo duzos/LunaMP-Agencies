@@ -28,7 +28,17 @@ namespace KspControl.HostTests;
    var list=await Request(new { jsonrpc="2.0",id=2,method="tools/list",@params=new {} },2);
    var names=list.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t=>t.GetProperty("name").GetString()).ToArray();
    CollectionAssert.Contains(names,"context");
-   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease","editor_state","editor_engineering"}) CollectionAssert.Contains(names,expected);
+   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease","editor_state","editor_engineering","craft_plan","editor_apply_craft","editor_restore_snapshot","job_status"}) CollectionAssert.Contains(names,expected);
+   // The mutation tools: exactly the documented arguments, bounded, and none that could carry grant content.
+   JsonElement Schema(string tool)=>list.GetProperty("result").GetProperty("tools").EnumerateArray().Single(t=>t.GetProperty("name").GetString()==tool).GetProperty("inputSchema");
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","graph","expectedPlanHash"},Schema("editor_apply_craft").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","snapshotId"},Schema("editor_restore_snapshot").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","waitSeconds"},Schema("job_status").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   var applyProperties=Schema("editor_apply_craft").GetProperty("properties");
+   Assert.AreEqual(262144,applyProperties.GetProperty("graph").GetProperty("maxLength").GetInt32()); Assert.AreEqual(64,applyProperties.GetProperty("expectedPlanHash").GetProperty("minLength").GetInt32()); Assert.AreEqual(64,applyProperties.GetProperty("expectedPlanHash").GetProperty("maxLength").GetInt32());
+   Assert.AreEqual(32,applyProperties.GetProperty("leaseId").GetProperty("minLength").GetInt32()); Assert.AreEqual(128,applyProperties.GetProperty("expectedRevision").GetProperty("maxLength").GetInt32());
+   var wait=Schema("job_status").GetProperty("properties").GetProperty("waitSeconds"); Assert.AreEqual(0,wait.GetProperty("minimum").GetInt32()); Assert.AreEqual(20,wait.GetProperty("maximum").GetInt32());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","graph","expectedPlanHash"},Schema("editor_apply_craft").GetProperty("required").EnumerateArray().Select(p=>p.GetString()).ToArray());
    // Schema scan over the real tool list: nothing accepts grant payloads or key material.
    foreach(var tool in list.GetProperty("result").GetProperty("tools").EnumerateArray())
    {
@@ -64,6 +74,16 @@ namespace KspControl.HostTests;
    var invalid=await Request(new { jsonrpc="2.0",id=5,method="tools/call",@params=new { name="control_acquire_lease",arguments=new { purpose="x",durationSeconds=5 } } },5);
    using var invalidResult=JsonDocument.Parse(invalid.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
    Assert.AreEqual("invalid_argument",invalidResult.RootElement.GetProperty("ReasonCode").GetString());
+   // A mutation without a lease is refused before any socket: lease_required with the journal available, never a bridge error.
+   var noLease=await Request(new { jsonrpc="2.0",id=8,method="tools/call",@params=new { name="editor_apply_craft",arguments=new { requestId="apply-0001",leaseId="0123456789abcdef0123456789abcdef",expectedRevision="abc",graph="{\"name\":\"n\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\"}]}",expectedPlanHash=new string('a',64) } } },8);
+   using var noLeaseResult=JsonDocument.Parse(noLease.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("lease_required",noLeaseResult.RootElement.GetProperty("ReasonCode").GetString());
+   var unknownJob=await Request(new { jsonrpc="2.0",id=9,method="tools/call",@params=new { name="job_status",arguments=new { requestId="never-seen-1" } } },9);
+   using var unknownJobResult=JsonDocument.Parse(unknownJob.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("job_unknown",unknownJobResult.RootElement.GetProperty("ReasonCode").GetString());
+   var badWait=await Request(new { jsonrpc="2.0",id=10,method="tools/call",@params=new { name="job_status",arguments=new { requestId="never-seen-1",waitSeconds=99 } } },10);
+   using var badWaitResult=JsonDocument.Parse(badWait.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("invalid_argument",badWaitResult.RootElement.GetProperty("ReasonCode").GetString());
   } finally { process.StandardInput.Close(); if(!process.WaitForExit(1000)) process.Kill(true); await errors; }
  }
 }

@@ -17,6 +17,9 @@ public sealed class JournalAccess : IDisposable
   return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"KspControl","journal",id);
  }
  public JournalAccess(string directory) { this.directory=directory; }
+ private MissionGrant? currentGrant;
+ /// <summary>The grant the bridge reported with the current lease (id, generation, operations, facilities as entities). Audit mirror: the bridge verifies it, the host only reads it.</summary>
+ public MissionGrant? CurrentGrant { get { lock(gate) return currentGrant; } }
  /// <summary>available, locked_by_other_host or unavailable.</summary>
  public string State { get { TryGet(); lock(gate) return state; } }
  public ControlJournal? TryGet()
@@ -43,7 +46,9 @@ public sealed class JournalAccess : IDisposable
    var operations=(grantInfo?["operations"] as JArray)?.Select(t=>(string)t!).ToArray() ?? Array.Empty<string>();
    var entities=(grantInfo?["facilities"] as JArray)?.Select(t=>"editor:"+(string)t!).ToArray() ?? Array.Empty<string>();
    DateTimeOffset expires=DateTimeOffset.TryParse((string?)grantInfo?["expiresUtc"],out var parsed) ? parsed : DateTimeOffset.UtcNow.AddMinutes(5);
-   try { j.ProvisionGrant(new MissionGrant(grantId,generation,"bridge_reported",expires,0,operations,entities)); } catch(InvalidOperationException) { /* already mirrored in this run, or revoked here */ }
+   var reported=new MissionGrant(grantId,generation,"bridge_reported",expires,0,operations,entities);
+   try { j.ProvisionGrant(reported); } catch(InvalidOperationException) { /* already mirrored in this run, or revoked here */ }
+   lock(gate) currentGrant=reported;
    j.Revoke();
    j.Acquire(leaseId,(string?)data["purpose"]??"unspecified",epoch,DateTimeOffset.UtcNow,TimeSpan.FromSeconds(Math.Clamp(seconds,1,300)));
   } catch(Exception) { /* audit mirror only */ }
@@ -51,6 +56,6 @@ public sealed class JournalAccess : IDisposable
  public void MirrorRenew(string leaseId,int seconds)
  { try { TryGet()?.Renew(leaseId,DateTimeOffset.UtcNow,TimeSpan.FromSeconds(Math.Clamp(seconds,1,300))); } catch(Exception) { } }
  public void MirrorEnd(string leaseId)
- { try { var j=TryGet(); if(j?.CurrentLease?.Id==leaseId) j.Revoke(); } catch(Exception) { } }
+ { try { var j=TryGet(); if(j?.CurrentLease?.Id==leaseId) { j.Revoke(); lock(gate) currentGrant=null; } } catch(Exception) { } }
  public void Dispose() { lock(gate) { journal?.Dispose(); journal=null; } }
 }

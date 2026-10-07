@@ -13,6 +13,7 @@ builder.Services.AddSingleton<IBeatSender, BridgeBeatSender>();
 builder.Services.AddSingleton<LeaseKeeper>();
 builder.Services.AddHostedService(services => services.GetRequiredService<LeaseKeeper>());
 builder.Services.AddSingleton<JournalAccess>();
-builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>();
+builder.Services.AddSingleton<MutationService>();
+builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>().WithTools<MutationTools>();
 await builder.Build().RunAsync();
 return 0;

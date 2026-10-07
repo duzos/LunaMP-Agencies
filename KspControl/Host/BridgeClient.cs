@@ -6,15 +6,15 @@ using Newtonsoft.Json.Linq;
 namespace KspControl.Host;
 /// <summary>
 /// Opens one fresh loopback connection per call. Operations are split into three disjoint allowlists:
-/// read (queued observations), control (inline lease operations) and mutation (reserved; empty until a slice
-/// routes mutations through the journal).
+/// read (queued observations, including the status of a mutation job), control (inline lease operations) and
+/// mutation (queued, lease-bound; only the mutation service calls them, and only after the journal admitted the request).
 /// </summary>
 public sealed class BridgeClient
 {
- public static readonly IReadOnlySet<string> ReadOperations = new HashSet<string>(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot",EditorOperations.State,EditorOperations.Engineering,ConstructionOperations.Catalog };
+ public static readonly IReadOnlySet<string> ReadOperations = new HashSet<string>(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot",EditorOperations.State,EditorOperations.Engineering,ConstructionOperations.Catalog,EditorOperations.OperationStatus };
  public static readonly IReadOnlySet<string> ControlOperationSet = new HashSet<string>(ControlOperations.All,StringComparer.Ordinal);
- /// <summary>Mutations are never reachable through this client yet; they must go through the journal.</summary>
- public static readonly IReadOnlySet<string> MutationOperations = new HashSet<string>(StringComparer.Ordinal);
+ /// <summary>Mutations reach the bridge only through <see cref="MutateAsync"/>, which the journaled mutation service calls.</summary>
+ public static readonly IReadOnlySet<string> MutationOperations = new HashSet<string>(EditorOperations.Mutations,StringComparer.Ordinal);
  private static readonly TimeSpan DefaultTimeout=TimeSpan.FromSeconds(10);
 
  public async Task<string> ReadAsync(string operation, JObject? arguments, CancellationToken cancellationToken, string? expectedWorldEpoch = null)
@@ -27,6 +27,13 @@ public sealed class BridgeClient
  {
   if (!ControlOperationSet.Contains(operation)) throw new ArgumentException("unsupported_operation");
   return await Call(operation,leaseId,arguments,timeout,cancellationToken);
+ }
+ /// <summary>Sends one mutation with its lease. The bridge answers within its queue deadline: either a refusal or a running job to poll with editor.operation_status.</summary>
+ public async Task<string> MutateAsync(string operation, string leaseId, JObject arguments, CancellationToken cancellationToken)
+ {
+  if (!MutationOperations.Contains(operation)) throw new ArgumentException("unsupported_operation");
+  if (!ControlLimits.IsLeaseId(leaseId)) throw new ArgumentException("invalid_lease");
+  return await Call(operation,leaseId,arguments,DefaultTimeout,cancellationToken);
  }
  private async Task<string> Call(string operation,string? leaseId,JObject? arguments,TimeSpan timeout,CancellationToken cancellationToken,string? expectedWorldEpoch=null)
  {

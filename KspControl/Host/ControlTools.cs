@@ -82,7 +82,7 @@ public sealed class ControlTools(BridgeClient bridge,LeaseKeeper keeper,JournalA
   => JObject.Parse(await bridge.ControlAsync(operation,leaseId,arguments,CallTimeout,cancellationToken));
  private static string Render(JObject reply) { Scrub(reply["Data"]); return reply.ToString(Formatting.None); }
  /// <summary>Defence in depth: nothing resembling grant content or key material ever leaves through a response.</summary>
- private static void Scrub(JToken? token)
+ internal static void Scrub(JToken? token)
  {
   if(token is JObject obj)
   {

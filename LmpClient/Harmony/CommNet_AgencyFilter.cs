@@ -19,6 +19,8 @@ namespace LmpClient.Harmony
         private static readonly Dictionary<CommNode, Vessel> vessels = new Dictionary<CommNode, Vessel>(new NodeIdentityComparer());
         private static int refreshRequested = 1, resetUiRequested;
         private static bool lastEnabled, lastOptIn;
+        private static readonly CommNetDenialLogGate denialLog = new CommNetDenialLogGate(60000);
+        private static readonly global::System.Diagnostics.Stopwatch clock = global::System.Diagnostics.Stopwatch.StartNew();
         private sealed class NodeIdentityComparer : IEqualityComparer<CommNode>
         {
             public bool Equals(CommNode a, CommNode b) => ReferenceEquals(a, b);
@@ -101,6 +103,8 @@ namespace LmpClient.Harmony
         private static void Postfix(CommNetwork __instance, CommNode __0, CommNode __1, ref bool __result)
         {
             if (!Enabled || __0 == null || __1 == null || __0.isHome || __1.isHome || disconnect == null) return;
+            // The stock game already rejected this pair (no link made): nothing to deny, nothing to log.
+            if (!__result) return;
             var allowed = false;
             try
             {
@@ -127,7 +131,10 @@ namespace LmpClient.Harmony
             {
                 disconnect.Invoke(__instance, new object[] { __0, __1, true });
                 __result = false;
-                Diagnostics.PlaytestDiagnostics.Write("client.commnet.denied", () => "optIn=" + SettingsSystem.ServerSettings.AgencyCommNetOptIn, traffic: true);
+                var idA = vessels.TryGetValue(__0, out var va) && va ? va.id : Guid.Empty;
+                var idB = vessels.TryGetValue(__1, out var vb) && vb ? vb.id : Guid.Empty;
+                if (denialLog.ShouldLog(idA, idB, clock.ElapsedMilliseconds))
+                    Diagnostics.PlaytestDiagnostics.Write("client.commnet.denied", () => "optIn=" + SettingsSystem.ServerSettings.AgencyCommNetOptIn, traffic: true);
             }
             catch (Exception e)
             {

@@ -44,6 +44,25 @@ namespace LmpClient.Systems.Agency
         public static ToolingQuote EditorQuote { get; private set; }
         /// <summary>The free-launch voucher the editor quote already accounts for, or null.</summary>
         public static TradeEntitlement EditorVoucher { get; private set; }
+        /// <summary>The launch charge the server quoted in the most recent confirmed PrepareLaunch result, and a counter that increases with each one.</summary>
+        internal static double LastLaunchCharge { get; private set; }
+        internal static long LaunchChargeSerial { get; private set; }
+        /// <summary>The server-confirmed agency balance, false while the economy snapshot is not ready for this agency.</summary>
+        internal static bool TryConfirmedFunds(out double funds)
+        {
+            lock (stateLock)
+            {
+                funds = 0;
+                if (!BalanceReady) return false;
+                funds = snapshot.Funds; return true;
+            }
+        }
+        /// <summary>Cancels a launch that has not started loading the flight scene, through the same CancelLaunch command the scene-change path uses.</summary>
+        internal static bool CancelPendingLaunchIfIdle()
+        {
+            if (pending == null || pending.Started) return false;
+            CancelLaunch(); return true;
+        }
         private sealed class PendingLaunch
         {
             internal Guid Request, Launch, Token, Voucher;
@@ -348,6 +367,7 @@ namespace LmpClient.Systems.Agency
             if (pending == null || result.RequestId != pending.Request || result.Operation != EconomyOperation.PrepareLaunch) return;
             if (!result.Success) { pending = null; InputLockManager.RemoveControlLock(LaunchLock); return; }
             pending.Token = result.LaunchToken;
+            if (result.Quote != null) { LastLaunchCharge = result.Quote.LaunchCost; LaunchChargeSerial++; }
             try
             {
                 if (HighLogic.LoadedScene != pending.Scene || HashFile(pending.Path) != pending.FileHash || CrewKey(pending.CrewManifest) != pending.Crew ||

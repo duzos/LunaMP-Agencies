@@ -15,6 +15,8 @@ namespace KspControl.Bridge
         private ExecutionAuthority authority;
         private GrantWatcher watcher;
         private ControlPump pump;
+        private EditorRevisionTracker tracker;
+        private EditorEvents editorEvents;
         private KeyCode stopKey = KeyCode.None;
         private string panelLine = "";
         private float panelRefreshed = -1f;
@@ -35,12 +37,18 @@ namespace KspControl.Bridge
                 if (port < 1024 || port > 65535) return;
                 var store = new FileSuspensionStore(Path.Combine(KSPUtil.ApplicationRootPath, "KspControlData", "control", "suspensions.json"));
                 authority = new ExecutionAuthority(() => MonotonicClock.Milliseconds, GrantMapping.KnownEffects, ControlLimits.WatchdogMilliseconds, store);
-                var source = new KspContextSource(observations);
+                // Editor state: the port is the only Unity-facing piece; the tracker, idle logic and envelopes are pure and tested.
+                var editorPort = new UnityEditorPort();
+                tracker = new EditorRevisionTracker(editorPort, new AuthorityTakeoverSink(authority));
+                editorEvents = new EditorEvents(tracker);
+                observations.EditorTracker = tracker;
+                observations.Editor = new EditorObservationService(editorPort, tracker, () => observations.WorldEpoch);
+                var source = new KspContextSource(observations, tracker);
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");
                 var keyFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_KEY_FILE");
                 if (!string.IsNullOrEmpty(grantFile) && !string.IsNullOrEmpty(keyFile)) watcher = new GrantWatcher(authority, grantFile, keyFile, source.CurrentBinding);
-                pump = new ControlPump(authority, watcher, source);
+                pump = new ControlPump(authority, watcher, source, tracker);
                 ReadStopKey();
                 server = new LoopbackServer(queue, token, port, new ControlDispatcher(authority).Handle);
                 Debug.Log("[KspControl] Bridge ready (read-only observations; control leases inline).");
@@ -80,6 +88,6 @@ namespace KspControl.Bridge
             if (status.StopPersistFailed) text.Append(" | WARNING: stop not saved to disk");
             return text.ToString();
         }
-        public void OnDestroy() { server?.Dispose(); queue.Stop(); }
+        public void OnDestroy() { server?.Dispose(); queue.Stop(); editorEvents?.Dispose(); }
     }
 }

@@ -22,7 +22,9 @@ namespace KspControl.Bridge
         }
         private JObject EditorSnapshot(ShipConstruct ship, JObject args)
         {
-            if (!ReferenceEquals(ship, observedEditorShip)) { observedEditorShip = ship; editorGeneration = Guid.NewGuid().ToString("N"); }
+            // The tracker owns the generation counter (it also feeds the edit-revision token). Without it, fall back to a per-identity id.
+            if (EditorTracker != null) editorGeneration = ProcessId + "." + EditorTracker.RefreshGeneration().ToString(System.Globalization.CultureInfo.InvariantCulture); // unique across restarts
+            else if (!ReferenceEquals(ship, observedEditorShip)) { observedEditorShip = ship; editorGeneration = Guid.NewGuid().ToString("N"); }
             var offset = Offset(args); var limit = Math.Min(ObservationLimits.MaxSnapshotPage, Limit(args));
             var parts = new JArray(); var root = ship.Parts.FirstOrDefault(p => p != null && p.parent == null);
             foreach (var part in ship.Parts.Skip(offset).Take(limit))

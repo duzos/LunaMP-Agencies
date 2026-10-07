@@ -6,8 +6,9 @@ namespace KspControl.Bridge
     internal sealed class KspContextSource : IEditorContextSource
     {
         private readonly Observations observations;
+        private readonly EditorRevisionTracker tracker;
         private string installId;
-        public KspContextSource(Observations observations) { this.observations = observations; }
+        public KspContextSource(Observations observations, EditorRevisionTracker tracker = null) { this.observations = observations; this.tracker = tracker; }
 
         public LeaseContext CurrentContext()
         {
@@ -15,8 +16,8 @@ namespace KspControl.Bridge
             var entity = editor ? "editor:" + (EditorDriver.editorFacility == EditorFacility.SPH ? "SPH" : "VAB") : "scene:" + HighLogic.LoadedScene;
             // Scene readiness is deliberately independent of the editor state machine; idle checks belong to admission.
             var ready = editor && EditorLogic.fetch != null && EditorDriver.fetch != null && !EditorDriver.fetch.restartingEditor;
-            // Editor revision tracking arrives with the editor-state slice; until then the revision is constant.
-            return new LeaseContext(observations.WorldEpoch, entity, 0, ready);
+            // The tracker is updated earlier in the same frame, so the published revision includes this frame's edits. It never decreases.
+            return new LeaseContext(observations.WorldEpoch, entity, tracker == null ? 0 : tracker.EditRevision, ready);
         }
 
         public GrantBinding CurrentBinding()

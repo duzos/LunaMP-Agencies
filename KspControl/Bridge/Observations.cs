@@ -24,6 +24,10 @@ namespace KspControl.Bridge
         internal const string BridgeVersion = "0.2.0";
         internal string WorldEpoch => epoch;
         internal Guid AgencyId => agency;
+        /// <summary>Editor-state reads. Null when the bridge runs without the editor layer, which makes editor.state unavailable.</summary>
+        private static readonly string ProcessId = Guid.NewGuid().ToString("N");
+        internal EditorObservationService Editor { get; set; }
+        internal EditorRevisionTracker EditorTracker { get; set; }
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -59,6 +63,16 @@ namespace KspControl.Bridge
                     var definition = PartLoader.LoadedPartsList?.FirstOrDefault(p => p != null && p.name == partName);
                     if (definition?.partPrefab == null) return Fail(request, "definition_unavailable");
                     data = PartDefinition(definition, request.Arguments); break;
+                case EditorOperations.State: case EditorOperations.Engineering:
+                    if (Editor == null) return Fail(request, "operation_unavailable");
+                    var editorResult = request.Operation == EditorOperations.State ? Editor.State() : Editor.Engineering(request.Arguments);
+                    if (editorResult.Reason != null)
+                    {
+                        var failed = Fail(request, editorResult.Reason);
+                        if (editorResult.Detail != null) failed.Data = new JObject { ["detail"] = editorResult.Detail };
+                        return failed;
+                    }
+                    data = editorResult.Data; break;
                 case "editor.snapshot":
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) return Fail(request, "editor_unavailable");
                     data = EditorSnapshot(EditorLogic.fetch.ship, request.Arguments); break;
@@ -108,7 +122,7 @@ namespace KspControl.Bridge
         private static JObject Capabilities() => new JObject
         {
             ["bridgeVersion"] = BridgeVersion,
-            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", "parts.definition", "editor.snapshot", "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
+            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
             ["inline"] = new JArray(ControlOperations.All),
             ["unavailable"] = new JObject { ["mutations"] = "authority_and_job_execution_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },

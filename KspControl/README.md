@@ -99,7 +99,7 @@ created on first `issue`, never printed; `grant.json`). Overrides: `--trust-dir`
 `--key-file`, or env `KSP_CONTROL_TRUST_DIR`. `issue`, `revoke` and `rearm` always write
 `generation + 1`; `show` never prints the key, payload or MAC. Only KSP gets the key path:
 `KSP_CONTROL_GRANT_FILE` and `KSP_CONTROL_GRANT_KEY_FILE` go in KSP's environment, not the
-MCP host's. Without both, no grant is ever provisioned.
+MCP host's. Without both, no grant is ever provisioned. The key file and trust directory are created user-only on Windows (inheritance off), with a warning if that fails. The host journal lives in `%LOCALAPPDATA%\KspControl\journal\<installId>` when `KSP_CONTROL_KSP_ROOT` names the KSP root, otherwise `...\journal\default`; `KSP_CONTROL_JOURNAL_DIR` overrides.
 
 **Bridge.** `GrantWatcher` polls the file at 1 Hz on the main thread (re-verifying on a stat
 change) and publishes an immutable status: `missing`, `malformed`, `invalid_mac`, `expired`,
@@ -107,7 +107,7 @@ change) and publishes an immutable status: `missing`, `malformed`, `invalid_mac`
 drops only the lease; a binding change drops the grant (re-provisioned when it matches again);
 the Stop button or `KSP_CONTROL_STOP_KEY` hotkey burns the current generation and persists it
 in `<KSP root>/KspControlData/control/suspensions.json`, so it survives a restart until
-`grant rearm` writes a higher generation. A human edit takeover (wired in a later slice) revokes
+`grant rearm` writes a higher generation. The highest generation seen per grant id is stored in the same file, so an older envelope cannot be replayed after a restart; a failed write shows as `stopPersistFailed` in `control_status` and a warning on the panel. A human edit takeover (wired in a later slice) revokes
 the lease and starts a 30 s cooldown.
 
 **Tools.** `control_status`, `control_acquire_lease(purpose 1..128, durationSeconds 30..300)`,

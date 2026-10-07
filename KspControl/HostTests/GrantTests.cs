@@ -110,6 +110,44 @@ namespace KspControl.HostTests;
   Assert.AreEqual(GrantCli.Usage,Run(Issue("--unknown","x")).Code); Assert.AreEqual(GrantCli.Usage,Run(Issue("--save","again")).Code);
   Assert.AreEqual(GrantCli.Usage,Run(Issue("--max-parts")).Code);
  }
+ [TestMethod] public void KeyFileAndTrustDirectoryAreRestrictedToTheCurrentUserOnWindows()
+ {
+  if(!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows ACLs only");
+  var result=Run(Issue()); Assert.AreEqual(0,result.Code,result.Err); Assert.IsFalse(result.Err.Contains("warning"),result.Err);
+  var me=System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+  foreach(var security in new System.Security.AccessControl.FileSystemSecurity[]{ new FileInfo(Path.Combine(dir,"grant.key")).GetAccessControl(), new DirectoryInfo(dir).GetAccessControl() })
+  {
+   Assert.IsTrue(security.AreAccessRulesProtected,"inheritance must be disabled");
+   var rules=security.GetAccessRules(true,true,typeof(System.Security.Principal.SecurityIdentifier)).Cast<System.Security.AccessControl.FileSystemAccessRule>().ToArray();
+   Assert.IsTrue(rules.All(r=>r.IdentityReference.Equals(me)),"only the current user may have access");
+   Assert.IsTrue(rules.Any(r=>r.FileSystemRights.HasFlag(System.Security.AccessControl.FileSystemRights.FullControl)));
+  }
+  Assert.AreEqual(0,Run("rearm","--trust-dir",dir).Code,"the user can still read the key and rewrite the grant");
+ }
+ [TestMethod] public void OversizedKeyFileIsTreatedAsUnusableNotRead()
+ {
+  Run(Issue()); File.WriteAllBytes(Path.Combine(dir,"grant.key"),new byte[100000]);
+  var shown=JObject.Parse(Run("show","--trust-dir",dir).Out); Assert.AreEqual("missing",(string?)shown["state"]); Assert.AreEqual("key_unavailable",(string?)shown["detail"]);
+  Assert.AreEqual(GrantCli.Failed,Run("rearm","--trust-dir",dir).Code);
+ }
+ [TestMethod] public void FailedWriteLeavesNoTemporaryFile()
+ {
+  Run(Issue()); Directory.CreateDirectory(Path.Combine(dir,"blocked"));
+  var result=Run("issue","--grant-file",Path.Combine(dir,"blocked"),"--key-file",Path.Combine(dir,"grant.key"),"--ksp-root",@"C:\Games\KSP","--save","X");
+  Assert.AreEqual(GrantCli.Failed,result.Code); Assert.AreEqual(0,Directory.GetFiles(dir,"*.tmp").Length);
+ }
+ [TestMethod] public void JournalDefaultDirectoryUsesTheInstallIdWhenTheRootIsKnown()
+ {
+  string? old=Environment.GetEnvironmentVariable("KSP_CONTROL_KSP_ROOT");
+  try
+  {
+   Environment.SetEnvironmentVariable("KSP_CONTROL_KSP_ROOT",@"C:\Games\KSP");
+   StringAssert.EndsWith(JournalAccess.DefaultDirectory(),Path.Combine("journal",GrantBindingKey.InstallId(@"C:\Games\KSP")));
+   Environment.SetEnvironmentVariable("KSP_CONTROL_KSP_ROOT",null);
+   StringAssert.EndsWith(JournalAccess.DefaultDirectory(),Path.Combine("journal","default"));
+  }
+  finally { Environment.SetEnvironmentVariable("KSP_CONTROL_KSP_ROOT",old); }
+ }
  [TestMethod] public void TrustDirectoryCanComeFromTheEnvironmentAndExplicitPaths()
  {
   var output=new StringWriter(); var error=new StringWriter();

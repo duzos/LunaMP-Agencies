@@ -1,4 +1,6 @@
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using KspControl.Contracts;
 using Newtonsoft.Json;
@@ -40,7 +42,7 @@ public static class GrantCli
     _ => Show(grantPath,keyPath,output,error)
    };
   }
-  catch(Exception failure) when(failure is IOException or UnauthorizedAccessException or ArgumentException or FormatException)
+  catch(Exception failure) when(failure is IOException or UnauthorizedAccessException or ArgumentException or FormatException or OverflowException)
   { error.WriteLine("grant command failed: "+failure.GetType().Name); return Failed; }
  }
 
@@ -80,7 +82,7 @@ public static class GrantCli
  {
   if(!File.Exists(grantPath)) { output.WriteLine(JsonConvert.SerializeObject(new { present=false,state="missing" })); return Ok; }
   if(!File.Exists(keyPath)) { output.WriteLine(JsonConvert.SerializeObject(new { present=true,state="key_missing" })); return Ok; }
-  var check=GrantCodec.Verify(File.ReadAllText(grantPath,Encoding.UTF8),File.ReadAllBytes(keyPath));
+  var check=GrantCodec.Verify(File.ReadAllText(grantPath,Encoding.UTF8),ReadKeyCapped(keyPath));
   if(!check.Ok) { output.WriteLine(JsonConvert.SerializeObject(new { present=true,state=check.State,detail=check.Detail })); return Ok; }
   var p=check.Payload;
   // Deliberately omits the payload bytes, the MAC and the key.
@@ -91,7 +93,7 @@ public static class GrantCli
  private static int Write(GrantPayload payload,string grantPath,string keyPath,bool create,TextWriter output,TextWriter error,string verb)
  {
   var problem=GrantCodec.Validate(payload); if(problem!=null) { error.WriteLine("grant refused: "+problem); return Usage; }
-  var key=create ? LoadOrCreateKey(keyPath) : LoadKey(keyPath);
+  var key=create ? LoadOrCreateKey(keyPath,error) : LoadKey(keyPath);
   AtomicWrite(grantPath,GrantCodec.Encode(payload,key));
   output.WriteLine($"{verb} grantId={payload.GrantId} generation={payload.Generation} expiresUtc={payload.ExpiresUtc}");
   return Ok;
@@ -100,7 +102,7 @@ public static class GrantCli
  private static GrantPayload? ReadVerified(string grantPath,string keyPath,TextWriter error)
  {
   if(!File.Exists(grantPath)||!File.Exists(keyPath)) { error.WriteLine("no existing grant or key; use issue"); return null; }
-  var check=GrantCodec.Verify(File.ReadAllText(grantPath,Encoding.UTF8),File.ReadAllBytes(keyPath));
+  var check=GrantCodec.Verify(File.ReadAllText(grantPath,Encoding.UTF8),ReadKeyCapped(keyPath));
   if(!check.Ok) { error.WriteLine("existing grant is not usable ("+check.State+"); use issue"); return null; }
   return check.Payload;
  }
@@ -127,25 +129,64 @@ public static class GrantCli
  private static string[] Split(string? text,string[] fallback) =>
   string.IsNullOrWhiteSpace(text) ? fallback : text.Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
 
+ /// <summary>Reads the key without trusting its size: an oversized file yields an empty array, which verification rejects.</summary>
+ private static byte[] ReadKeyCapped(string keyPath) => new FileInfo(keyPath).Length>64 ? Array.Empty<byte>() : File.ReadAllBytes(keyPath);
  private static byte[] LoadKey(string keyPath)
  {
-  var key=File.ReadAllBytes(keyPath);
+  var key=ReadKeyCapped(keyPath);
   if(key.Length!=GrantCodec.KeyLength) throw new ArgumentException("invalid_key_length");
   return key;
  }
- private static byte[] LoadOrCreateKey(string keyPath)
+ private static byte[] LoadOrCreateKey(string keyPath,TextWriter error)
  {
   if(File.Exists(keyPath)) return LoadKey(keyPath);
-  var directory=Path.GetDirectoryName(Path.GetFullPath(keyPath)); if(!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+  var directory=Path.GetDirectoryName(Path.GetFullPath(keyPath));
+  bool restricted=true;
+  if(!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) restricted&=CreateDirectoryUserOnly(directory);
   var key=RandomNumberGenerator.GetBytes(GrantCodec.KeyLength);
-  try { using var stream=new FileStream(keyPath,FileMode.CreateNew,FileAccess.Write,FileShare.None); stream.Write(key); stream.Flush(true); return key; }
+  try { using var stream=CreateKeyFile(keyPath,ref restricted); stream.Write(key); stream.Flush(true); }
   catch(IOException) when(File.Exists(keyPath)) { return LoadKey(keyPath); }
+  if(!restricted) error.WriteLine("warning: could not restrict the key file to the current user; protect "+keyPath+" yourself");
+  return key;
+ }
+ /// <summary>Creates the file already restricted to the current user (inheritance off) on Windows, so there is no window with inherited access.</summary>
+ private static FileStream CreateKeyFile(string path,ref bool restricted)
+ {
+  if(OperatingSystem.IsWindows())
+  {
+   try
+   {
+    var security=new FileSecurity(); security.SetAccessRuleProtection(true,false);
+    security.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!,FileSystemRights.FullControl,AccessControlType.Allow));
+    return new FileInfo(path).Create(FileMode.CreateNew,FileSystemRights.Write|FileSystemRights.ReadData,FileShare.None,4096,FileOptions.None,security);
+   }
+   catch(Exception failure) when(failure is not IOException) { restricted=false; }
+  }
+  else restricted=false;
+  return new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None);
+ }
+ private static bool CreateDirectoryUserOnly(string directory)
+ {
+  if(!OperatingSystem.IsWindows()) { Directory.CreateDirectory(directory); return false; }
+  try
+  {
+   var security=new DirectorySecurity(); security.SetAccessRuleProtection(true,false);
+   security.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!,FileSystemRights.FullControl,InheritanceFlags.ContainerInherit|InheritanceFlags.ObjectInherit,PropagationFlags.None,AccessControlType.Allow));
+   // Only the leaf gets the explicit ACL; missing parents are created normally.
+   var parent=Path.GetDirectoryName(directory); if(!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+   new DirectoryInfo(directory).Create(security); return true;
+  }
+  catch(Exception failure) when(failure is not IOException) { Directory.CreateDirectory(directory); return false; }
  }
  private static void AtomicWrite(string path,string text)
  {
   var directory=Path.GetDirectoryName(Path.GetFullPath(path)); if(!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
   var temporary=path+"."+Guid.NewGuid().ToString("N")+".tmp";
-  using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)) { stream.Write(new UTF8Encoding(false).GetBytes(text)); stream.Flush(true); }
-  File.Move(temporary,path,true);
+  try
+  {
+   using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)) { stream.Write(new UTF8Encoding(false).GetBytes(text)); stream.Flush(true); }
+   File.Move(temporary,path,true);
+  }
+  catch { try { File.Delete(temporary); } catch { } throw; }
  }
 }

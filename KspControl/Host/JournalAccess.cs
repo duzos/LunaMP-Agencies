@@ -8,7 +8,14 @@ namespace KspControl.Host;
 public sealed class JournalAccess : IDisposable
 {
  private readonly object gate=new(); private readonly string directory; private ControlJournal? journal; private string state="not_opened";
- public JournalAccess() : this(Environment.GetEnvironmentVariable("KSP_CONTROL_JOURNAL_DIR") is { Length: >0 } configured ? configured : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"KspControl","journal","default")) { }
+ public JournalAccess() : this(Environment.GetEnvironmentVariable("KSP_CONTROL_JOURNAL_DIR") is { Length: >0 } configured ? configured : DefaultDirectory()) { }
+ /// <summary>%LOCALAPPDATA%\KspControl\journal\installId. The id is the bridge's install hash when KSP_CONTROL_KSP_ROOT names the KSP root; otherwise "default" (the host is not told the root).</summary>
+ public static string DefaultDirectory()
+ {
+  string? root=Environment.GetEnvironmentVariable("KSP_CONTROL_KSP_ROOT"); string id="default";
+  if(!string.IsNullOrWhiteSpace(root)) { try { id=KspControl.Contracts.GrantBindingKey.InstallId(root); } catch(Exception) { } }
+  return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"KspControl","journal",id);
+ }
  public JournalAccess(string directory) { this.directory=directory; }
  /// <summary>available, locked_by_other_host or unavailable.</summary>
  public string State { get { TryGet(); lock(gate) return state; } }

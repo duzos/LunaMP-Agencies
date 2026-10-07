@@ -160,6 +160,13 @@ namespace KspControl.BridgeTests
         public bool TrySetBackup() { SetBackupCalls++; UnsavedValue = Parts > 0; return true; }
         public IReadOnlyList<string> ReadCrew() { return CrewList; }
 
+        // ---- surface placement (P2.8): scriptable live measurements, every call counted ----
+        public Func<uint, double, double?> RadiusOf;
+        public Func<uint, Pure.SurfaceNodeDefinition> SurfaceNodeOf;
+        public int MeasureCalls, NodeReads;
+        public double? MeasureSurfaceRadius(uint parentCraftId, double localHeight) { MeasureCalls++; return RadiusOf == null ? (double?)null : RadiusOf(parentCraftId, localHeight); }
+        public Pure.SurfaceNodeDefinition ReadSurfaceNode(uint craftId) { NodeReads++; return SurfaceNodeOf == null ? null : SurfaceNodeOf(craftId); }
+
         /// <summary>A three-part craft. Each argument changes exactly one thing the fingerprint must notice.</summary>
         public static string CraftText(string podStage = "-1", string tankStage = "1", string moduleValue = "10", string cryoTime = "100")
         {

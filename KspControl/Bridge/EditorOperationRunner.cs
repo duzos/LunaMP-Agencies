@@ -117,6 +117,7 @@ namespace KspControl.Bridge
                 case OperationPhase.Dispatch: DoDispatch(job, now, job.StagingPath, OperationPhase.Settle); break;
                 case OperationPhase.Settle: DoSettle(job, now, false); break;
                 case OperationPhase.Verify: DoVerify(job, now); break;
+                case OperationPhase.SurfaceMeasure: DoSurfaceMeasure(job, now); break;
                 case OperationPhase.RestoreStaging: DoRestoreStaging(job, now); break;
                 case OperationPhase.RestoreDispatch: DoDispatch(job, now, job.StagingPath2, OperationPhase.RestoreSettle); break;
                 case OperationPhase.RestoreSettle: DoSettle(job, now, true); break;
@@ -193,6 +194,8 @@ namespace KspControl.Bridge
             job.Thumbs = new ThumbnailHousekeeper(files, paths, port.Facility);
             job.Thumbs.Watch(new[] { "kc-" + job.RequestId }, new[] { port.SanitizeFileName(job.Plan.Graph.Name) }, job.RequestId);
             job.ExpectedParts = job.Plan.PartCount;
+            // P2.8: a plan with surface parts is loaded twice inside this job (plan R1-section 6.5). Pass 1 uses the provisional radius.
+            if (job.Kind == OperationKind.Apply && Pure.SurfaceCalibration.NeedsCalibration(job.Plan.Plan.Layout)) { job.SurfacePass = 1; job.SurfaceSites = Pure.SurfaceCalibration.Sites(job.Plan.Plan.Layout); }
             SetPhase(job, OperationPhase.Dispatch, now);
         }
 
@@ -237,7 +240,48 @@ namespace KspControl.Bridge
             job.DeltaVReady = port.DeltaVReady;
             if (!job.DeltaVReady && now - job.ReadySince < options.DeltaVWaitMilliseconds) return;
             Rebase(job);
+            // Pass 1 of a surface placement is only measured: its positions use the provisional radius, so the verify step runs on pass 2.
+            if (!recovery && job.SurfacePass == 1) { SetPhase(job, OperationPhase.SurfaceMeasure, now); return; }
             SetPhase(job, recovery ? OperationPhase.RestoreVerify : OperationPhase.Verify, now);
+        }
+
+        /// <summary>
+        /// Between the two loads, locks still held: read each parent's live radius at its attach height and each child's live srfAttachNode, re-plan
+        /// with them, overwrite the staging file with the pass-2 craft and dispatch the second load. Any gap fails the job (and restores the snapshot).
+        /// </summary>
+        private void DoSurfaceMeasure(OperationJob job, long now)
+        {
+            if (!Guard(job)) return;
+            var plan = job.Plan;
+            var measured = new Pure.SurfaceMeasurements();
+            foreach (var site in Pure.SurfaceCalibration.MeasurementSites(plan.Plan.Layout))
+            {
+                var radius = port.MeasureSurfaceRadius(site.ParentCid, site.Height);
+                if (!radius.HasValue) { LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, "surface_unmeasured " + site.PartId); return; }
+                measured.SetRadius(site.ParentCid, site.Height, radius.Value);
+            }
+            foreach (var site in job.SurfaceSites)
+            {
+                if (measured.ChildNodes.ContainsKey(site.ChildPart)) continue;
+                var node = port.ReadSurfaceNode(site.ChildCid);
+                if (node == null) { LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, "surface_node_unreadable " + site.PartId); return; }
+                measured.ChildNodes[site.ChildPart] = node;
+            }
+            var second = Pure.SurfaceCalibration.Recalibrate(plan.Graph, plan.Catalog, plan.Options, plan.Plan.Layout, measured);
+            if (!second.Ok) { LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, second.Issues.Count == 0 ? "recalibration_failed" : second.Issues[0].ToString()); return; }
+            var text = second.Craft.ToText();
+            if (text.Length > Pure.ConfigText.MaxChars) { LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, "recalibrated_craft_too_large"); return; }
+            Validate(job);
+            var bytes = new UTF8Encoding(false).GetBytes(text);
+            files.WriteAtomic(job.StagingPath, bytes); // the pass-1 file was already consumed by the synchronous load; the same declared path is reused
+            if (!string.Equals(OperationHash.Sha256Hex(files.ReadAllBytes(job.StagingPath)), OperationHash.Sha256Hex(bytes), StringComparison.Ordinal)) { LoadFailure(job, OperationReasons.StagingFailed, "hash_mismatch_pass2"); return; }
+            string missing;
+            if (!port.AllPartsFound(job.StagingPath, out missing)) { LoadFailure(job, OperationReasons.CraftPartsMissing, missing); return; }
+            plan.Plan = second; plan.CraftText = text; // the admitted planHash stays: it names the plan the model approved, not the calibrated positions
+            job.SurfaceSites = Pure.SurfaceCalibration.Sites(second.Layout);
+            job.SurfacePass = 2;
+            job.EffectsApplied.Add("surface_calibrated");
+            SetPhase(job, OperationPhase.Dispatch, now);
         }
 
         private void DoVerify(OperationJob job, long now)
@@ -252,6 +296,17 @@ namespace KspControl.Bridge
                 foreach (var problem in problems.Take(20)) job.VerifyProblems.Add(problem.ToString());
                 LoadFailure(job, problems[0].Code, problems[0].Detail);
                 return;
+            }
+            if (job.SurfacePass == 2)
+            {
+                var clearance = Pure.SurfaceCalibration.Clearance(job.SurfaceSites, (cid, height) => port.MeasureSurfaceRadius(cid, height));
+                if (clearance.Count != 0)
+                {
+                    foreach (var problem in clearance.Take(20)) job.VerifyProblems.Add(OperationReasons.GeometryMismatchAfterLoad + ": " + problem);
+                    LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, clearance[0]);
+                    return;
+                }
+                job.EffectsApplied.Add("surface_clearance_verified");
             }
             if (!ApplyOverwriteGuard(job)) { LoadFailure(job, OperationReasons.SaveOverwriteGuardUnavailable, "the save-name guard could not be written"); return; }
             job.EffectsApplied.Add("craft_replaced");

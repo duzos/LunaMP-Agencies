@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using UnityEngine;
+using Pure = KspControl.EditorModel;
 
 namespace KspControl.Bridge
 {
@@ -121,6 +123,77 @@ namespace KspControl.Bridge
                         if (crew[seat] != null) seats.Add(partManifest.PartID.ToString(CultureInfo.InvariantCulture) + "|" + seat.ToString(CultureInfo.InvariantCulture) + "|" + crew[seat].name);
                 }
                 return seats;
+            }
+            catch (Exception) { return null; }
+        }
+
+        // ---- surface placement (plan R1-section 6.5, P2.8): reads of the live craft only ----
+
+        private static Part FindPart(uint craftId)
+        {
+            var ship = Ship;
+            if (ship == null || ship.Parts == null) return null;
+            foreach (var part in ship.Parts) if (part != null && part.craftID == craftId) return part;
+            return null;
+        }
+
+        /// <summary>
+        /// The part's own renderer boxes in its local frame: each MeshRenderer or SkinnedMeshRenderer under the part but not under a child part, its
+        /// mesh-space bounds taken through the full transform chain, so a rotated or scaled mesh still gives an exact oriented box.
+        /// </summary>
+        private static List<Pure.Vector[]> RendererBoxes(Part part)
+        {
+            var boxes = new List<Pure.Vector[]>();
+            foreach (var renderer in part.GetComponentsInChildren<Renderer>(false))
+            {
+                if (renderer == null || !renderer.enabled || renderer.GetComponentInParent<Part>() != part) continue;
+                Bounds local;
+                var skinned = renderer as SkinnedMeshRenderer;
+                if (skinned != null) local = skinned.localBounds;
+                else if (renderer is MeshRenderer)
+                {
+                    var filter = renderer.GetComponent<MeshFilter>();
+                    if (filter == null || filter.sharedMesh == null) continue;
+                    local = filter.sharedMesh.bounds;
+                }
+                else continue;
+                var corners = new Pure.Vector[8];
+                var i = 0;
+                for (var x = -1; x <= 1; x += 2)
+                    for (var y = -1; y <= 1; y += 2)
+                        for (var z = -1; z <= 1; z += 2)
+                        {
+                            var world = renderer.transform.TransformPoint(local.center + Vector3.Scale(local.extents, new Vector3(x, y, z)));
+                            var inPart = part.transform.InverseTransformPoint(world);
+                            corners[i++] = new Pure.Vector(inPart.x, inPart.y, inPart.z);
+                        }
+                boxes.Add(corners);
+            }
+            return boxes;
+        }
+
+        public double? MeasureSurfaceRadius(uint parentCraftId, double localHeight)
+        {
+            try
+            {
+                var part = FindPart(parentCraftId);
+                return part == null ? null : Pure.SurfaceCalibration.RadiusAtHeight(RendererBoxes(part), localHeight);
+            }
+            catch (Exception) { return null; }
+        }
+
+        public Pure.SurfaceNodeDefinition ReadSurfaceNode(uint craftId)
+        {
+            try
+            {
+                var part = FindPart(craftId);
+                var node = part == null ? null : part.srfAttachNode;
+                if (node == null) return null;
+                return new Pure.SurfaceNodeDefinition
+                {
+                    Position = new Pure.Vector(node.position.x, node.position.y, node.position.z),
+                    Orientation = new Pure.Vector(node.orientation.x, node.orientation.y, node.orientation.z)
+                };
             }
             catch (Exception) { return null; }
         }

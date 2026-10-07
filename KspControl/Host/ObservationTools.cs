@@ -46,7 +46,7 @@ public sealed class BridgeClient
    return JsonConvert.SerializeObject(reply);
   },timeout.Token);
  }
- private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect" };
+ private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot" };
 }
 [McpServerToolType]
 public sealed class ObservationTools(BridgeClient bridge)
@@ -69,6 +69,19 @@ public sealed class ObservationTools(BridgeClient bridge)
  public Task<string> Science(string partId,CancellationToken cancellationToken=default) => bridge.ReadAsync("science.inspect",Part(partId,0),cancellationToken);
  [McpServerTool, Description("Inspect the active vessel through bridge disclosure policy. No foreign vessel lookup.")]
  public Task<string> Vessel(int offset=0,int limit=20,CancellationToken cancellationToken=default) => bridge.ReadAsync("vessel.inspect",Page(offset,limit),cancellationToken);
+ [McpServerTool, Description("Inspect a loaded part definition including configured attachment nodes. Optional native config is bounded and is not a saved live module state.")]
+ public Task<string> PartDefinition(string partName,bool includeNative=false,CancellationToken cancellationToken=default)
+ {
+  if(string.IsNullOrWhiteSpace(partName)||partName.Length>256) throw new ArgumentException("invalid_part_name");
+  return bridge.ReadAsync("parts.definition",new JObject { ["partName"]=partName,["includeNative"]=includeNative },cancellationToken);
+ }
+ [McpServerTool, Description("Snapshot the current editor craft without changing it. Optional native craft text is bounded; oversize snapshots fail instead of truncating.")]
+ public Task<string> EditorSnapshot(int offset=0,int limit=20,bool includeNative=false,CancellationToken cancellationToken=default)
+ {
+  if(limit>20) throw new ArgumentOutOfRangeException(nameof(limit));
+  var args=Page(offset,limit);args["includeNative"]=includeNative;
+  return bridge.ReadAsync("editor.snapshot",args,cancellationToken);
+ }
  private static JObject Page(int offset,int limit)
  {
   if(offset<0||offset>100000||limit<1||limit>50) throw new ArgumentOutOfRangeException(nameof(offset));
@@ -80,6 +93,7 @@ public sealed class ObservationTools(BridgeClient bridge)
   var args=Page(offset,4); args["partId"]=partId; return args;
  }
 }
+
 
 
 

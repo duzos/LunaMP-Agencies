@@ -47,11 +47,12 @@ installation, game lifecycle and client configuration are orchestrator tasks, no
 MCP tools. An absent credential produces `credential_not_configured`.
 
 Current tools are `capabilities`, `context`, `parts`, `editor`, `vessel`,
-`part_controls` and `science`. Part and vessel pages are bounded. Part controls
+`part_controls`, `science`, `part_definition` and `editor_snapshot`. The latter two provide bounded configured-part and native editor snapshots; they do not import or create craft. Part and vessel pages are bounded. Part controls
 and science require a part ID from an accessible craft observation. Controls are
 descriptors only; field values/invocation are not available. Flight inspection
 requires a ready LunaMP ownership record belonging to the current agency. No
 foreign-vessel enumeration is exposed. Revision values are observation sequences,
 not mutation preconditions. Screenshots, MechJeb, contacts and write operations are
 explicitly unavailable pending their implementations and acceptance gates.
+
 

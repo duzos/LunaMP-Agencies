@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <RootNamespace>LmpAgenciesUpdater</RootNamespace>
+    <AssemblyName>LmpAgenciesUpdater</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference assemblies only: the helper ships as a single exe and must never carry an extra DLL. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <!-- HelperCommandLine.cs sits in this folder, so the default glob already compiles it. Do not add an explicit Compile
+       item for it (NETSDK1022). It is also linked into LmpCommon. -->
+
+</Project>

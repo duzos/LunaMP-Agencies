@@ -44,7 +44,7 @@ public sealed class AutopilotService(MutationService mutations)
  }
 
  private Task<string> Run(string bridgeOperation,string requestId,string leaseId,JObject args,CancellationToken cancellationToken)
-  => mutations.RunAsync(AutopilotOperations.Effect,bridgeOperation,requestId,leaseId.ToLowerInvariant(),args,OperationLimits.WaitSecondsMax,cancellationToken,AutopilotOperations.JournalEntity);
+  => mutations.RunAsync(AutopilotOperations.Effect,bridgeOperation,requestId,leaseId.ToLowerInvariant(),args,OperationLimits.WaitSecondsMax,cancellationToken,FlightEffects.JournalEntity);
 }
 
 /// <summary>

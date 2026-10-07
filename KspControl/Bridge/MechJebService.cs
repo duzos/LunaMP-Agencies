@@ -123,7 +123,7 @@ namespace KspControl.Bridge
             // Authority: the lease, the grant's flight.autopilot family (FLIGHT facility), the vessel the lease is bound to. The recipient is that lease's entity
             // ("vessel:<guid>"); the grant's "vessel:*" matches it. The revision is whatever the authority published this frame.
             var leaseEntity = authority.DescribeLease(leaseId)?.Entity;
-            var effects = new[] { new ClassifiedEffect(AutopilotOperations.Effect, leaseEntity ?? AutopilotOperations.EntityWildcard, 0) };
+            var effects = new[] { new ClassifiedEffect(AutopilotOperations.Effect, leaseEntity ?? FlightEffects.EntityWildcard, 0) };
             ExecutionTicket ticket;
             try { ticket = authority.Admit(leaseId, authority.PublishedRevision, effects); }
             catch (InvalidOperationException error) { return RefuseAdmission(request, MapAdmission(error.Message), error.Message == "authority_unavailable" ? null : error.Message, leaseId); }
@@ -132,7 +132,7 @@ namespace KspControl.Bridge
             if (!flight.InFlight) return Refuse(request, AutopilotReasons.FlightUnavailable, "not in the flight scene");
             var telemetry = flight.Read();
             if (telemetry == null) return Refuse(request, AutopilotReasons.FlightUnavailable, "there is no active vessel");
-            if (!string.Equals(leaseEntity, AutopilotOperations.EntityPrefix + telemetry.VesselId, StringComparison.Ordinal))
+            if (!string.Equals(leaseEntity, FlightEffects.EntityPrefix + telemetry.VesselId, StringComparison.Ordinal))
                 return Refuse(request, AutopilotReasons.VesselChanged, "the lease is bound to another vessel than the active one; acquire a new lease");
 
             var job = new AutopilotJob

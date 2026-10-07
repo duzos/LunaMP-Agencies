@@ -5,20 +5,15 @@ namespace KspControl.Contracts
 {
     /// <summary>
     /// The MechJeb autopilot family. One grant operation (<see cref="Effect"/>) covers every mutation below; the status reads need no lease.
-    /// The entity is the flight scene, not a vessel: the bridge binds each job to the vessel that was active at admission and ends the job if that changes.
+    /// The lease entity is the active vessel ("vessel:<guid>"): the bridge binds each job to that vessel at admission and ends the job if it changes.
     /// </summary>
     public static class AutopilotOperations
     {
         /// <summary>The grant operation family listed in the grant's operations. The bridge classifies every mutation below as this effect.</summary>
         public const string Effect = "flight.autopilot";
         // Same flight lease model as the other flight tools: the grant's FLIGHT facility selects flight, the lease entity is "vessel:<guid>" of the
-        // active vessel (so a vessel switch revokes the lease), and the grant maps the facility to the wildcard "vessel:*".
-        /// <summary>The grant facility that selects flight.</summary>
-        public const string Facility = "FLIGHT";
-        public const string EntityPrefix = "vessel:";
-        public const string EntityWildcard = "vessel:*";
-        /// <summary>The journal entity the host uses for every flight mutation.</summary>
-        public const string JournalEntity = "flight:vessel";
+        // active vessel (so a vessel switch revokes the lease), and the grant maps the facility to the wildcard "vessel:*". The facility, entity
+        // prefix/wildcard and journal entity are FlightEffects' constants: one lease model, one definition.
 
         public const string MechJebStatus = "mechjeb.status";
         public const string Status = "flight.autopilot_status";

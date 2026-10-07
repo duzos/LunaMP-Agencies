@@ -122,7 +122,7 @@ namespace KspControl.BridgeTests
 
     internal sealed class FlightContextSource : IEditorContextSource
     {
-        public string Epoch = "epoch1", Entity = AutopilotOperations.EntityPrefix + "vessel-1";
+        public string Epoch = "epoch1", Entity = FlightEffects.EntityPrefix + "vessel-1";
         public bool Ready = true;
         public LeaseContext CurrentContext() { return new LeaseContext(Epoch, Entity, 0, Ready); }
         public GrantBinding CurrentBinding() { return AuthorityHelpers.Bind(); }
@@ -157,7 +157,7 @@ namespace KspControl.BridgeTests
             Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options);
             Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc);
             Authority.UpdateContext(Context.CurrentContext(), Context.CurrentBinding(), AuthorityHelpers.ValidStatus());
-            Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect }, facilities ?? new[] { AutopilotOperations.Facility })));
+            Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect }, facilities ?? new[] { FlightEffects.Facility })));
             if (lease) AcquireLease();
         }
 

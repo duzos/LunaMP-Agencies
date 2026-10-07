@@ -41,9 +41,19 @@ namespace LmpCommon.Time
         private static void RefreshTimeDifference()
         {
             //In case we run several servers/clients we use a OS level mutex to avoid being kicked from the servers if we make too many requests
+            // Runs on a timer thread: any escaping exception would terminate the whole process.
+            try { RefreshTimeDifferenceUnsafe(); }
+            catch (Exception)
+            {
+                // ignored: keep the previous time difference and try again on the next tick
+            }
+        }
+
+        private static void RefreshTimeDifferenceUnsafe()
+        {
             using (var timeMutex = new Mutex(true, "LunaTimeMutex", out var createdNew))
             {
-                if (createdNew || timeMutex.WaitOne(10))
+                if (createdNew || TryWait(timeMutex))
                 {
                     //We OWN the mutex!
                     try
@@ -69,6 +79,16 @@ namespace LmpCommon.Time
                     Timer.Change(5500, TimeSyncIntervalMs);
                 }
             }
+        }
+
+        /// <summary>
+        /// Waits briefly for the OS-wide time mutex. An abandoned mutex (its previous owner was killed while holding it)
+        /// is acquired by this thread, so it counts as owned.
+        /// </summary>
+        public static bool TryWait(Mutex mutex)
+        {
+            try { return mutex.WaitOne(10); }
+            catch (AbandonedMutexException) { return true; }
         }
     }
 }

@@ -37,20 +37,28 @@ namespace KspControl.Bridge
         public bool? TechAvailable { get; set; }
         /// <summary>Null when ResearchAndDevelopment is absent (sandbox).</summary>
         public bool? ModelPurchased { get; set; }
-        /// <summary>Effective default-variant stack nodes: AvailablePart.variant.AttachNodes when present, else the prefab attach nodes.</summary>
+        /// <summary>Prefab stack nodes (the base layer). Only stack-type nodes belong here.</summary>
         public IList<CatalogNodeSource> StackNodes { get; set; } = new List<CatalogNodeSource>();
-        public bool StackNodesFromVariant { get; set; }
+        /// <summary>
+        /// Stack nodes the default variant supplies, or null when there is no variant. The variant list is an override: it may be empty
+        /// (texture-only variant) or hold only the nodes that move, so it is overlaid on the prefab nodes by id, never used alone.
+        /// </summary>
+        public IList<CatalogNodeSource> VariantStackNodes { get; set; }
         public string VariantName { get; set; }
-        /// <summary>Total attach nodes before the bridge's own cap, so truncation can be detected.</summary>
-        public int RawStackNodeCount { get; set; }
+        /// <summary>Variant surface node when the variant defines one, else null (the prefab one applies).</summary>
+        public CatalogNodeSource VariantSurfaceNode { get; set; }
+        /// <summary>Variant attach rules when the variant defines them, else null (the prefab ones apply).</summary>
+        public CatalogAttachRulesSource VariantAttachRules { get; set; }
         public CatalogNodeSource SurfaceNode { get; set; }
         public CatalogAttachRulesSource AttachRules { get; set; } = new CatalogAttachRulesSource();
     }
 
     public interface ICatalogPartReader
     {
-        /// <summary>True when ResearchAndDevelopment is live; false means sandbox (every part is treated as allowed and the response says so).</summary>
+        /// <summary>True when ResearchAndDevelopment.Instance exists.</summary>
         bool ResearchAvailable { get; }
+        /// <summary>True only when the current game mode is SANDBOX (HighLogic.CurrentGame.Mode). Career/science without R&D is unreadable, not sandbox.</summary>
+        bool SandboxMode { get; }
         /// <summary>Null when no loaded part has this name.</summary>
         CatalogPartSource Read(string partName);
     }
@@ -86,7 +94,7 @@ namespace KspControl.Bridge
     /// <summary>Pure mapping from loaded-part primitives to the construction catalog wire shape. No Unity or KSP types.</summary>
     public static class ConstructionCatalogMapper
     {
-        // Category vocabulary is the EditorModel one (PartCategories). booster, nosecone and parachute are not supported there, so they map to "other".
+        // Category vocabulary is the EditorModel one (PartCategories). nosecone and parachute are not supported there, so they map to "other"; a solid booster is an engine.
         public const string Command = "command", Tank = "tank", Engine = "engine", Decoupler = "decoupler", Other = "other";
         public const int MaxNodes = 32;
 
@@ -133,40 +141,45 @@ namespace KspControl.Bridge
             foreach (var name in names)
             {
                 var source = reader.Read(name);
-                parts.Add(source == null ? new JObject { ["name"] = name, ["found"] = false } : Describe(source, reader.ResearchAvailable, policy));
+                parts.Add(source == null ? new JObject { ["name"] = name, ["found"] = false } : Describe(source, reader.ResearchAvailable, reader.SandboxMode, policy));
             }
             return new JObject
             {
                 ["requested"] = names.Count,
-                ["researchAndDevelopment"] = reader.ResearchAvailable ? "available" : "absent_sandbox_allowed",
+                ["researchAndDevelopment"] = reader.ResearchAvailable ? "available" : reader.SandboxMode ? "absent_sandbox_allowed" : "unreadable",
                 ["nodeFrame"] = "part_local_default_variant",
                 ["parts"] = parts
             };
         }
 
-        private static JObject Describe(CatalogPartSource part, bool researchAvailable, ConstructionSupportPolicy policy)
+        private static JObject Describe(CatalogPartSource part, bool researchAvailable, bool sandbox, ConstructionSupportPolicy policy)
         {
             var problems = new JArray();
-            var nodes = new JArray(); var ids = new HashSet<string>(StringComparer.Ordinal);
-            if (part.RawStackNodeCount > MaxNodes) problems.Add("node_count_over_" + MaxNodes);
-            foreach (var node in part.StackNodes ?? new List<CatalogNodeSource>())
+            var merged = Overlay(part.StackNodes, part.VariantStackNodes);
+            var nodes = new JArray(); var ids = new HashSet<string>(StringComparer.Ordinal); bool overlaid = false;
+            if (merged.Count > MaxNodes) problems.Add("node_count_over_" + MaxNodes);
+            foreach (var entry in merged)
             {
+                var node = entry.Node;
                 if (nodes.Count >= MaxNodes) break;
                 if (node == null || string.IsNullOrEmpty(node.Id) || !Finite3(node.Position) || !Finite3(node.Orientation)) { problems.Add("invalid_node"); continue; }
                 if (!ids.Add(node.Id)) { problems.Add("duplicate_node_id"); continue; }
-                nodes.Add(NodeJson(node, true));
+                var json = NodeJson(node, true); json["nodeSource"] = entry.FromVariant ? "variant_overlay" : "prefab";
+                overlaid |= entry.FromVariant;
+                nodes.Add(json);
             }
             JToken surface = JValue.CreateNull();
-            var rules = part.AttachRules ?? new CatalogAttachRulesSource();
-            if (part.SurfaceNode != null)
+            var rules = part.VariantAttachRules ?? part.AttachRules ?? new CatalogAttachRulesSource();
+            var srfNode = part.VariantSurfaceNode ?? part.SurfaceNode;
+            if (srfNode != null)
             {
-                if (Finite3(part.SurfaceNode.Position) && Finite3(part.SurfaceNode.Orientation)) surface = NodeJson(part.SurfaceNode, false);
+                if (Finite3(srfNode.Position) && Finite3(srfNode.Orientation)) { var j = NodeJson(srfNode, false); j["nodeSource"] = part.VariantSurfaceNode != null ? "variant_overlay" : "prefab"; surface = j; }
                 else problems.Add("invalid_surface_node");
             }
             bool allowed;
             string basis;
             if (researchAvailable && part.TechAvailable.HasValue && part.ModelPurchased.HasValue) { allowed = part.TechAvailable.Value && part.ModelPurchased.Value; basis = "tech_and_model_purchased"; }
-            else if (!researchAvailable) { allowed = true; basis = "research_absent_sandbox"; }
+            else if (!researchAvailable && sandbox) { allowed = true; basis = "research_absent_sandbox"; }
             else { allowed = false; basis = "research_state_unreadable"; }
             bool verified = policy.IsVerified(part.Name) && problems.Count == 0;
             var result = new JObject
@@ -181,7 +194,7 @@ namespace KspControl.Bridge
                 ["techAvailable"] = part.TechAvailable.HasValue ? (JToken)new JValue(part.TechAvailable.Value) : JValue.CreateNull(),
                 ["modelPurchased"] = part.ModelPurchased.HasValue ? (JToken)new JValue(part.ModelPurchased.Value) : JValue.CreateNull(),
                 ["constructionSupport"] = verified ? "verified" : "unverified",
-                ["nodeSource"] = part.StackNodesFromVariant ? "variant" : "prefab",
+                ["nodeSource"] = overlaid ? "variant_overlay" : "prefab",
                 ["variant"] = part.VariantName,
                 ["stackNodes"] = nodes,
                 ["surfaceNode"] = surface,
@@ -192,6 +205,28 @@ namespace KspControl.Bridge
                 }
             };
             if (problems.Count != 0) result["problems"] = problems;
+            return result;
+        }
+
+        private struct MergedNode { public CatalogNodeSource Node; public bool FromVariant; }
+
+        /// <summary>Prefab nodes in prefab order, each replaced by the variant node with the same id; variant-only ids follow. A null or empty variant list changes nothing.</summary>
+        private static List<MergedNode> Overlay(IList<CatalogNodeSource> prefab, IList<CatalogNodeSource> variant)
+        {
+            var result = new List<MergedNode>();
+            var overrides = new Dictionary<string, CatalogNodeSource>(StringComparer.Ordinal);
+            if (variant != null) foreach (var v in variant) if (v != null && v.Id != null && !overrides.ContainsKey(v.Id)) overrides[v.Id] = v;
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var p in prefab ?? new List<CatalogNodeSource>())
+            {
+                CatalogNodeSource over;
+                if (p != null && p.Id != null && overrides.TryGetValue(p.Id, out over)) { result.Add(new MergedNode { Node = over, FromVariant = true }); used.Add(p.Id); }
+                else result.Add(new MergedNode { Node = p, FromVariant = false });
+            }
+            if (variant != null)
+                foreach (var v in variant)
+                    if (v == null || v.Id == null) result.Add(new MergedNode { Node = v, FromVariant = true });
+                    else if (!used.Contains(v.Id) && overrides[v.Id] == v) { result.Add(new MergedNode { Node = v, FromVariant = true }); used.Add(v.Id); }
             return result;
         }
 

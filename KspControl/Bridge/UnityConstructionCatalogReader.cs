@@ -13,6 +13,8 @@ namespace KspControl.Bridge
     internal sealed class UnityConstructionCatalogReader : ICatalogPartReader
     {
         public bool ResearchAvailable { get { return ResearchAndDevelopment.Instance != null; } }
+        // Sandbox means the game mode, not "no R&D instance": a career or science save without R&D is unreadable, not allowed.
+        public bool SandboxMode { get { return HighLogic.CurrentGame != null && HighLogic.CurrentGame.Mode == Game.Modes.SANDBOX; } }
 
         public CatalogPartSource Read(string partName)
         {
@@ -20,15 +22,12 @@ namespace KspControl.Bridge
             if (info == null || info.partPrefab == null) return null;
             var prefab = info.partPrefab;
             var variant = info.variant;
-            var rawNodes = variant != null && variant.AttachNodes != null ? variant.AttachNodes : prefab.attachNodes;
             var source = new CatalogPartSource
             {
                 Name = info.name,
                 KspCategory = info.category.ToString(),
                 Buildable = PartFilters.IsBuildable(info.category == PartCategories.none, info.TechRequired, info.TechHidden),
-                StackNodesFromVariant = variant != null && variant.AttachNodes != null,
-                VariantName = variant == null ? null : variant.Name,
-                RawStackNodeCount = rawNodes == null ? 0 : rawNodes.Count
+                VariantName = variant == null ? null : variant.Name
             };
             if (ResearchAvailable)
             {
@@ -37,19 +36,31 @@ namespace KspControl.Bridge
             }
             foreach (PartModule module in prefab.Modules) if (module != null && source.ModuleNames.Count < 128) source.ModuleNames.Add(module.moduleName);
             foreach (PartResource resource in prefab.Resources) if (resource != null && source.ResourceNames.Count < 32) source.ResourceNames.Add(resource.resourceName);
-            foreach (var node in rawNodes ?? new List<AttachNode>())
+            // Prefab nodes are the base layer. The default variant's list is an override (possibly empty), overlaid by id in the mapper.
+            AddStackNodes(source.StackNodes, prefab.attachNodes);
+            if (variant != null && variant.AttachNodes != null)
             {
-                if (node == null || node.nodeType != AttachNode.NodeType.Stack) continue;
-                source.StackNodes.Add(Convert(node.id, node.position, node.orientation, node.size));
+                source.VariantStackNodes = new List<CatalogNodeSource>();
+                AddStackNodes(source.VariantStackNodes, variant.AttachNodes);
             }
             var rules = prefab.attachRules;
-            if (rules != null)
-                source.AttachRules = new CatalogAttachRulesSource { Stack = rules.stack, Srf = rules.srfAttach, AllowStack = rules.allowStack,
-                    AllowSrf = rules.allowSrfAttach, AllowCollision = rules.allowCollision, AllowDock = rules.allowDock };
+            if (rules != null) source.AttachRules = Rules(rules);
             // The prefab srfAttachNode keeps a default nodeType; real capability lives in attachRules.srfAttach.
             if (prefab.srfAttachNode != null && rules != null && rules.srfAttach)
                 source.SurfaceNode = Convert("srfAttach", prefab.srfAttachNode.position, prefab.srfAttachNode.orientation, prefab.srfAttachNode.size);
             return source;
+        }
+
+        private static void AddStackNodes(IList<CatalogNodeSource> into, List<AttachNode> nodes)
+        {
+            foreach (var node in nodes ?? new List<AttachNode>())
+                if (node != null && node.nodeType == AttachNode.NodeType.Stack) into.Add(Convert(node.id, node.position, node.orientation, node.size));
+        }
+
+        private static CatalogAttachRulesSource Rules(AttachRules rules)
+        {
+            return new CatalogAttachRulesSource { Stack = rules.stack, Srf = rules.srfAttach, AllowStack = rules.allowStack,
+                AllowSrf = rules.allowSrfAttach, AllowCollision = rules.allowCollision, AllowDock = rules.allowDock };
         }
 
         private static CatalogNodeSource Convert(string id, UnityEngine.Vector3 position, UnityEngine.Vector3 orientation, int size)

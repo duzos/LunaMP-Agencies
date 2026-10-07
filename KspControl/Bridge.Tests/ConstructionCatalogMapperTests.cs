@@ -12,6 +12,7 @@ namespace KspControl.BridgeTests
         private sealed class FakeReader : ICatalogPartReader
         {
             public bool ResearchAvailable { get; set; }
+            public bool SandboxMode { get; set; }
             public readonly Dictionary<string, CatalogPartSource> Parts = new Dictionary<string, CatalogPartSource>(StringComparer.Ordinal);
             public readonly List<string> Reads = new List<string>();
             public CatalogPartSource Read(string name) { Reads.Add(name); CatalogPartSource p; return Parts.TryGetValue(name, out p) ? p : null; }
@@ -22,7 +23,7 @@ namespace KspControl.BridgeTests
         private static CatalogPartSource Part(string name, string[] modules, string[] resources, params CatalogNodeSource[] nodes) => new CatalogPartSource
         {
             Name = name, KspCategory = "Propulsion", Buildable = true, TechAvailable = true, ModelPurchased = true,
-            ModuleNames = modules, ResourceNames = resources, StackNodes = nodes, RawStackNodeCount = nodes.Length,
+            ModuleNames = modules, ResourceNames = resources, StackNodes = nodes,
             AttachRules = new CatalogAttachRulesSource { Stack = true, AllowStack = true, Srf = false, AllowSrf = true, AllowCollision = false, AllowDock = false }
         };
 
@@ -83,7 +84,7 @@ namespace KspControl.BridgeTests
 
         [TestMethod] public void SandboxWithoutResearchTreatsPartsAsAllowedAndSaysSo()
         {
-            var reader = Stock(); reader.ResearchAvailable = false;
+            var reader = Stock(); reader.ResearchAvailable = false; reader.SandboxMode = true;
             foreach (var p in reader.Parts.Values) { p.TechAvailable = null; p.ModelPurchased = null; }
             var json = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null);
             Assert.AreEqual("absent_sandbox_allowed", (string)json["researchAndDevelopment"]);
@@ -100,6 +101,55 @@ namespace KspControl.BridgeTests
             var part = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null)["parts"][0];
             Assert.AreEqual(expected, (bool)part["partsStockAllowed"]);
             Assert.AreEqual(tech, (bool)part["techAvailable"]); Assert.AreEqual(purchased, (bool)part["modelPurchased"]);
+        }
+
+        [TestMethod] public void CareerOrScienceWithoutResearchIsUnreadableAndNotAllowed()
+        {
+            var reader = Stock(); reader.ResearchAvailable = false; reader.SandboxMode = false;
+            foreach (var p in reader.Parts.Values) { p.TechAvailable = null; p.ModelPurchased = null; }
+            var json = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null);
+            Assert.AreEqual("unreadable", (string)json["researchAndDevelopment"]);
+            Assert.IsFalse((bool)json["parts"][0]["partsStockAllowed"]); Assert.AreEqual("research_state_unreadable", (string)json["parts"][0]["stockAllowedBasis"]);
+        }
+
+        [TestMethod] public void EmptyVariantListKeepsEveryPrefabNode()
+        {
+            var reader = Stock(); var tank = reader.Parts["fuelTankSmall"]; tank.VariantStackNodes = new CatalogNodeSource[0]; tank.VariantName = "Orange";
+            var part = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null)["parts"][0];
+            var nodes = (JArray)part["stackNodes"];
+            CollectionAssert.AreEqual(new[] { "top", "bottom" }, nodes.Select(n => (string)n["id"]).ToArray());
+            Assert.IsTrue(nodes.All(n => (string)n["nodeSource"] == "prefab")); Assert.AreEqual("prefab", (string)part["nodeSource"]);
+            Assert.AreEqual(0.55525, (double)nodes[0]["position"][1], 1e-6);
+        }
+
+        [TestMethod] public void OneMovedVariantNodeOverlaysAndTheOthersAreKept()
+        {
+            var reader = Stock(); var tank = reader.Parts["fuelTankSmall"]; tank.VariantStackNodes = new[] { N("bottom", -0.7, -1) };
+            var part = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null)["parts"][0];
+            var nodes = (JArray)part["stackNodes"];
+            CollectionAssert.AreEqual(new[] { "top", "bottom" }, nodes.Select(n => (string)n["id"]).ToArray(), "prefab order is kept");
+            Assert.AreEqual(0.55525, (double)nodes[0]["position"][1], 1e-6); Assert.AreEqual("prefab", (string)nodes[0]["nodeSource"]);
+            Assert.AreEqual(-0.7, (double)nodes[1]["position"][1], 1e-9); Assert.AreEqual("variant_overlay", (string)nodes[1]["nodeSource"]);
+            Assert.AreEqual("variant_overlay", (string)part["nodeSource"]);
+        }
+
+        [TestMethod] public void VariantOnlyNodeIsAppendedAndVariantSurfaceNodeWins()
+        {
+            var reader = Stock(); var tank = reader.Parts["fuelTankSmall"];
+            tank.SurfaceNode = new CatalogNodeSource { Id = "srfAttach", Position = new[] { 0.5, 0.0, 0.0 }, Orientation = new[] { 1.0, 0.0, 0.0 } };
+            tank.VariantSurfaceNode = new CatalogNodeSource { Id = "srfAttach", Position = new[] { 0.7, 0.0, 0.0 }, Orientation = new[] { 1.0, 0.0, 0.0 } };
+            tank.VariantStackNodes = new[] { N("extra", 0.1, 1) };
+            var part = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null)["parts"][0];
+            CollectionAssert.AreEqual(new[] { "top", "bottom", "extra" }, ((JArray)part["stackNodes"]).Select(n => (string)n["id"]).ToArray());
+            Assert.AreEqual(0.7, (double)part["surfaceNode"]["position"][0], 1e-9); Assert.AreEqual("variant_overlay", (string)part["surfaceNode"]["nodeSource"]);
+        }
+
+        [TestMethod] public void VariantAttachRulesOverridePrefabRulesWhenPresent()
+        {
+            var reader = Stock(); var tank = reader.Parts["fuelTankSmall"];
+            tank.VariantAttachRules = new CatalogAttachRulesSource { Stack = true, AllowStack = false, AllowSrf = false };
+            var rules = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null)["parts"][0]["attachRules"];
+            Assert.IsFalse((bool)rules["allowStack"]); Assert.IsFalse((bool)rules["allowSrf"]);
         }
 
         [TestMethod] public void UnreadableResearchStateIsNotAllowed()
@@ -123,16 +173,17 @@ namespace KspControl.BridgeTests
         {
             var reader = Stock(); var tank = reader.Parts["fuelTankSmall"];
             tank.SurfaceNode = new CatalogNodeSource { Id = "srfAttach", Position = new[] { 0.625, 0.0, 0.0 }, Orientation = new[] { 1.0, 0.0, 0.0 } };
-            tank.StackNodesFromVariant = true; tank.VariantName = "Basic";
+            tank.VariantStackNodes = new[] { N("top", 0.6, 1) }; tank.VariantName = "Basic";
             var part = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, null)["parts"][0];
-            Assert.AreEqual("variant", (string)part["nodeSource"]); Assert.AreEqual("Basic", (string)part["variant"]);
+            Assert.AreEqual("variant_overlay", (string)part["nodeSource"]); Assert.AreEqual("Basic", (string)part["variant"]);
             Assert.AreEqual(0.625, (double)part["surfaceNode"]["position"][0], 1e-9);
-            Assert.IsNull(part["surfaceNode"]["id"]);
+            Assert.IsNull(part["surfaceNode"]["id"]); Assert.AreEqual("prefab", (string)part["surfaceNode"]["nodeSource"]);
         }
 
         [TestMethod] public void NodeCountOverTheCapIsFlagged()
         {
-            var reader = Stock(); var tank = reader.Parts["fuelTankSmall"]; tank.RawStackNodeCount = ConstructionCatalogMapper.MaxNodes + 1;
+            var reader = Stock(); var tank = reader.Parts["fuelTankSmall"];
+            tank.StackNodes = Enumerable.Range(0, ConstructionCatalogMapper.MaxNodes + 1).Select(i => N("n" + i, i, 1)).ToArray();
             var part = ConstructionCatalogMapper.Build(new[] { "fuelTankSmall" }, reader, new ConstructionSupportPolicy(new[] { "fuelTankSmall" }))["parts"][0];
             Assert.AreEqual("unverified", (string)part["constructionSupport"]);
         }

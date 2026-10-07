@@ -29,6 +29,13 @@ public sealed partial class MutationService
  private void SettleLaunch(ControlJournal j,Job job,JObject reply,string terminal,string why,string text)
  {
   var data=reply["Data"] as JObject; decimal charge=0m;
+  if(job.Status=="indeterminate")
+  {
+   // A job the host marked indeterminate is settled only from the bridge's own envelope for this very request: completed (charge recorded),
+   // or cancelled/failed once the refund is confirmed or the launch provably never ran. Anything else leaves the reservation held.
+   if(terminal=="indeterminate" || (string?)data?["requestId"]!=job.RequestId) return;
+   if(terminal!="completed" && (bool?)data?["refundConfirmed"]!=true && (bool?)data?["notDispatched"]!=true) return;
+  }
   if(terminal=="completed")
   {
    // The bridge reports what the server charged. Without it the whole reservation is assumed spent, never less.

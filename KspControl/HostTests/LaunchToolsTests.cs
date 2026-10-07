@@ -22,7 +22,7 @@ namespace KspControl.HostTests;
  private static JObject StatusData(long? spend,params string[] operations)
  {
   var grant=new JObject { ["state"]="valid",["id"]="grant-1",["generation"]=3,["operations"]=new JArray(operations.Length==0 ? new[]{ OperationEffects.Launch } : operations),["facilities"]=new JArray("VAB"),["expiresUtc"]="2099-01-01T00:00:00.000Z" };
-  if(spend.HasValue) grant["spendLimitFunds"]=spend.Value;
+  if(spend.HasValue) { grant["spendLimitFunds"]=spend.Value; grant["effectiveSpendCap"]=spend.Value; }
   return new JObject { ["grant"]=grant,["lease"]=new JObject { ["held"]=false },["cooldownSeconds"]=0 };
  }
  private static BridgeResponse Running(string requestId)=>new() { Status="running",Data=new JObject { ["operation"]="launch",["requestId"]=requestId,["phase"]="await_flight",["notDispatched"]=false } };
@@ -154,7 +154,8 @@ namespace KspControl.HostTests;
   var rig=await Acquire(8000);
   using var shortWait=new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
   var first=JObject.Parse(await rig.Tools.EditorLaunch("launch-0001",Lease,Token,"LaunchPad",5000,shortWait.Token));
-  Assert.AreEqual("running",(string?)first["Status"]); Assert.AreEqual((0m,5000m),Spend(rig),"reserved while running");
+  // The short wait may end on a cancelled poll, which is reported as that poll's failure; what matters is that the launch has not completed and its reservation is held.
+  Assert.AreNotEqual("completed",(string?)first["Status"],first.ToString()); Assert.AreEqual((0m,5000m),Spend(rig),"reserved while running");
   finished=true;
   var status=JObject.Parse(await new MutationTools(rig.Service).JobStatus("launch-0001",5));
   Assert.AreEqual("completed",(string?)status["Status"],status.ToString());
@@ -183,6 +184,89 @@ namespace KspControl.HostTests;
   using var bridge=new FakeBridge(r=>Control(r,8000,x=>Done(RequestIdOf(x),5300.4))); var rig=await Acquire(8000);
   Assert.AreEqual("completed",(string?)(await Launch(rig,max:5000))["Status"]);
   Assert.AreEqual((5300.4m,0m),Spend(rig)); rig.Journal.Dispose();
+ }
+
+ // ---- indeterminate launches settle from the bridge's own envelope ----
+
+ private static BridgeResponse Env(string status,string requestId,string? reason=null,bool? refund=null,bool notDispatched=false,double? charge=null)
+ {
+  var data=new JObject { ["operation"]="launch",["requestId"]=requestId,["phase"]="done",["notDispatched"]=notDispatched };
+  if(refund.HasValue) data["refundConfirmed"]=refund.Value; if(charge.HasValue) data["charge"]=charge.Value;
+  return new BridgeResponse { Status=status,ReasonCode=reason,Data=data };
+ }
+
+ [TestMethod] public async Task AnIndeterminateLaunchSettlesAsCompletedFromTheBridgesOwnEnvelope()
+ {
+  BridgeResponse? status=null;
+  using var bridge=new FakeBridge(r=>Control(r,8000,x=> x.Operation==EditorOperations.Launch ? FakeBridge.Fail("bridge_unreachable") : status!));
+  var rig=await Acquire(8000);
+  Assert.AreEqual("indeterminate",(string?)(await Launch(rig,max:5000))["Status"]);
+  status=Env("completed","launch-0001",charge:1300);
+  var result=JObject.Parse(await new MutationTools(rig.Service).JobStatus("launch-0001",2));
+  Assert.AreEqual("completed",(string?)result["Status"]); Assert.AreEqual((1300m,0m),Spend(rig)); Assert.AreEqual("completed",rig.Journal.TryGet()!.Get("launch-0001").Status);
+  rig.Journal.Dispose();
+ }
+
+ [TestMethod] public async Task AnIndeterminateLaunchReleasesOnlyOnAConfirmedRefundOrProofItNeverRan()
+ {
+  BridgeResponse? status=null;
+  using var bridge=new FakeBridge(r=>Control(r,8000,x=> x.Operation==EditorOperations.Launch ? FakeBridge.Fail("bridge_unreachable") : status!));
+  var rig=await Acquire(8000);
+  Assert.AreEqual("indeterminate",(string?)(await Launch(rig,max:5000))["Status"]);
+  status=Env("cancelled","launch-0001","authority_revoked",refund:false);
+  await new MutationTools(rig.Service).JobStatus("launch-0001",2);
+  Assert.AreEqual((0m,5000m),Spend(rig),"an unconfirmed refund keeps the hold");
+  status=Env("cancelled","launch-0001","authority_revoked",refund:true);
+  await new MutationTools(rig.Service).JobStatus("launch-0001",2);
+  Assert.AreEqual((0m,0m),Spend(rig)); Assert.AreEqual("cancelled",rig.Journal.TryGet()!.Get("launch-0001").Status);
+  rig.Journal.Dispose();
+ }
+
+ [TestMethod] public async Task AnEnvelopeForAnotherRequestOrAStillIndeterminateOneNeverSettles()
+ {
+  BridgeResponse? status=null;
+  using var bridge=new FakeBridge(r=>Control(r,8000,x=> x.Operation==EditorOperations.Launch ? FakeBridge.Fail("bridge_unreachable") : status!));
+  var rig=await Acquire(8000);
+  Assert.AreEqual("indeterminate",(string?)(await Launch(rig,max:5000))["Status"]);
+  status=Env("completed","launch-9999",charge:1);
+  await new MutationTools(rig.Service).JobStatus("launch-0001",2);
+  status=Env("indeterminate","launch-0001","disconnected");
+  await new MutationTools(rig.Service).JobStatus("launch-0001",2);
+  Assert.AreEqual((0m,5000m),Spend(rig)); Assert.AreEqual("indeterminate",rig.Journal.TryGet()!.Get("launch-0001").Status);
+  rig.Journal.Dispose();
+ }
+
+ [TestMethod] public async Task ANotDispatchedFailureReleasesAnIndeterminateHold()
+ {
+  BridgeResponse? status=null;
+  using var bridge=new FakeBridge(r=>Control(r,8000,x=> x.Operation==EditorOperations.Launch ? FakeBridge.Fail("bridge_unreachable") : status!));
+  var rig=await Acquire(8000);
+  Assert.AreEqual("indeterminate",(string?)(await Launch(rig,max:5000))["Status"]);
+  status=Env("failed","launch-0001","launch_not_started",notDispatched:true);
+  await new MutationTools(rig.Service).JobStatus("launch-0001",2);
+  Assert.AreEqual((0m,0m),Spend(rig)); rig.Journal.Dispose();
+ }
+
+ // ---- the standing cap the bridge reports ----
+
+ private static JObject StatusWithCap(long spend,long? effective,params string[] operations)
+ {
+  var data=StatusData(spend,operations); var grant=(JObject)data["grant"]!; grant.Remove("effectiveSpendCap"); if(effective.HasValue) grant["effectiveSpendCap"]=effective.Value; return data;
+ }
+
+ [TestMethod] public async Task TheHostUsesTheSmallerOfTheSignedLimitAndTheBridgesStandingCap()
+ {
+  using var bridge=new FakeBridge(r=>r.Operation switch { ControlOperations.Acquire=>FakeBridge.Ok(Acquired()), ControlOperations.Status=>FakeBridge.Ok(StatusWithCap(90000,20000)), _=>Done(RequestIdOf(r),100,released:false) });
+  var rig=await Acquire(90000);
+  Assert.AreEqual("spend_cap_exceeded",(string?)(await Launch(rig,max:20001))["ReasonCode"]);
+  Assert.AreEqual("completed",(string?)(await Launch(rig,"launch-0002",20000))["Status"]); rig.Journal.Dispose();
+ }
+
+ [TestMethod] public async Task ALaunchGrantWithoutAStandingCapAuthorisesNothing()
+ {
+  using var bridge=new FakeBridge(r=>r.Operation switch { ControlOperations.Acquire=>FakeBridge.Ok(Acquired()), ControlOperations.Status=>FakeBridge.Ok(StatusWithCap(90000,null)), _=>Done(RequestIdOf(r),100) });
+  var rig=await Acquire(90000);
+  Assert.AreEqual("spend_cap_exceeded",(string?)(await Launch(rig,max:1))["ReasonCode"]); Assert.AreEqual(0,LaunchCalls(bridge)); rig.Journal.Dispose();
  }
 
  // ---- the lease after the launch ----

@@ -94,10 +94,17 @@ public sealed class ControlJournal : IDisposable
   if(status is not ("completed" or "failed" or "cancelled" or "indeterminate") || charged<0) throw new ArgumentException("invalid_status");
   lock(gate)
   {
-   var job=Get(id); if(job.Status is not ("accepted" or "running")) throw new InvalidOperationException("not_in_flight");
+   // An indeterminate job may be settled once, by the caller's proof that the bridge's own envelope for this request id now says what happened.
+   var job=Get(id); if(job.Status is not ("accepted" or "running" or "indeterminate")) throw new InvalidOperationException("not_in_flight");
    if(charged>0 && status!="indeterminate") AddCharge(job.GrantId,charged);
    return Set(job with { Status=status,Reason=reason,Result=result.Length>MaxResult ? "" : result });
   }
+ }
+ /// <summary>Sets the spending limit of the provisioned grant (same id and generation). The bridge fixes the live cap at the first acquire, which can be after the grant was first mirrored.</summary>
+ public void SetSpendingLimit(string grantId,long generation,decimal limit)
+ {
+  if(limit<0) throw new ArgumentException("invalid_limit");
+  lock(gate) { if(grants.TryGetValue(grantId,out var held) && held.Generation==generation) grants[grantId]=held with { SpendingLimit=limit }; }
  }
  /// <summary>After a launch moved the bridge's lease to a new scene: adopt the bridge's new world epoch for the same lease so later requests stay admissible.</summary>
  public void RebaseLease(string leaseId,string newWorldEpoch)

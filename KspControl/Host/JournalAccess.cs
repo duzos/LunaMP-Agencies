@@ -47,9 +47,13 @@ public sealed class JournalAccess : IDisposable
    var entities=(grantInfo?["facilities"] as JArray)?.Select(t=>"editor:"+(string)t!).ToArray() ?? Array.Empty<string>();
    DateTimeOffset expires=DateTimeOffset.TryParse((string?)grantInfo?["expiresUtc"],out var parsed) ? parsed : DateTimeOffset.UtcNow.AddMinutes(5);
    // The cap is the human's: the bridge verified the signed grant and reports its spendLimitFunds. Absent means no spend is authorised.
+   // The live cap is the smaller of the signed limit and the bridge's standing cap (min(100000, 25% of the balance at the first acquire)); a grant that
+   // lists launch but has no standing cap yet (balance unknown) authorises nothing.
    decimal spendLimit=Math.Max(0,(long?)grantInfo?["spendLimitFunds"] ?? 0L);
+   if(operations.Contains("editor.launch",StringComparer.Ordinal)) spendLimit=Math.Min(spendLimit,Math.Max(0,(long?)grantInfo?["effectiveSpendCap"] ?? 0L));
    var reported=new MissionGrant(grantId,generation,"bridge_reported",expires,spendLimit,operations,entities);
    try { j.ProvisionGrant(reported); } catch(InvalidOperationException) { /* already mirrored in this run, or revoked here */ }
+   j.SetSpendingLimit(grantId,generation,spendLimit);
    lock(gate) currentGrant=reported;
    j.Revoke();
    j.Acquire(leaseId,(string?)data["purpose"]??"unspecified",epoch,DateTimeOffset.UtcNow,TimeSpan.FromSeconds(Math.Clamp(seconds,1,300)));

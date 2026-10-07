@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using KspControl.Contracts;
 using Newtonsoft.Json.Linq;
 
 namespace KspControl.Bridge
 {
-    internal sealed class Observations
+    internal sealed partial class Observations
     {
         private string epoch = Guid.NewGuid().ToString("N");
         private Game game;
@@ -48,6 +49,10 @@ namespace KspControl.Bridge
                 case "bridge.capabilities": data = Capabilities(); break;
                 case "game.context": data = Context(); break;
                 case "parts.list": data = Catalog(request.Arguments); break;
+                case "parts.definition": data = PartDefinition(request.Arguments); break;
+                case "editor.snapshot":
+                    if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) return Fail(request, "editor_unavailable");
+                    data = EditorSnapshot(EditorLogic.fetch.ship, request.Arguments); break;
                 case "editor.inspect":
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch == null || EditorLogic.fetch.ship == null) return Fail(request, "editor_unavailable");
                     var ship = EditorLogic.fetch.ship;
@@ -76,6 +81,8 @@ namespace KspControl.Bridge
             }
             data["observedAtUtc"] = DateTime.UtcNow.ToString("O");
             data["readOnly"] = true;
+            if (Encoding.UTF8.GetByteCount(data.ToString(Newtonsoft.Json.Formatting.None)) > 524288)
+                return Fail(request, "snapshot_size_limit_use_smaller_page");
             return new BridgeResponse { RequestId = request.RequestId, Status = "completed", WorldEpoch = epoch, Revision = ++revision, Data = data };
         }
         private BridgeResponse Fail(BridgeRequest request, string reason)
@@ -89,7 +96,7 @@ namespace KspControl.Bridge
         };
         private static JObject Capabilities() => new JObject
         {
-            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
+            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", "parts.definition", "editor.snapshot", "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
             ["unavailable"] = new JObject { ["mutations"] = "authority_and_job_execution_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },
             ["maximumPageSize"] = 50

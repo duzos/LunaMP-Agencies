@@ -48,6 +48,7 @@ namespace LmpClient.Base
         private static void PatchManualTargets()
         {
             DefaultDateTimeFormatterClamp.Install(HarmonyInstance);
+            SoftMaskGuard.Install(HarmonyInstance);
         }
 
         /// <summary>

@@ -258,6 +258,8 @@
     <Compile Include="Harmony\Strategy_Deactivate.cs" />
     <Compile Include="Harmony\Strategy_Activate.cs" />
     <Compile Include="Harmony\DefaultDateTimeFormatter_ClampDateInputs.cs" />
+    <Compile Include="Harmony\SoftMaskGuard.cs" />
+    <Compile Include="Harmony\UiFaultPolicy.cs" />
     <Compile Include="Harmony\TimeWarp_setMode.cs" />
     <Compile Include="Harmony\TimeWarp_setRate.cs" />
     <Compile Include="Harmony\TrackingStationWidget_Update.cs" />

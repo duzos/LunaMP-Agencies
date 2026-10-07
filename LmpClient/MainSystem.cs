@@ -141,6 +141,7 @@ namespace LmpClient
         {
             LunaLog.ProcessLogMessages();
             PlaytestDiagnostics.PumpUnitySnapshot();
+            LmpClient.Harmony.SoftMaskGuard.Pump();
             LunaScreenMsg.ProcessScreenMessages();
 
             //Heartbeat runs BEFORE the Enabled gate so it still emits when LMP

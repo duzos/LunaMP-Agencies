@@ -205,6 +205,29 @@ settle and grace timings, whether the control locks (and the separate `EditorLog
 and sentinel produce the stock overwrite prompt, the thumbnail naming (staging path or ship name), that `SaveShip` on an empty editor
 still carries `_modVersions`, and the crew and `ShipConstruct.SaveShip` header facts the snapshot records.
 
+## Load (editor_load_craft)
+
+`editor_load_craft(requestId, leaseId, expectedRevision, facility, fileName, expectedSha256, allowUpgrade=false)` loads an existing
+`Ships/<facility>/<fileName>` into the editor. It uses the same host path, lease and `editor.replace_craft` grant family as an apply.
+The human's file is never loaded in place, never rewritten and never gets a sidecar. In the runner's staging step the bridge:
+
+1. copies the file to `KspControlData/<save>/staging/kc-<requestId>.craft` and hash-checks the copy against `expectedSha256` (`file_changed`);
+2. checks link integrity on the text (`craft_invalid_links`), before any KSP code sees the file;
+3. loads two independent nodes from the copy and calls `KSPUpgradePipeline.Process(work, copy, LoadContext.Craft, onSuccess, onFail)`
+   synchronously on the main thread, never re-entrantly. Without `onSuccess` the job is `craft_upgrade_failed`: the `SaveUpgradeFail`
+   popup is dismissed, the `SaveUpgradeFailDialog` lock removed and both callbacks become no-ops;
+4. compares the untouched reference with the pipeline output. Any difference (or a changed header `version`) is `upgradedOnLoad`, listed
+   in `pipelineDifferences`; without `allowUpgrade` the job is refused `craft_requires_upgrade` with `notDispatched=true`; with it the
+   output is staged as `kc-<requestId>.upgraded.craft` and that is loaded (an unchanged craft loads the verified copy);
+5. pre-validates the craft to load: parts installed (`craft_parts_missing`, also `AllPartsFound`), and every `MODULE` name present on the
+   part prefab (`module_not_installed`).
+
+Then the standard runner: snapshot of a non-empty editor, dispatch, settle, verify (`comparison` = the staged craft against the editor's
+own `SaveShip`; reported, never a failure), locked grace, thumbnail settle. After grace the source, its `.original` and its `.loadmeta`
+are hashed again: a change to the source or `.original` fails the job `source_changed_during_load` (the editor keeps the loaded copy and
+the snapshot stays); a changed `.loadmeta` is reported. KSP's own save-name values are left as the load set them.
+`scriptsApplied` is `"unavailable"` unless the game reports it.
+
 ## Offline preview packaging
 
 `./KspControl/Build-Package.ps1` builds the bridge and publishes a self-contained

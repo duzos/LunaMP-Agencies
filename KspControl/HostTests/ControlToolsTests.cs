@@ -105,7 +105,7 @@ namespace KspControl.HostTests;
 {
  [TestMethod] public void ReadControlAndMutationAllowlistsAreDisjointAndMutationsAreExactlyApplyAndRestore()
  {
-  CollectionAssert.AreEquivalent(new[]{ "editor.apply_craft","editor.restore_snapshot" },BridgeClient.MutationOperations.ToArray());
+  CollectionAssert.AreEquivalent(new[]{ "editor.apply_craft","editor.restore_snapshot","editor.load_craft" },BridgeClient.MutationOperations.ToArray());
   Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ReadOperations)); Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ControlOperationSet));
   Assert.IsFalse(BridgeClient.ReadOperations.Overlaps(BridgeClient.ControlOperationSet)); Assert.IsFalse(BridgeClient.ReadOperations.Any(ControlOperations.IsControl));
   CollectionAssert.AreEquivalent(ControlOperations.All,BridgeClient.ControlOperationSet.ToArray());

@@ -20,7 +20,7 @@ namespace ServerTest.Agency
     [TestClass, DoNotParallelize]
     public class AgencyTradeTest
     {
-        private sealed class Fixture : IDisposable
+        internal sealed class Fixture : IDisposable
         {
             internal readonly AgencyEconomyTest.Fixture Economy = new AgencyEconomyTest.Fixture();
             private readonly bool oldTrade = GeneralSettings.SettingsStore.AgencyTrade;
@@ -104,7 +104,7 @@ namespace ServerTest.Agency
             }
         }
 
-        private static string Proto(Guid id, params uint[] parts) => "pid = " + id.ToString("N") + "\nname = Offered\nroot = 0\n" + string.Concat(parts.Select(uid => "PART\n{\nname = probe\nuid = " + uid + "\n}\n")) + string.Concat(new[] { "ORBIT", "ACTIONGROUPS", "DISCOVERY", "FLIGHTPLAN", "CTRLSTATE", "VESSELMODULES" }.Select(n => n + "\n{\n}\n"));
+        internal static string Proto(Guid id, params uint[] parts) => "pid = " + id.ToString("N") + "\nname = Offered\nroot = 0\n" + string.Concat(parts.Select(uid => "PART\n{\nname = probe\nuid = " + uid + "\n}\n")) + string.Concat(new[] { "ORBIT", "ACTIONGROUPS", "DISCOVERY", "FLIGHTPLAN", "CTRLSTATE", "VESSELMODULES" }.Select(n => n + "\n{\n}\n"));
 
         [DataTestMethod]
         [DataRow("VAB")]

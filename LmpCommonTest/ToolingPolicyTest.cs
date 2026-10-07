@@ -54,21 +54,98 @@ namespace LmpCommonTest
             Assert.AreEqual(1200d, ToolingPolicy.Quote(single, designs, Rates).ToolingCost);
         }
         [TestMethod]
-        public void RepeatedSubassemblyUsesHighestCostMatchingInstancesWithoutDoubleDiscount()
+        public void EachToolingDesignCoversAtMostOneInstancePerQuote()
         {
             var small = Craft(Part("a", 1));
             var result = ToolingPolicy.Quote(Craft(Part("a", 100), Part("a", 40), Part("b",10)), new[] { Design(small,10) }, Rates);
-            Assert.IsTrue(result.Success); Assert.AreEqual(240d,result.ToolingCost); Assert.AreEqual(2,result.Matches.Sum(m=>m.Count));
+            // The design covers the most expensive "a" once; the other "a" and the "b" pay full tooling.
+            Assert.IsTrue(result.Success); Assert.AreEqual(10 * (40 + 10) + .1 * 10 * 100, result.ToolingCost, 1e-9); Assert.AreEqual(1, result.Matches.Sum(m=>m.Count));
+            Assert.AreEqual(1, result.Matches.Length);
+        }
+        [TestMethod]
+        public void ADesignWithTwoCopiesCoversTwoButASingleCopyDesignCoversOne()
+        {
+            var craft = Craft(Part("booster", 100), Part("booster", 100));
+            var free = new ToolingRates(10, .1, 1, 0);
+            Assert.AreEqual(1000d, ToolingPolicy.Quote(craft, new[] { Design(Craft(Part("booster", 100)), 1000) }, free).ToolingCost, "One tooled booster does not unlock unlimited boosters.");
+            Assert.AreEqual(0d, ToolingPolicy.Quote(craft, new[] { Design(craft, 2000) }, free).ToolingCost);
+            Assert.AreEqual(0d, ToolingPolicy.Quote(Craft(Part("booster", 100), Part("booster", 100), Part("booster", 100)), new[] { Design(Craft(Part("booster", 100), Part("booster", 100)), 2000), Design(Craft(Part("booster", 100)), 1000) }, free).ToolingCost, "Two designs together cover three.");
+        }
+        [TestMethod]
+        public void AddingAPartToATooledDesignCostsOnlyThatPartAtZeroCombine()
+        {
+            var rates = new ToolingRates(5, .1, 2, 0);
+            var tooled = Craft(Enumerable.Range(0, 30).Select(i => Part("p" + i, 700)).ToArray());
+            var extended = Craft(tooled.Parts.Concat(new[] { Part("extra", 300) }).ToArray());
+            var quote = ToolingPolicy.Quote(extended, new[] { Design(tooled, 105000) }, rates);
+            Assert.IsTrue(quote.Success, quote.Reason);
+            Assert.AreEqual(1500d, quote.ToolingCost, 1e-9);
+            Assert.AreEqual(1500d, ToolingPolicy.Quote(extended, new[] { Design(tooled, 1) }, rates).ToolingCost, 1e-9, "Independent of the saved basis.");
+            var two = ToolingPolicy.Quote(Craft(tooled.Parts.Concat(new[] { Part("extra", 300), Part("extra", 300) }).ToArray()), new[] { Design(tooled, 1) }, rates);
+            Assert.AreEqual(3000d, two.ToolingCost, 1e-9, "Cost grows linearly with each added part.");
+        }
+        [TestMethod]
+        public void TypicalCraftsWithSeveralDesignsStayWellUnderTheSearchLimit()
+        {
+            var rates = new ToolingRates(5, .1, 2, .1);
+            var names = Enumerable.Range(0, 20).Select(i => "part" + i).ToArray();
+            var parts = Enumerable.Range(0, 60).Select(i => Part(names[i % names.Length], 50 + 13 * (i % 7))).ToArray();
+            var designs = new System.Collections.Generic.List<ToolingDesign>();
+            for (var d = 0; d < 10; d++)
+                designs.Add(Design(Craft(Enumerable.Range(0, 4 + d).Select(i => Part(names[(d * 3 + i) % names.Length], 50)).ToArray()), 1000 + d));
+            foreach (var combine in new[] { 0d, .1 })
+            {
+                var quote = ToolingPolicy.Quote(Craft(parts), designs, new ToolingRates(5, .1, 2, combine));
+                Assert.IsTrue(quote.Success, quote.Reason);
+                Assert.IsTrue(quote.Matches.All(m => m.Count == 1));
+                Assert.IsTrue(quote.ToolingCost <= 5 * parts.Sum(x => x.UnitCost) + 1e-9);
+            }
         }
         [TestMethod]
         public void OverflowAndSearchLimitReturnFailureInsteadOfPartialQuote()
         {
             var overflow = ToolingPolicy.Quote(Craft(Part("a", ToolingPolicy.MaxCost)), Array.Empty<ToolingDesign>(), Rates);
             Assert.IsFalse(overflow.Success);
-            var many = Craft(Enumerable.Range(0, 300).Select(_ => Part("a", 100)).ToArray());
-            var complex = ToolingPolicy.Quote(many, new[] { Design(Craft(Part("a", 100)), 1000) }, Rates);
-            Assert.IsFalse(complex.Success);
-            StringAssert.Contains(complex.Reason, "complex");
+            // Many distinct designs that each fit give an exponential number of cover subsets.
+            var distinct = Enumerable.Range(0, 20).Select(i => Part("n" + i, 100)).ToArray();
+            var singles = distinct.Select(p => Design(Craft(p), 1000)).ToArray();
+            var complex = ToolingPolicy.Quote(Craft(distinct), singles, Rates);
+            // The cover search giving up must not fail the quote: tooling falls back to full uncovered pricing.
+            Assert.IsTrue(complex.Success, complex.Reason);
+            Assert.IsTrue(complex.CoverSearchExhausted);
+        }
+        [TestMethod]
+        public void ExhaustedCoverSearchPricesToolingUncoveredAndLeavesLaunchCostAlone()
+        {
+            var parts = Enumerable.Range(0, 20).Select(i => Part("n" + i, 100)).Concat(new[] { new ToolingPart { Name = "lab", UnitCost = 700, IsScience = true } }).ToArray();
+            var singles = Enumerable.Range(0, 20).Select(i => Design(Craft(Part("n" + i, 100)), 1000)).ToArray();
+            var craft = Craft(parts);
+            var quote = ToolingPolicy.Quote(craft, singles, Rates);
+            Assert.IsTrue(quote.Success, quote.Reason);
+            Assert.IsTrue(quote.CoverSearchExhausted);
+            Assert.AreEqual(0, quote.Matches.Length);
+            Assert.AreEqual(10d * 2000, quote.ToolingCost, 1e-9, "Tooling multiplier times non-science part costs, no covers.");
+            Assert.IsFalse(quote.AlreadyTooled);
+            Assert.AreEqual(ToolingPolicy.LaunchCost(700, 0, 2000, false, Rates), quote.LaunchCost, 1e-9);
+            var again = ToolingPolicy.Quote(craft, singles.Reverse().ToArray(), Rates);
+            Assert.AreEqual(quote.ToolingCost, again.ToolingCost);
+            Assert.AreEqual(quote.LaunchCost, again.LaunchCost);
+            Assert.IsTrue(again.CoverSearchExhausted);
+            // A craft the search can handle is not flagged.
+            var simple = ToolingPolicy.Quote(Craft(Part("n0", 100)), singles, Rates);
+            Assert.IsTrue(simple.AlreadyTooled);
+            Assert.IsFalse(simple.CoverSearchExhausted);
+        }
+        [TestMethod]
+        public void AlreadyTooledCraftNeverRunsCoverSearch()
+        {
+            var distinct = Enumerable.Range(0, 20).Select(i => Part("n" + i, 100)).ToArray();
+            var designs = distinct.Select(p => Design(Craft(p), 1000)).Concat(new[] { Design(Craft(distinct), 1000) }).ToArray();
+            var quote = ToolingPolicy.Quote(Craft(distinct), designs, Rates);
+            Assert.IsTrue(quote.Success);
+            Assert.IsTrue(quote.AlreadyTooled);
+            Assert.IsFalse(quote.CoverSearchExhausted);
+            Assert.AreEqual(2000 * .1, quote.LaunchCost, 1e-9);
         }
         [TestMethod]
         public void RejectsNonfiniteNegativeAndOversizedInputsWithoutCharges()
@@ -85,37 +162,51 @@ namespace LmpCommonTest
         [TestMethod]
         public void ShippedDefaultsAreTheAgreedRates()
         {
-            Assert.AreEqual(5d, ToolingDefaults.ToolingCost); Assert.AreEqual(.1, ToolingDefaults.TooledLaunch); Assert.AreEqual(2d, ToolingDefaults.UntooledLaunch); Assert.AreEqual(.1, ToolingDefaults.Combine);
+            Assert.AreEqual(5d, ToolingDefaults.ToolingCost); Assert.AreEqual(.1, ToolingDefaults.TooledLaunch); Assert.AreEqual(2d, ToolingDefaults.UntooledLaunch); Assert.AreEqual(0d, ToolingDefaults.Combine);
             var rates = ToolingRates.Default;
             Assert.AreEqual(ToolingDefaults.ToolingCost, rates.Tooling); Assert.AreEqual(ToolingDefaults.TooledLaunch, rates.TooledLaunch); Assert.AreEqual(ToolingDefaults.UntooledLaunch, rates.UntooledLaunch); Assert.AreEqual(ToolingDefaults.Combine, rates.Combine);
         }
         [TestMethod]
-        public void NestedCombineFeeIsTheSameShareOfTheFullToolingValueAtEveryLevel()
+        public void ToolingCostIsLinearInUncoveredPartsAtEveryLevelWithDefaultRates()
         {
             var rates = ToolingRates.Default;
+            Assert.AreEqual(0d, rates.Combine);
             var designs = new System.Collections.Generic.List<ToolingDesign>();
-            // Level 1 is tooled from scratch: 2 halves at 100 each, tooling 5x.
             var pair = Craft(Part("half", 100), Part("half", 100));
             var seed = ToolingPolicy.Quote(pair, designs, rates);
             Assert.AreEqual(1000d, seed.ToolingCost); designs.Add(Design(pair, seed.ToolingCost));
-            // Each next level doubles the craft and is built from the levels before it. The old fee came from the discounted paid basis, so it shrank 10x per level.
-            var fees = new System.Collections.Generic.List<double>();
+            // Each saved design covers one instance, so doubling the craft only ever pays for the halves that no saved design covers.
+            var costs = new System.Collections.Generic.List<double>();
             for (var halves = 4; halves <= 16; halves *= 2)
             {
                 var craft = Craft(Enumerable.Range(0, halves).Select(_ => Part("half", 100)).ToArray());
                 var quote = ToolingPolicy.Quote(craft, designs, rates);
                 Assert.IsTrue(quote.Success, quote.Reason);
-                var fullValue = rates.Tooling * halves * 100;
-                Assert.AreEqual(rates.Combine * fullValue, quote.ToolingCost, 1e-9, halves + " halves");
-                Assert.AreEqual(quote.ToolingCost, quote.Matches.Sum(m => m.CombineCost), 1e-9);
-                fees.Add(quote.ToolingCost); designs.Add(Design(craft, quote.ToolingCost));
+                Assert.AreEqual(0d, quote.Matches.Sum(m => m.CombineCost), 1e-9, "No combine fee at the default rate.");
+                costs.Add(quote.ToolingCost); designs.Add(Design(craft, quote.ToolingCost));
             }
-            CollectionAssert.AreEqual(new[] { 200d, 400d, 800d }, fees);
+            Assert.AreEqual(3, costs.Count);
+            Assert.AreEqual(1000d, costs[0], 1e-9, "4 halves: the pair covers two, two pay 5 x 100 each.");
+            Assert.AreEqual(1000d, costs[1], 1e-9, "8 halves: the 4-half design covers four, the pair two, two pay full.");
+            Assert.AreEqual(5 * 100d * (16 - 8 - 4 - 2), costs[2], 1e-9, "16 halves: designs of 8, 4 and 2 are covered once each.");
+        }
+        [TestMethod]
+        public void NestedCombineFeeStaysTheSameShareOfTheFullToolingValueWhenACombineRateIsConfigured()
+        {
+            var rates = new ToolingRates(5, .1, 2, .1);
+            var designs = new System.Collections.Generic.List<ToolingDesign>();
+            var pair = Craft(Part("half", 100), Part("half", 100));
+            designs.Add(Design(pair, ToolingPolicy.Quote(pair, designs, rates).ToolingCost));
+            var quad = Craft(Enumerable.Range(0, 4).Select(_ => Part("half", 100)).ToArray());
+            var quote = ToolingPolicy.Quote(quad, designs, rates);
+            // The pair covers two halves for a share of their tooling value; the other two pay full.
+            Assert.AreEqual(.1 * 5 * 200 + 5 * 200, quote.ToolingCost, 1e-9);
+            Assert.AreEqual(100d, quote.Matches.Sum(m => m.CombineCost), 1e-9);
         }
         [TestMethod]
         public void CombineFeeIgnoresThePaidBasisAndALighterVariantStillMatches()
         {
-            var rates = ToolingRates.Default;
+            var rates = new ToolingRates(5, .1, 2, .1);
             var saved = Craft(Part("tank", 100), Part("engine", 200));
             // The same part list with less fuel in the tank, plus one extra part that still needs tooling.
             var variant = Craft(Part("tank", 60), Part("engine", 200), Part("fin", 50));

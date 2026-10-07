@@ -17,6 +17,8 @@ namespace LmpCommon.Agency
     public sealed class EconomyCommand
     {
         public Guid RequestId, LaunchId, LaunchToken, VesselId, SessionId;
+        /// <summary>PrepareLaunch only: the single-launch voucher to apply to this launch.</summary>
+        public Guid VoucherId;
         public Guid ParentVesselId;
         public string CrewName;
         public byte[] VesselData = Array.Empty<byte>();

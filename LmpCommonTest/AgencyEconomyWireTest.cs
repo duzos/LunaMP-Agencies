@@ -47,6 +47,46 @@ namespace LmpCommonTest
         }
 
         [TestMethod]
+        public void SingleLaunchTermsAndVoucherIdRoundtripAndLegacyJsonKeepsToday()
+        {
+            var peer = new NetClient(new NetPeerConfiguration("trade-modes-wire"));
+            var snapshotSource = new ServerMessageFactory().CreateNewMessageData<AgencyEconomySnapshotMsgData>();
+            var launch = Guid.NewGuid();
+            snapshotSource.Snapshot = new EconomySnapshot { Ready = true,
+                Offers = new[] { new TradeOffer { OfferId = Guid.NewGuid(), DesignMode = TradeDesignMode.SingleLaunch, PrepaidLaunchFunds = 123.5, LaunchMultiplier = 2 } },
+                Entitlements = new[] { new TradeEntitlement { EntitlementId = Guid.NewGuid(), Kind = TradeEntitlementKind.SingleLaunch, PrepaidFunds = 123.5, LaunchMultiplier = 2, LaunchId = launch, Redeemed = true } } };
+            var output = peer.CreateMessage(); snapshotSource.Serialize(output);
+            var snapshotTarget = new ServerMessageFactory().CreateNewMessageData<AgencyEconomySnapshotMsgData>(); snapshotTarget.Deserialize(Incoming(peer, output));
+            Assert.AreEqual(TradeDesignMode.SingleLaunch, snapshotTarget.Snapshot.Offers[0].DesignMode);
+            Assert.AreEqual(123.5, snapshotTarget.Snapshot.Offers[0].PrepaidLaunchFunds);
+            Assert.AreEqual(2d, snapshotTarget.Snapshot.Offers[0].LaunchMultiplier);
+            var voucher = snapshotTarget.Snapshot.Entitlements[0];
+            Assert.AreEqual(TradeEntitlementKind.SingleLaunch, voucher.Kind);
+            Assert.AreEqual(123.5, voucher.PrepaidFunds);
+            Assert.AreEqual(launch, voucher.LaunchId);
+            Assert.IsTrue(voucher.Redeemed);
+
+            var commandSource = new ClientMessageFactory().CreateNewMessageData<AgencyEconomyCommandMsgData>();
+            var id = Guid.NewGuid();
+            commandSource.Command = new EconomyCommand { RequestId = Guid.NewGuid(), Operation = EconomyOperation.PrepareLaunch, VoucherId = id,
+                Trade = new TradeCommand { DesignMode = TradeDesignMode.SingleLaunch } };
+            output = peer.CreateMessage(); commandSource.Serialize(output);
+            var commandTarget = new ClientMessageFactory().CreateNewMessageData<AgencyEconomyCommandMsgData>(); commandTarget.Deserialize(Incoming(peer, output));
+            Assert.AreEqual(id, commandTarget.Command.VoucherId);
+            Assert.AreEqual(TradeDesignMode.SingleLaunch, commandTarget.Command.Trade.DesignMode);
+
+            // An agencies.4 payload has none of the new fields: offers keep meaning tooling plus design and entitlements stay permanent.
+            var legacyOffer = Newtonsoft.Json.JsonConvert.DeserializeObject<TradeOffer>("{\"OfferId\":\"" + Guid.NewGuid() + "\",\"SellerFunds\":5.0}");
+            Assert.AreEqual(TradeDesignMode.ToolingAndDesign, legacyOffer.DesignMode);
+            Assert.AreEqual(0d, legacyOffer.PrepaidLaunchFunds);
+            var legacyEntitlement = Newtonsoft.Json.JsonConvert.DeserializeObject<TradeEntitlement>("{\"EntitlementId\":\"" + Guid.NewGuid() + "\",\"Fingerprint\":\"x\"}");
+            Assert.AreEqual(TradeEntitlementKind.Permanent, legacyEntitlement.Kind);
+            Assert.IsFalse(legacyEntitlement.Redeemed);
+            Assert.AreEqual(Guid.Empty, legacyEntitlement.LaunchId);
+            Assert.AreEqual(Guid.Empty, Newtonsoft.Json.JsonConvert.DeserializeObject<EconomyCommand>("{}").VoucherId);
+        }
+
+        [TestMethod]
         public void BoardingCommandPreservesCorrelationFinalProtoAndCargoBindings()
         {
             var peer = new NetClient(new NetPeerConfiguration("economy-command"));

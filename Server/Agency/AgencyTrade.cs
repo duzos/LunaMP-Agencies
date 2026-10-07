@@ -35,12 +35,18 @@ namespace Server.Agency
             {
                 if (row?.Offer == null || row.Offer.OfferId == Guid.Empty || !TradePolicy.ValidateAmounts(row.Offer.SellerFunds, row.Offer.SellerScience, row.Offer.BuyerFunds, row.Offer.BuyerScience) || row.Blueprint == null || row.Blueprint.Length > TradeLimits.MaxBlueprintBytes) throw new InvalidDataException("Invalid trade offer.");
                 if (row.Blueprint.Length > 0 && Hash(row.Blueprint) != row.BlueprintHash) throw new InvalidDataException("Trade blueprint checksum mismatch.");
+                if (!Enum.IsDefined(typeof(TradeDesignMode), row.Offer.DesignMode) || !ToolingPolicy.FiniteNonNegative(row.Offer.PrepaidLaunchFunds) || !ToolingPolicy.FiniteNonNegative(row.Offer.LaunchMultiplier)) throw new InvalidDataException("Invalid trade design terms.");
+                if (row.Offer.DesignMode == TradeDesignMode.SingleLaunch && (string.IsNullOrEmpty(row.Offer.DesignFingerprint) || row.Blueprint.Length == 0)) throw new InvalidDataException("Invalid single-launch offer.");
             }
             foreach (var received in document.Entitlements.Values)
             {
                 if (received == null || received.Count > TradeLimits.MaxEntitlements || received.Sum(e => (long)e.BlueprintData.Length) > TradeLimits.MaxAgencyBlueprintBytes) throw new InvalidDataException("Purchased-design storage limit reached.");
                 foreach (var entitlement in received)
+                {
                     if (entitlement.EntitlementId == Guid.Empty || entitlement.BlueprintData.Length > 0 && Hash(entitlement.BlueprintData) != entitlement.BlueprintHash) throw new InvalidDataException("Invalid purchased design.");
+                    if (!Enum.IsDefined(typeof(TradeEntitlementKind), entitlement.Kind) || !ToolingPolicy.FiniteNonNegative(entitlement.PrepaidFunds) || !ToolingPolicy.FiniteNonNegative(entitlement.LaunchMultiplier)) throw new InvalidDataException("Invalid purchased design terms.");
+                    if (entitlement.Kind == TradeEntitlementKind.SingleLaunch && (string.IsNullOrEmpty(entitlement.Fingerprint) || entitlement.Redeemed && entitlement.LaunchId == Guid.Empty)) throw new InvalidDataException("Invalid single-launch voucher.");
+                }
             }
         }
 
@@ -123,7 +129,8 @@ namespace Server.Agency
         private static void AddEntitlement(EconomyDocument candidate, Guid agencyId, TradeEntitlement entitlement)
         {
             if (!candidate.Entitlements.TryGetValue(agencyId, out var entries)) candidate.Entitlements[agencyId] = entries = new List<TradeEntitlement>();
-            if (entries.Any(e => e.Fingerprint == entitlement.Fingerprint && e.BlueprintHash == entitlement.BlueprintHash && e.VesselId == entitlement.VesselId)) return;
+            // Each purchased launch is its own voucher; only permanent allowances collapse into one.
+            if (entitlement.Kind == TradeEntitlementKind.Permanent && entries.Any(e => e.Kind == TradeEntitlementKind.Permanent && e.Fingerprint == entitlement.Fingerprint && e.BlueprintHash == entitlement.BlueprintHash && e.VesselId == entitlement.VesselId)) return;
             entries.Add(entitlement);
         }
 
@@ -147,12 +154,27 @@ namespace Server.Agency
                 if (candidate.TradeOffers.Values.Count(o => o.Offer.Status == TradeOfferStatus.Open && (o.Offer.SellerAgencyId == client.AgencyId || o.Offer.BuyerAgencyId == request.BuyerAgencyId)) >= TradeLimits.MaxOpenOffers) throw new InvalidOperationException("Too many open offers; close an existing offer first.");
                 if (!TradePolicy.ValidateAmounts(request.SellerFunds, request.SellerScience, request.BuyerFunds, request.BuyerScience)) throw new ArgumentException("Invalid trade currency amounts.");
                 var seller = AgencyStore.Agencies[client.AgencyId];
-                var offer = new TradeOffer { OfferId = request.OfferId, SellerAgencyId = client.AgencyId, BuyerAgencyId = request.BuyerAgencyId, VesselId = request.VesselId, Revision = 1, ExpiresUtcTicks = UtcNow().AddHours(24).Ticks, SellerFunds = request.SellerFunds, SellerScience = request.SellerScience, BuyerFunds = request.BuyerFunds, BuyerScience = request.BuyerScience, DesignFingerprint = request.DesignFingerprint };
+                if (!Enum.IsDefined(typeof(TradeDesignMode), request.DesignMode)) throw new ArgumentException("Unsupported design mode.");
+                var singleLaunch = request.DesignMode == TradeDesignMode.SingleLaunch;
+                if (singleLaunch && (!ToolingEnabled || string.IsNullOrEmpty(request.DesignFingerprint))) throw new InvalidOperationException(ToolingEnabled ? "A single-launch offer needs a design." : "Single-launch offers need agency tooling.");
+                var offer = new TradeOffer { DesignMode = request.DesignMode, OfferId = request.OfferId, SellerAgencyId = client.AgencyId, BuyerAgencyId = request.BuyerAgencyId, VesselId = request.VesselId, Revision = 1, ExpiresUtcTicks = UtcNow().AddHours(24).Ticks, SellerFunds = request.SellerFunds, SellerScience = request.SellerScience, BuyerFunds = request.BuyerFunds, BuyerScience = request.BuyerScience, DesignFingerprint = request.DesignFingerprint };
                 var stored = new StoredTradeOffer { Offer = offer, SellerOwner = seller.OwnerUniqueId, BuyerOwner = buyer.OwnerUniqueId, SessionId = command.SessionId, CreatedSequence = command.Sequence };
                 if (!string.IsNullOrEmpty(request.DesignFingerprint))
                 {
-                    stored.Design = Copy(Agency(candidate, client.AgencyId).Designs.SingleOrDefault(d => d.Fingerprint == request.DesignFingerprint) ?? throw new InvalidOperationException("Only an existing tooled design can be sold."));
-                    if (ToolingPolicy.Fingerprint(BlueprintManifest(request.BlueprintData, request.Editor)) != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the offered tooling.");
+                    var blueprintFingerprint = ToolingPolicy.Fingerprint(BlueprintManifest(request.BlueprintData, request.Editor));
+                    if (singleLaunch)
+                    {
+                        // The seller needs no tooling: the manifest only prices the launch the seller prepays.
+                        if (command.Manifest == null || ToolingPolicy.ManifestHash(command.Manifest) != command.ManifestHash || ToolingPolicy.Fingerprint(command.Manifest) != request.DesignFingerprint || blueprintFingerprint != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the priced launch manifest.");
+                        var quote = Quote(Agency(candidate, client.AgencyId), command.Manifest, command.ManifestHash);
+                        offer.LaunchMultiplier = quote.AlreadyTooled ? Rates().TooledLaunch : Rates().UntooledLaunch;
+                        offer.PrepaidLaunchFunds = UsesFunds ? TradePolicy.PrepaidLaunchCost(quote, offer.LaunchMultiplier) : 0;
+                    }
+                    else
+                    {
+                        stored.Design = Copy(Agency(candidate, client.AgencyId).Designs.SingleOrDefault(d => d.Fingerprint == request.DesignFingerprint) ?? throw new InvalidOperationException("Only an existing tooled design can be sold."));
+                        if (blueprintFingerprint != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the offered tooling.");
+                    }
                     stored.Blueprint = Copy(request.BlueprintData);
                     stored.BlueprintHash = Hash(stored.Blueprint);
                     offer.BlueprintName = SafeName(request.BlueprintName);
@@ -166,7 +188,7 @@ namespace Server.Agency
                     offer.VesselName = VesselStoreSystem.CurrentVessels[offer.VesselId].Fields.GetSingle("name")?.Value;
                     ValidateOfferedTitle(stored, AgencyVesselMap.ExportDocument());
                 }
-                if (offer.VesselId == Guid.Empty && stored.Design == null && offer.SellerFunds + offer.SellerScience + offer.BuyerFunds + offer.BuyerScience == 0) throw new ArgumentException("Offer has no assets or currencies.");
+                if (offer.VesselId == Guid.Empty && stored.Design == null && stored.Blueprint.Length == 0 && offer.SellerFunds + offer.SellerScience + offer.BuyerFunds + offer.BuyerScience == 0) throw new ArgumentException("Offer has no assets or currencies.");
                 candidate.TradeOffers[offer.OfferId] = stored;
                 result.TradeOfferId = offer.OfferId;
                 return;
@@ -189,6 +211,7 @@ namespace Server.Agency
             }
             if (command.Operation != EconomyOperation.TradeAccept) throw new ArgumentException("Unsupported trade decision.");
             if (!AgencyStore.Agencies.TryGetValue(trade.SellerAgencyId, out var sellerAgency) || !AgencyStore.Agencies.TryGetValue(trade.BuyerAgencyId, out var buyerAgency) || sellerAgency.OwnerUniqueId != saved.SellerOwner || buyerAgency.OwnerUniqueId != saved.BuyerOwner) throw new InvalidOperationException("Agency ownership changed; create a new offer.");
+            if (trade.DesignMode == TradeDesignMode.SingleLaunch && !ToolingEnabled) throw new InvalidOperationException("Single-launch designs need agency tooling.");
             var ownership = AgencyVesselMap.ExportDocument();
             ValidateOfferedTitle(saved, ownership);
             var sellerBalance = Agency(candidate, trade.SellerAgencyId);
@@ -196,7 +219,14 @@ namespace Server.Agency
             var settled = TradePolicy.Settle(sellerBalance.Funds, sellerBalance.Science, buyerBalance.Funds, buyerBalance.Science, trade.SellerFunds, trade.SellerScience, trade.BuyerFunds, trade.BuyerScience);
             sellerBalance.Funds = settled.SellerFunds; sellerBalance.Science = settled.SellerScience;
             buyerBalance.Funds = settled.BuyerFunds; buyerBalance.Science = settled.BuyerScience;
-            if (saved.Design != null)
+            if (trade.DesignMode == TradeDesignMode.SingleLaunch)
+            {
+                // The seller builds to order: the prepayment is taken now, after the price has been received.
+                if (UsesFunds && sellerBalance.Funds < trade.PrepaidLaunchFunds) throw new InvalidOperationException("Seller cannot prepay the launch.");
+                Charge(sellerBalance, trade.PrepaidLaunchFunds);
+                AddEntitlement(candidate, trade.BuyerAgencyId, new TradeEntitlement { EntitlementId = Guid.NewGuid(), SellerAgencyId = trade.SellerAgencyId, Fingerprint = trade.DesignFingerprint, BlueprintName = trade.BlueprintName, Editor = trade.Editor, BlueprintHash = saved.BlueprintHash, BlueprintData = Copy(saved.Blueprint), Kind = TradeEntitlementKind.SingleLaunch, PrepaidFunds = UsesFunds ? trade.PrepaidLaunchFunds : 0, LaunchMultiplier = trade.LaunchMultiplier });
+            }
+            else if (saved.Design != null)
             {
                 if (!sellerBalance.Designs.Any(d => d.Fingerprint == saved.Design.Fingerprint)) throw new InvalidOperationException("Offered tooling no longer exists.");
                 if (!buyerBalance.Designs.Any(d => d.Fingerprint == saved.Design.Fingerprint)) buyerBalance.Designs.Add(Copy(saved.Design));
@@ -228,14 +258,16 @@ namespace Server.Agency
             }).ToArray();
         }
 
-        public static bool ValidateTradeEntitlement(Guid agencyId, Guid entitlementId, global::Server.System.Vessel.Classes.Vessel vessel)
+        public static bool ValidateTradeEntitlement(Guid agencyId, Guid entitlementId, global::Server.System.Vessel.Classes.Vessel vessel, Guid launchId = default(Guid))
         {
             lock (AgencyVesselMap.TransactionGate)
             {
                 if (entitlementId == Guid.Empty) return true;
                 if (!TradeEnabled || !Ready || !_document.Entitlements.TryGetValue(agencyId, out var entitlements)) return false;
                 var manifest = new ToolingManifest { Parts = vessel.Parts.GetAllValues().Select(p => new ToolingPart { Name = p.Fields.GetSingle("name")?.Value }).ToArray() };
-                return TradePolicy.CanUseEntitlement(manifest, entitlements.Where(e => e.EntitlementId == entitlementId).Select(e => e.Fingerprint));
+                // A voucher grants research for the one launch that reserved it, and only while tooling gameplay is on.
+                var allowed = entitlements.Where(e => e.EntitlementId == entitlementId && (e.Kind == TradeEntitlementKind.Permanent || ToolingEnabled && launchId != Guid.Empty && !e.Redeemed && e.LaunchId == launchId));
+                return TradePolicy.CanUseEntitlement(manifest, allowed.Select(e => e.Fingerprint));
             }
         }
     }

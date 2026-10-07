@@ -41,7 +41,7 @@ namespace Server.Settings.Definition
         [XmlComment(Value = "Maximum length of a username.")]
         public int MaxUsernameLength { get; set; } = 15;
 
-        [XmlComment(Value = "Specify in minutes how often /dekessler automatically runs. 0 = Disabled")]
+        [XmlComment(Value = "Specify in minutes how often /dekessler automatically runs. Debris a player is loaded near (holds an Update lock on) is never cleared. 0 = Disabled")]
         public float AutoDekessler { get; set; } = 0.5f;
 
         [XmlComment(Value = "Specify in minutes how often /nukeksc automatically runs. 0 = Disabled")]
@@ -106,7 +106,7 @@ namespace Server.Settings.Definition
         public bool AgencyTooling { get; set; } = false;
         public bool AgencyTrade { get; set; } = false;
         public bool AgencyHideCraft { get; set; } = false;
-        [XmlComment(Value = "Antenna detection range multiplier (0 < value <= 1), independent of communication range. Invalid values use 0.01.")]
+        [XmlComment(Value = "Radar range per unit of total antenna power (0 < value <= 1), independent of communication range. Range = this x active multiplier x summed antenna power, the same in both modes. Invalid values use 0.2.")]
         public double AgencyDetectionRangeMultiplier { get; set; } = VisibilityPolicy.DefaultDetectionRangeMultiplier;
         public double AgencyContactClassificationSeconds { get; set; } = VisibilityContactSettings.ClassificationSeconds;
         public double AgencyContactIdentificationDistance { get; set; } = VisibilityContactSettings.IdentificationDistance;

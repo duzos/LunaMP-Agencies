@@ -39,6 +39,44 @@ namespace LmpCommon.Agency
             return result;
         }
 
+        /// <summary>What the seller's agency pays up front for a single free launch: science parts at face value and the rest at the seller's own launch rate.</summary>
+        public static double PrepaidLaunchCost(ToolingQuote quote, double rate)
+        {
+            if (quote == null || !quote.Success || !ToolingPolicy.FiniteNonNegative(rate)) throw new ArgumentException("A valid quote and launch rate are required.");
+            var cost = quote.ScienceCost + quote.NonScienceCost * rate;
+            if (!ToolingPolicy.FiniteNonNegative(cost)) throw new ArgumentException("Prepaid launch cost exceeds supported range.");
+            return cost;
+        }
+
+        /// <summary>What the buyer still pays when launching on a voucher: all inventory, plus any part cost above what the seller prepaid (extra fuel and the like).</summary>
+        public static double VoucherLaunchCharge(ToolingQuote quote, double prepaid, double multiplier)
+        {
+            if (quote == null || !quote.Success || !ToolingPolicy.FiniteNonNegative(prepaid) || !ToolingPolicy.FiniteNonNegative(multiplier)) throw new ArgumentException("A valid quote, prepayment and multiplier are required.");
+            var charge = quote.CargoCost + Math.Max(0, quote.ScienceCost + quote.NonScienceCost * multiplier - prepaid);
+            if (!ToolingPolicy.FiniteNonNegative(charge)) throw new ArgumentException("Voucher launch charge exceeds supported range.");
+            return charge;
+        }
+
+        /// <summary>
+        /// The voucher a launch of this design would use: the first unspent, unreserved one for the exact part list. In career a voucher is
+        /// only taken when it actually costs less than the normal launch, so it is never burned for no benefit.
+        /// </summary>
+        public static TradeEntitlement SelectVoucher(IEnumerable<TradeEntitlement> entitlements, ToolingQuote quote, bool usesFunds)
+        {
+            if (entitlements == null || quote == null || !quote.Success) return null;
+            foreach (var entitlement in entitlements)
+            {
+                if (entitlement == null || entitlement.Kind != TradeEntitlementKind.SingleLaunch || entitlement.Redeemed || entitlement.LaunchId != Guid.Empty ||
+                    !string.Equals(entitlement.Fingerprint, quote.Fingerprint, StringComparison.Ordinal)) continue;
+                try
+                {
+                    if (!usesFunds || VoucherLaunchCharge(quote, entitlement.PrepaidFunds, entitlement.LaunchMultiplier) < quote.LaunchCost) return entitlement;
+                }
+                catch (ArgumentException) { }
+            }
+            return null;
+        }
+
         public static bool CanUseEntitlement(ToolingManifest actual, IEnumerable<string> purchasedFingerprints)
         {
             if (actual == null || purchasedFingerprints == null) return false;

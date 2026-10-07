@@ -42,9 +42,11 @@ namespace LmpClient.Systems.Agency
         public static bool Ready { get { lock (stateLock) return Enabled && snapshot != null && snapshot.Ready && snapshot.AgencyId == AgencySystem.Singleton.MyAgencyId; } }
         public static string LatestStatus { get; private set; }
         public static ToolingQuote EditorQuote { get; private set; }
+        /// <summary>The free-launch voucher the editor quote already accounts for, or null.</summary>
+        public static TradeEntitlement EditorVoucher { get; private set; }
         private sealed class PendingLaunch
         {
-            internal Guid Request, Launch, Token;
+            internal Guid Request, Launch, Token, Voucher;
             internal string Path, FileHash, Flag, Site, ManifestHash, Crew;
             internal ToolingManifest Manifest;
             internal VesselCrewManifest CrewManifest;
@@ -95,11 +97,33 @@ namespace LmpClient.Systems.Agency
             var settings = SettingsSystem.ServerSettings;
             return new ToolingRates(settings.ToolingCostMultiplier, settings.TooledLaunchMultiplier, settings.UntooledLaunchMultiplier, settings.ToolingCombineMultiplier);
         }
-        private static ToolingQuote Quote(ToolingManifest manifest)
+        /// <summary>The agency's own price for a craft, ignoring any free-launch voucher.</summary>
+        internal static ToolingQuote StandardQuote(ToolingManifest manifest)
         {
             lock (stateLock)
                 return ToolingPolicy.Quote(manifest, snapshot?.Designs ?? Array.Empty<ToolingDesign>(), Rates());
         }
+        private static ToolingQuote Quote(ToolingManifest manifest) => Quote(manifest, out _);
+        /// <summary>The price the server will charge: a matching free-launch voucher turns the launch into inventory and top-up only.</summary>
+        private static ToolingQuote Quote(ToolingManifest manifest, out TradeEntitlement voucher)
+        {
+            var standard = StandardQuote(manifest);
+            voucher = TradeClient.SelectVoucher(standard);
+            if (voucher == null) return standard;
+            return new ToolingQuote
+            {
+                Success = standard.Success, Reason = standard.Reason, Fingerprint = standard.Fingerprint, ToolingCost = standard.ToolingCost,
+                ScienceCost = standard.ScienceCost, NonScienceCost = standard.NonScienceCost, CargoCost = standard.CargoCost, AlreadyTooled = standard.AlreadyTooled, CoverSearchExhausted = standard.CoverSearchExhausted, Matches = standard.Matches,
+                LaunchCost = TradePolicy.VoucherLaunchCharge(standard, voucher.PrepaidFunds, voucher.LaunchMultiplier)
+            };
+        }
+        internal static bool HasTooling(string fingerprint)
+        {
+            lock (stateLock) return snapshot?.Designs != null && snapshot.Designs.Any(d => d.Fingerprint == fingerprint);
+        }
+        /// <summary>True while a launch is reserved or starting; its voucher, if any, is the only one that counts for research.</summary>
+        internal static bool LaunchPending => pending != null;
+        internal static Guid PendingVoucher => pending?.Voucher ?? Guid.Empty;
         internal static ToolingQuote DisplayQuote(ShipConstruct ship, ShipTemplate template, VesselCrewManifest crew)
         {
             if (!Ready) return null;
@@ -115,10 +139,11 @@ namespace LmpClient.Systems.Agency
             {
                 if (!Ready) throw new InvalidOperationException("Waiting for agency economy.");
                 var manifest = ToolingManifestBuilder.FromFile(path, crew);
-                pending = new PendingLaunch { Request = Guid.NewGuid(), Launch = Guid.NewGuid(), Path = path, Flag = flag, Site = site,
+                Quote(manifest, out var voucher);
+                pending = new PendingLaunch { Voucher = voucher?.EntitlementId ?? Guid.Empty, Request = Guid.NewGuid(), Launch = Guid.NewGuid(), Path = path, Flag = flag, Site = site,
                     FileHash = HashFile(path), Scene = HighLogic.LoadedScene, CraftIndices = CraftIndices(path), Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest), CrewManifest = crew,
                     Crew = CrewKey(crew), Deadline = DateTime.UtcNow.AddSeconds(45) };
-                Send(new EconomyCommand { RequestId = pending.Request, Operation = EconomyOperation.PrepareLaunch, LaunchId = pending.Launch,
+                Send(new EconomyCommand { RequestId = pending.Request, Operation = EconomyOperation.PrepareLaunch, LaunchId = pending.Launch, VoucherId = pending.Voucher,
                     Manifest = manifest, ManifestHash = pending.ManifestHash });
                 InputLockManager.SetControlLock(ControlTypes.EDITOR_LAUNCH, LaunchLock);
                 LatestStatus = "Reserving launch funds...";
@@ -283,10 +308,12 @@ namespace LmpClient.Systems.Agency
             try
             {
                 var manifest = Ready && EditorLogic.fetch?.ship != null ? CurrentManifest() : null;
-                EditorQuote = manifest == null ? null : Quote(manifest);
+                TradeEntitlement voucher = null;
+                EditorQuote = manifest == null ? null : Quote(manifest, out voucher);
+                EditorVoucher = voucher;
                 editorQuoteHash = manifest == null ? null : ToolingPolicy.ManifestHash(manifest);
             }
-            catch (Exception e) { EditorQuote = null; LatestStatus = e.Message; }
+            catch (Exception e) { EditorQuote = null; EditorVoucher = null; LatestStatus = e.Message; }
             LmpClient.Harmony.AgencyCostDisplay.Refresh();
         }
         private static void Handle(EconomyResult result)
@@ -352,7 +379,7 @@ namespace LmpClient.Systems.Agency
             settlementDeadline = default(DateTime);
             boarding = null; InputLockManager.RemoveControlLock(BoardingLock);
             splitting = null; splitQueue.Clear(); splitBytes = 0; InputLockManager.RemoveControlLock(SplitLock);
-            pending = null; pendingRevert = Guid.Empty; resumeLaunch = resumeRevert = false; EditorQuote = null; LatestStatus = null;
+            pending = null; pendingRevert = Guid.Empty; resumeLaunch = resumeRevert = false; EditorQuote = null; EditorVoucher = null; LatestStatus = null;
             InputLockManager.RemoveControlLock(LaunchLock);
         }
     }

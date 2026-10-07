@@ -97,6 +97,84 @@ public class AgencyTradeTest
             if (succeeded && errors.Count > 0) throw new AggregateException(errors);
         }
     }
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task SingleLaunchVoucherIsPrepaidReleasedOnDisconnectAndRedeemedOnceAsync(bool reconnectFirst)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        var token = deadline.Token;
+        var run = Guid.NewGuid().ToString("N");
+        var a = new BotClient("VoucherSeller", "voucher-seller-" + run); var b = new BotClient("VoucherBuyer", "voucher-buyer-" + run);
+        var bots = new[] { a, b };
+        ServerProcess server = null;
+        var succeeded = false;
+        try
+        {
+            server = await ServerProcess.StartAsync(TestContext, token, s => { s.AgencyTrade = true; s.AgencyTooling = true; s.AgencyVesselOwnership = false; });
+            await a.ConnectAsync(server.Port, token);
+            var agencyB = (await b.ConnectAsync(server.Port, token)).MyAgencyId;
+            var initialA = await a.WaitForAsync<EconomyStateBot>(s => s.State.Ready, token);
+            var initialB = await b.WaitForAsync<EconomyStateBot>(s => s.State.Ready, token);
+            var manifest = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "probeCoreSphere", UnitCost = 100 } } };
+            var hash = ToolingPolicy.ManifestHash(manifest);
+            var draft = new TradeCommand { OfferId = Guid.NewGuid(), BuyerAgencyId = agencyB, DesignMode = TradeDesignMode.SingleLaunch, SellerFunds = 100, BuyerFunds = 250,
+                DesignFingerprint = ToolingPolicy.Fingerprint(manifest), BlueprintName = "Voucher probe", Editor = "VAB",
+                BlueprintData = System.Text.Encoding.UTF8.GetBytes("ship = Voucher probe\ntype = VAB\nPART\n{\npart = probeCoreSphere_1\n}\n") };
+            var created = await Command(a, new EconomyCommand { Operation = EconomyOperation.TradeCreate, Trade = draft, Manifest = manifest, ManifestHash = hash }, token);
+            Assert.IsTrue(created.Success, created.Reason);
+            var offer = (await b.WaitForAsync<EconomyStateBot>(s => s.State.Offers.Any(o => o.OfferId == created.TradeOfferId), token)).State.Offers.Single(o => o.OfferId == created.TradeOfferId);
+            Assert.AreEqual(TradeDesignMode.SingleLaunch, offer.DesignMode);
+            Assert.AreEqual(200d, offer.PrepaidLaunchFunds, .001);
+            var accepted = await Command(b, new EconomyCommand { Operation = EconomyOperation.TradeAccept, Trade = new TradeCommand { OfferId = offer.OfferId, ExpectedRevision = offer.Revision } }, token);
+            Assert.IsTrue(accepted.Success, accepted.Reason);
+            // The seller receives the 250 price, gives 100, and prepays the launch at the untooled 2x of 100.
+            var finalA = await a.WaitForAsync<EconomyStateBot>(s => s.State.Offers.Any(o => o.OfferId == offer.OfferId && o.Status == TradeOfferStatus.Accepted), token);
+            Assert.AreEqual(initialA.State.Funds + 150 - 200, finalA.State.Funds, .001);
+            var finalB = await b.WaitForAsync<EconomyStateBot>(s => s.State.Entitlements.Any(e => e.Kind == TradeEntitlementKind.SingleLaunch), token);
+            Assert.AreEqual(initialB.State.Funds - 150, finalB.State.Funds, .001);
+            Assert.AreEqual(0, finalB.State.Designs.Length, "No tooling is transferred.");
+            var voucher = finalB.State.Entitlements.Single();
+
+            if (reconnectFirst)
+            {
+                var reserved = await Command(b, new EconomyCommand { Operation = EconomyOperation.PrepareLaunch, LaunchId = Guid.NewGuid(), VoucherId = voucher.EntitlementId, Manifest = manifest, ManifestHash = hash }, token);
+                Assert.IsTrue(reserved.Success, reserved.Reason);
+                Assert.AreEqual(0d, reserved.Quote.LaunchCost, .001);
+                await b.WaitForAsync<EconomyStateBot>(s => s.State.Entitlements.Any(e => e.LaunchId == reserved.LaunchId), token);
+                await b.DisconnectForReconnectAsync(token);
+                await a.WaitForAsync<PlayerLeftSnapshot>(s => s.Player == b.Name, token);
+                Assert.AreEqual(agencyB, (await b.ConnectAsync(server.Port, token)).MyAgencyId);
+                var back = await b.WaitForAsync<EconomyStateBot>(s => s.State.Ready && s.State.Entitlements.Any(), token);
+                Assert.AreEqual(Guid.Empty, back.State.Entitlements.Single().LaunchId, "A dropped reservation gives the voucher back.");
+                Assert.IsFalse(back.State.Entitlements.Single().Redeemed);
+            }
+
+            var launch = await Command(b, new EconomyCommand { Operation = EconomyOperation.PrepareLaunch, LaunchId = Guid.NewGuid(), VoucherId = voucher.EntitlementId, Manifest = manifest, ManifestHash = hash }, token);
+            Assert.IsTrue(launch.Success, launch.Reason);
+            Assert.AreEqual(0d, launch.Quote.LaunchCost, .001, "The seller's prepayment covers the whole launch.");
+            var vessel = Guid.NewGuid();
+            b.UploadPaidVessel(vessel, AgencyVesselOwnershipTest.FixtureVessel(vessel, "Voucher probe", 4501), launch.LaunchId, launch.LaunchToken, new[] { 0 });
+            var registered = await b.WaitForAsync<EconomyResultBot>(s => s.Result.RequestId == launch.LaunchId && s.Result.Operation == EconomyOperation.RegisterLaunch, token);
+            Assert.IsTrue(registered.Result.Success, registered.Result.Reason);
+            var redeemed = await b.WaitForAsync<EconomyStateBot>(s => s.State.Entitlements.Any(e => e.Redeemed), token);
+            Assert.AreEqual(finalB.State.Funds, redeemed.State.Funds, .001);
+            var again = await Command(b, new EconomyCommand { Operation = EconomyOperation.PrepareLaunch, LaunchId = Guid.NewGuid(), VoucherId = voucher.EntitlementId, Manifest = manifest, ManifestHash = hash }, token);
+            Assert.IsFalse(again.Success, "A spent voucher cannot launch again.");
+            server.ThrowIfExited(); succeeded = true;
+        }
+        finally
+        {
+            var errors = new List<Exception>();
+            foreach (var bot in bots)
+            {
+                try { await bot.DisposeAsync(); } catch (Exception e) { errors.Add(e); TestContext.WriteLine(e.ToString()); }
+                try { if (server != null) server.AttachTranscript(bot.Name, bot.Transcript); } catch (Exception e) { errors.Add(e); }
+            }
+            if (server != null) try { await server.DisposeAsync(); } catch (Exception e) { errors.Add(e); }
+            if (succeeded && errors.Count > 0) throw new AggregateException(errors);
+        }
+    }
     private static async Task<EconomyResult> Command(BotClient bot, EconomyCommand command, CancellationToken token)
     {
         var id = bot.SendEconomy(command);

@@ -24,6 +24,7 @@ namespace LmpClient.Systems.Agency
         private static int targetCursor,sensorCursor;
         private static DateTime nextIndex,nextPresentation;
         private static VisibilitySensorIndex index=new VisibilitySensorIndex(Array.Empty<VisibilitySensor>());
+        private static VisibilitySensorIndex activeIndex=new VisibilitySensorIndex(Array.Empty<VisibilitySensor>());
         private sealed class SensorCache {internal double Power;internal DateTime Expires;}
         public static bool Enabled=>MainSystem.NetworkState>=ClientState.Handshaking && SettingsSystem.ServerSettings.AgencyHideCraft;
         public static bool Ready {get{lock(gate)return ready;}}
@@ -58,7 +59,7 @@ namespace LmpClient.Systems.Agency
             }
         }
         internal static void ApplyResult(AgencyVisibilityResultMsgData result){LatestStatus=result.Reason;}
-        internal static void Invalidate(){lock(gate){ready=false;endpoints.Clear();visibleUntil.Clear();physicsUntil.Clear();sensors.Clear();index=new VisibilitySensorIndex(Array.Empty<VisibilitySensor>());nextIndex=default(DateTime);refreshPresentation=true;}}
+        internal static void Invalidate(){lock(gate){ready=false;endpoints.Clear();visibleUntil.Clear();physicsUntil.Clear();sensors.Clear();index=new VisibilitySensorIndex(Array.Empty<VisibilitySensor>());activeIndex=index;nextIndex=default(DateTime);refreshPresentation=true;}}
         public static Guid SetAgencyShare(Guid target,bool enabled)=>Send(Guid.Empty,target,VisibilityOperation.SetAgencyShare,enabled,VisibilityOverride.Inherit);
         public static Guid SetVesselShare(Guid vessel,Guid target,VisibilityOverride rule)=>Send(vessel,target,VisibilityOperation.SetCraftOverride,false,rule);
         private static Guid Send(Guid vessel,Guid target,VisibilityOperation operation,bool enabled,VisibilityOverride rule)
@@ -119,8 +120,9 @@ namespace LmpClient.Systems.Agency
                     if(sensorCursor>=all.Count)sensorCursor=0;
                     var vessel=all[sensorCursor++];
                     if(!vessel)continue;
+                    if(Owner(vessel.id)!=AgencySystem.Singleton.MyAgencyId || AgencySystem.Singleton.MyAgencyId==Guid.Empty)continue;
                     if(!sensors.TryGetValue(vessel.id,out var cached)||cached.Expires<=now)
-                        sensors[vessel.id]=new SensorCache{Power=VisibilitySensors.StrongestPower(vessel),Expires=now.AddSeconds(2)};
+                        sensors[vessel.id]=new SensorCache{Power=VisibilitySensors.TotalPower(vessel),Expires=now.AddSeconds(2)};
                 }
                 if(now>=nextIndex)
                 {
@@ -135,17 +137,18 @@ namespace LmpClient.Systems.Agency
                 VisibilitySphere[] occluders=null;
                 if(bodies!=null && bodies.Count>0 && bodies.All(body=>body))
                     occluders=bodies.Select(body=>{var p=body.position;return new VisibilitySphere(new VisibilityPoint(p.x,p.y,p.z),body.Radius);}).ToArray();
-                var samples=new List<VisibilitySensor>();
+                // "All" keeps every own craft (zero-power ones still give the physics floor and close identification); only the radar radius depends on power.
+                var samples=new List<VisibilitySensor>();var activeSamples=new List<VisibilitySensor>();
                 foreach(var vessel in all)
                 {
                     if(!vessel || Owner(vessel.id)!=AgencySystem.Singleton.MyAgencyId || AgencySystem.Singleton.MyAgencyId==Guid.Empty)continue;
                     var floor=PhysicsRadius(vessel);var power=sensors.TryGetValue(vessel.id,out var cache)&&cache.Expires>now?cache.Power:0;
-                    var activeScan = AgencySystem.Singleton.IsActiveScanning(vessel.id);
-                    samples.Add(new VisibilitySensor{Position=Point(vessel),
-                        SensorRadius=activeScan ? VisibilityPolicy.DetectionRadius(power,SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier) * SettingsSystem.ServerSettings.AgencyActiveDetectionRangeMultiplier : 0,
-                        PhysicsRadius=floor, CanReceive=power>0});
+                    var radius=VisibilityPolicy.RadarRadius(power,SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier,SettingsSystem.ServerSettings.AgencyActiveDetectionRangeMultiplier);
+                    var sample=new VisibilitySensor{Position=Point(vessel),SensorRadius=radius,PhysicsRadius=floor};
+                    samples.Add(sample);
+                    if(AgencySystem.Singleton.IsActiveScanning(vessel.id))activeSamples.Add(sample);
                 }
-                index=new VisibilitySensorIndex(samples);
+                index=new VisibilitySensorIndex(samples);activeIndex=new VisibilitySensorIndex(activeSamples);
                 VisibilityContacts.Reconcile((id, owner, ownershipRevision) => !ready ||
                     endpoints.TryGetValue(id,out var entry) && entry.OwnerAgencyId == owner && entry.OwnershipRevision == ownershipRevision);
                 for(var count=0;count<Math.Min(128,all.Count);count++)
@@ -153,10 +156,9 @@ namespace LmpClient.Systems.Agency
                     if(targetCursor>=all.Count)targetCursor=0;
                     var vessel=all[targetCursor++];if(!vessel)continue;
                     var before=CanSee(vessel.id);var point=Point(vessel);
-                    var targetPower = sensors.TryGetValue(vessel.id,out var targetCache) && targetCache.Expires>now ? targetCache.Power : 0;
-                    var emissionRadius = AgencySystem.Singleton.IsActiveScanning(vessel.id) ?
-                        VisibilityPolicy.DetectionRadius(targetPower,SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier) * SettingsSystem.ServerSettings.AgencyActiveDetectionRangeMultiplier : 0;
-                    var inRange=index.InDetectionRange(point,emissionRadius,(sensor,target)=>VisibilityLineOfSight.IsClear(sensor,target,occluders));
+                    var targetActive=AgencySystem.Singleton.IsActiveScanning(vessel.id);
+                    // Observers hear active targets within their own radius (any mode); only active observers see passive targets.
+                    var inRange=VisibilityPolicy.Detects(index,activeIndex,targetActive,point,(sensor,target)=>VisibilityLineOfSight.IsClear(sensor,target,occluders));
                     if(index.InPhysicsRange(point,PhysicsRadius(vessel)))physicsUntil[vessel.id]=now.AddSeconds(1);else physicsUntil.Remove(vessel.id);
                     if(inRange)visibleUntil[vessel.id]=now.AddSeconds(1);else visibleUntil.Remove(vessel.id);
                     var owner = Owner(vessel.id);
@@ -183,7 +185,7 @@ namespace LmpClient.Systems.Agency
         }
         internal static void Clear()
         {
-            lock(gate){endpoints.Clear();grants=Array.Empty<VisibilityAgencyGrant>();overrides=Array.Empty<VisibilityCraftOverride>();sharedOwners.Clear();localOverrides.Clear();visibleUntil.Clear();physicsUntil.Clear();sensors.Clear();ready=false;revision=-1;nextIndex=default(DateTime);index=new VisibilitySensorIndex(Array.Empty<VisibilitySensor>());refreshPresentation=true;}
+            lock(gate){endpoints.Clear();grants=Array.Empty<VisibilityAgencyGrant>();overrides=Array.Empty<VisibilityCraftOverride>();sharedOwners.Clear();localOverrides.Clear();visibleUntil.Clear();physicsUntil.Clear();sensors.Clear();ready=false;revision=-1;nextIndex=default(DateTime);index=new VisibilitySensorIndex(Array.Empty<VisibilitySensor>());activeIndex=index;refreshPresentation=true;}
             VisibilityContacts.Clear();
             LatestStatus=null;
         }

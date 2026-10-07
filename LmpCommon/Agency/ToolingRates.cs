@@ -6,7 +6,7 @@ namespace LmpCommon.Agency
         public const double ToolingCost = 5;
         public const double TooledLaunch = 0.1;
         public const double UntooledLaunch = 2.0;
-        public const double Combine = 0.1;
+        public const double Combine = 0;
         /// <summary>What a server that predates the untooled multiplier charges: face value.</summary>
         public const double LegacyUntooledLaunch = 1.0;
     }

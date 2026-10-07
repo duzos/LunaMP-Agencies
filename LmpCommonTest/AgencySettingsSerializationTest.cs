@@ -57,7 +57,7 @@ namespace LmpCommonTest
             var factory = new ServerMessageFactory();
             var peer = new NetClient(new NetPeerConfiguration("DetectionSettings"));
             var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
-            source.AgencyDetectionRangeMultiplier = .2;
+            source.AgencyDetectionRangeMultiplier = .5;
             source.UntooledLaunchMultiplier = 4;
             var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
@@ -66,7 +66,7 @@ namespace LmpCommonTest
             parsed.AgencyDetectionRangeMultiplier = .9;
             parsed.Deserialize(incoming);
             Assert.AreEqual(4d, parsed.UntooledLaunchMultiplier);
-            Assert.AreEqual(missingBits == 0 ? .2 : .01, parsed.AgencyDetectionRangeMultiplier);
+            Assert.AreEqual(missingBits == 0 ? .5 : .2, parsed.AgencyDetectionRangeMultiplier);
         }
 
         [DataTestMethod]
@@ -85,7 +85,7 @@ namespace LmpCommonTest
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
             incoming.LengthBits = outgoing.LengthBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>(); parsed.Deserialize(incoming);
-            Assert.AreEqual(.01, parsed.AgencyDetectionRangeMultiplier);
+            Assert.AreEqual(.2, parsed.AgencyDetectionRangeMultiplier);
         }
         // Locate the first agency flag by changing only that bit. This keeps historical
         // fixtures stable when more independent flags are appended in later features.
@@ -294,7 +294,7 @@ namespace LmpCommonTest
         public void NewMessagesDefaultToTheShippedRates()
         {
             var settings = new ServerMessageFactory().CreateNewMessageData<SettingsReplyMsgData>();
-            Assert.AreEqual(.01, settings.AgencyDetectionRangeMultiplier);
+            Assert.AreEqual(.2, settings.AgencyDetectionRangeMultiplier);
             Assert.AreEqual(ToolingDefaults.ToolingCost, settings.ToolingCostMultiplier); Assert.AreEqual(ToolingDefaults.TooledLaunch, settings.TooledLaunchMultiplier);
             Assert.AreEqual(ToolingDefaults.UntooledLaunch, settings.UntooledLaunchMultiplier); Assert.AreEqual(ToolingDefaults.Combine, settings.ToolingCombineMultiplier);
         }

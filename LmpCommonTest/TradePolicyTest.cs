@@ -42,6 +42,48 @@ namespace LmpCommonTest
             Assert.IsFalse(TradePolicy.CanUseEntitlement(original, Array.Empty<string>()));
             Assert.IsFalse(TradePolicy.CanUseEntitlement(null, new[] { fingerprint }));
         }
+        private static ToolingQuote Quote(double science, double nonScience, double cargo, double launch = 0) => new ToolingQuote { Success = true, Fingerprint = "f", ScienceCost = science, NonScienceCost = nonScience, CargoCost = cargo, LaunchCost = launch };
+        [TestMethod]
+        public void PrepaidLaunchCostIsScienceAtFaceValuePlusOtherPartsAtTheSellerRate()
+        {
+            Assert.AreEqual(300d + 100 * 2, TradePolicy.PrepaidLaunchCost(Quote(300, 100, 55), 2), 1e-9);
+            Assert.AreEqual(300d + 100 * .1, TradePolicy.PrepaidLaunchCost(Quote(300, 100, 55), .1), 1e-9);
+            Assert.AreEqual(0d, TradePolicy.PrepaidLaunchCost(Quote(0, 0, 55), 2), 1e-9);
+        }
+        [TestMethod]
+        public void VoucherChargeIsInventoryPlusAnyPartCostAboveThePrepayment()
+        {
+            var quote = Quote(300, 100, 40);
+            Assert.AreEqual(40d, TradePolicy.VoucherLaunchCharge(quote, 500, 2), 1e-9, "Prepaid exactly covers the parts: inventory only.");
+            Assert.AreEqual(40d, TradePolicy.VoucherLaunchCharge(quote, 900, 2), 1e-9, "Overpayment is never refunded to the buyer.");
+            Assert.AreEqual(40d + 60, TradePolicy.VoucherLaunchCharge(quote, 440, 2), 1e-9, "Extra fuel or parts are topped up.");
+        }
+        [TestMethod]
+        public void VoucherPolicyRejectsNonFiniteAndNegativeInputs()
+        {
+            var quote = Quote(1, 1, 1);
+            Assert.ThrowsException<ArgumentException>(() => TradePolicy.PrepaidLaunchCost(quote, double.NaN));
+            Assert.ThrowsException<ArgumentException>(() => TradePolicy.PrepaidLaunchCost(quote, -1));
+            Assert.ThrowsException<ArgumentException>(() => TradePolicy.PrepaidLaunchCost(new ToolingQuote { Success = false }, 1));
+            Assert.ThrowsException<ArgumentException>(() => TradePolicy.PrepaidLaunchCost(Quote(ToolingPolicy.MaxCost, ToolingPolicy.MaxCost, 0), 2));
+            Assert.ThrowsException<ArgumentException>(() => TradePolicy.VoucherLaunchCharge(quote, -1, 1));
+            Assert.ThrowsException<ArgumentException>(() => TradePolicy.VoucherLaunchCharge(quote, 1, double.PositiveInfinity));
+            Assert.ThrowsException<ArgumentException>(() => TradePolicy.VoucherLaunchCharge(null, 1, 1));
+        }
+        [TestMethod]
+        public void SelectVoucherSkipsSpentReservedAndForeignVouchersAndOnlyTakesAWorthwhileOneInCareer()
+        {
+            TradeEntitlement V(string fingerprint = "f", double prepaid = 200, bool redeemed = false, bool reserved = false) => new TradeEntitlement { EntitlementId = Guid.NewGuid(), Kind = TradeEntitlementKind.SingleLaunch, Fingerprint = fingerprint, PrepaidFunds = prepaid, LaunchMultiplier = 2, Redeemed = redeemed, LaunchId = reserved ? Guid.NewGuid() : Guid.Empty };
+            var quote = Quote(0, 100, 40, launch: 240);
+            var spent = V(redeemed: true); var reserved = V(reserved: true); var foreign = V("other"); var worthless = V(prepaid: 0); var good = V(); var later = V();
+            var permanent = new TradeEntitlement { EntitlementId = Guid.NewGuid(), Kind = TradeEntitlementKind.Permanent, Fingerprint = "f" };
+            Assert.AreSame(good, TradePolicy.SelectVoucher(new[] { permanent, spent, reserved, foreign, good, later }, quote, true));
+            Assert.IsNull(TradePolicy.SelectVoucher(new[] { permanent, spent, reserved, foreign }, quote, true));
+            Assert.IsNull(TradePolicy.SelectVoucher(new[] { worthless }, quote, true), "A voucher that saves nothing is left unspent in career.");
+            Assert.AreSame(worthless, TradePolicy.SelectVoucher(new[] { worthless }, quote, false), "Without funds the voucher still grants its research allowance.");
+            Assert.IsNull(TradePolicy.SelectVoucher(null, quote, true));
+            Assert.IsNull(TradePolicy.SelectVoucher(new[] { good }, new ToolingQuote { Success = false }, true));
+        }
         private static ToolingPart Part(string name) => new ToolingPart { Name = name, UnitCost = 100 };
     }
 }

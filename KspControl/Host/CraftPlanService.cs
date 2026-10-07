@@ -77,6 +77,7 @@ public static class CraftPlanService
  {
   if(t==null || t.Type==JTokenType.Null) return null;
   if(t.Type!=JTokenType.Integer) throw new FormatException(what+" must be an integer");
+  if(((JValue)t).Value is System.Numerics.BigInteger) throw new FormatException(what+" is out of range");
   var v=(long)t;
   return v is < int.MinValue or > int.MaxValue ? throw new FormatException(what+" is out of range") : (int)v;
  }

@@ -428,6 +428,7 @@ internal static class CatalogFx
  [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":{}}","parts must be an array")]
  [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"configuration\":\"x\"}]}","configuration must be an array")]
  [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\"}]} {}","valid graph JSON")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"stage\":100000000000000000000}]}","stage is out of range")]
  public async Task StrictGraphParsingRejectsCoercionCommentsAndCaseVariants(string json,string detail)
  {
   var fake=CatalogFx.Stock();

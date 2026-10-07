@@ -91,6 +91,8 @@ namespace LmpClient.Systems.Agency
                 var editor = HighLogic.LoadedSceneIsEditor ? EditorLogic.fetch : null;
                 if (editor == null || editor.ship == null || editor.ship.Parts.Count == 0) { reason = "editor_unavailable"; return false; }
                 if (ToolingClient.LaunchPending) { reason = "launch_pending"; return false; }
+                // The Launch button is disabled by this lock; calling the routine around it would skip the stock gate.
+                if (!InputLockManager.IsUnlocked(ControlTypes.EDITOR_LAUNCH)) { reason = "launch_locked"; return false; }
                 if (string.IsNullOrEmpty(launchSiteName) || !EditorDriver.ValidLaunchSite(launchSiteName)) { reason = "launch_site_invalid"; return false; }
                 var select = AccessTools.Method(typeof(EditorDriver), "setLaunchSite", new[] { typeof(string) });
                 if (select == null) { reason = "launch_site_selector_unavailable"; return false; }
@@ -105,6 +107,20 @@ namespace LmpClient.Systems.Agency
             }
             catch (TargetInvocationException e) { reason = "launch_exception:" + (e.InnerException ?? e).GetType().Name; return false; }
             catch (Exception e) { reason = "launch_error:" + e.GetType().Name; return false; }
+        }
+
+        /// <summary>Closes a stock pre-flight prompt left open by BeginLaunch, through the editor's own abortLaunch. True only when it was invoked and no reservation is pending.</summary>
+        public static bool CloseLaunchPrompt()
+        {
+            try
+            {
+                var editor = HighLogic.LoadedSceneIsEditor ? EditorLogic.fetch : null;
+                var abort = editor == null ? null : AccessTools.Method(typeof(EditorLogic), "abortLaunch", Type.EmptyTypes);
+                if (abort == null) return false;
+                abort.Invoke(editor, null);
+                return !ToolingClient.LaunchPending;
+            }
+            catch (Exception) { return false; }
         }
 
         /// <summary>Cancels a reservation whose flight scene has not started loading, through the normal CancelLaunch command. False when there is nothing to cancel.</summary>

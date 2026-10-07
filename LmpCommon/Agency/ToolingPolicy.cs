@@ -171,17 +171,20 @@ namespace LmpCommon.Agency
                     .Select(x => new Candidate { Fingerprint = x.design.Fingerprint, Counts = names.Select(n => x.counts.TryGetValue(n, out var count) ? count : 0).ToArray() })
                     .GroupBy(c => c.Fingerprint, StringComparer.Ordinal).Select(g => g.First()).OrderBy(c => c.Fingerprint, StringComparer.Ordinal).ToArray();
             }
-            internal Cover Solve() => Solve(initial, 0);
-            private Cover Solve(int[] remaining, int depth)
+            internal Cover Solve() => Solve(0, initial);
+            // Each saved design covers at most one instance per quote. Candidates are tried in index order, so the state is (next candidate, remaining parts)
+            // and there are no permutations: every subset of designs is considered exactly once.
+            private Cover Solve(int start, int[] remaining)
             {
-                var key = string.Join(",", remaining.Select(n => n.ToString(CultureInfo.InvariantCulture)));
+                var key = start.ToString(CultureInfo.InvariantCulture) + ":" + string.Join(",", remaining.Select(n => n.ToString(CultureInfo.InvariantCulture)));
                 if (cache.TryGetValue(key, out var cached)) return cached;
-                if (++states > MaxSearchStates || depth > 256) throw new ArgumentException("This combination is too complex to quote safely. Tool smaller assemblies first.");
+                if (++states > MaxSearchStates) throw new ArgumentException("This combination is too complex to quote safely. Tool smaller assemblies first.");
                 var best = new Cover();
                 for (var i = 0; i < remaining.Length; i++) best.Cost += costs[i].Take(remaining[i]).Sum() * multiplier;
                 CheckCost(best.Cost);
-                foreach (var candidate in candidates)
+                for (var index = start; index < candidates.Length; index++)
                 {
+                    var candidate = candidates[index];
                     var next = new int[remaining.Length]; var fits = true; double replaced = 0;
                     for (var i = 0; i < remaining.Length; i++)
                     {
@@ -189,16 +192,14 @@ namespace LmpCommon.Agency
                         if (next[i] < 0) { fits = false; break; }
                         replaced += costs[i].Skip(next[i]).Take(candidate.Counts[i]).Sum() * multiplier;
                     }
-                    // The fee is the combine share of the full tooling value of the parts this craft would stop paying for. It ignores what the saved design cost,
-                    // so nested combines stay a constant fraction per level.
+                    // The fee is the combine share of the full tooling value of the parts this craft would stop paying for. It ignores what the saved design cost.
                     var fee = replaced * combine;
                     if (!fits || fee >= replaced) continue;
-                    var tail = Solve(next, depth + 1);
+                    var tail = Solve(index + 1, next);
                     var total = CheckCost(tail.Cost + fee);
                     if (total >= best.Cost) continue;
                     best = new Cover { Cost = total, Matches = tail.Matches.ToDictionary(p => p.Key, p => new ToolingMatch { Fingerprint = p.Key, Count = p.Value.Count, CombineCost = p.Value.CombineCost }, StringComparer.Ordinal) };
-                    if (!best.Matches.TryGetValue(candidate.Fingerprint, out var match)) best.Matches[candidate.Fingerprint] = match = new ToolingMatch { Fingerprint = candidate.Fingerprint };
-                    match.Count++; match.CombineCost += fee;
+                    best.Matches[candidate.Fingerprint] = new ToolingMatch { Fingerprint = candidate.Fingerprint, Count = 1, CombineCost = fee };
                 }
                 cache[key] = best;
                 return best;

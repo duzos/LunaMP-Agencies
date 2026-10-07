@@ -83,7 +83,7 @@ namespace LmpClient.Windows.Agency
                 GUILayout.Label("Launch after tooling  " + Money(ToolingPolicy.LaunchCost(quote.ScienceCost, quote.CargoCost, quote.NonScienceCost, true, ToolingClient.Rates())), text);
                 GUILayout.Label("Tooling discounts future launches of this exact part list. Layout changes are fine; changing parts needs new tooling.", text);
                 foreach (var match in quote.Matches)
-                    GUILayout.Label(match.Count + " × existing subassembly · combine fee " + Money(match.CombineCost), text);
+                    GUILayout.Label(match.Count + " × existing subassembly" + (match.CombineCost > 0 ? " · combine fee " + Money(match.CombineCost) : string.Empty), text);
                 if (confirmFingerprint != null && (confirmFingerprint != quote.Fingerprint || confirmCost != quote.ToolingCost)) confirmFingerprint = null;
                 if (confirmFingerprint == null)
                 {

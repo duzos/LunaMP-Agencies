@@ -251,13 +251,13 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void ASurfacePartIsStillRefusedAtAdmissionWhileItsPartsAreUnverified()
+        public void ASurfacePartWithUnverifiedPartsIsNoLongerRefusedForConstructionSupport()
         {
-            rig.Policy = null; // production table: the radial parts have no structural-load evidence yet
+            rig.Policy = null; // production table: the radial parts have no structural-load evidence, which is informational only
             var request = new BridgeRequest { RequestId = "w", Operation = EditorOperations.ApplyCraft, LeaseId = rig.Lease, Arguments = new JObject
             { ["requestId"] = "apply-0001", ["graph"] = RadialGraph, ["expectedPlanHash"] = new string('a', 64), ["expectedRevision"] = rig.Token() } };
             var response = rig.Service.Handle(request);
-            Assert.AreEqual("part_construction_unverified", response.ReasonCode);
+            Assert.AreEqual("plan_changed", response.ReasonCode, "it re-plans and only the fake planHash differs");
             Assert.AreEqual(0, rig.Port.LoadCalls);
         }
     }

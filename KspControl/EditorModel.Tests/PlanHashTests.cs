@@ -55,7 +55,8 @@ public class PlanHashTests
         Assert.IsFalse(bad.Ok); Assert.IsNull(PlanHasher.Hash(g, bad, c.Hash())); Assert.IsNull(PlanHasher.Canonical(g, null!, c.Hash()));
         c.Parts["fuelTankSmall"].ConstructionSupport = "unverified";
         var unverified = CraftPlanner.Plan(GoldenFixtures.T1(), c);
-        Assert.IsNull(PlanHasher.Hash(GoldenFixtures.T1(), unverified, c.Hash()));
+        Assert.IsTrue(unverified.Ok, "an unverified part plans; construction support is informational");
+        Assert.IsNotNull(PlanHasher.Hash(GoldenFixtures.T1(), unverified, c.Hash()));
     }
 
     [TestMethod]

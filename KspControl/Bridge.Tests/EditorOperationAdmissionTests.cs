@@ -235,7 +235,7 @@ namespace KspControl.BridgeTests
             Assert.IsTrue(((JArray)response.Data["issues"]).Any(i => (string)i["code"] == "unknown_part"));
         }
 
-        [TestMethod] public void AnUnverifiedPartIsRefusedByTheCatalog()
+        [TestMethod] public void AnUnverifiedPartIsNotRefusedForConstructionSupport()
         {
             rig.Reader.Parts["fuelTankLarge"] = new CatalogPartSource
             {
@@ -246,7 +246,7 @@ namespace KspControl.BridgeTests
             var graph = OperationRig.TwoStageGraph.Replace("fuelTankSmall", "fuelTankLarge");
             var request = new BridgeRequest { RequestId = "w", Operation = EditorOperations.ApplyCraft, LeaseId = rig.Lease, Arguments = new JObject
             { ["requestId"] = "apply-0001", ["graph"] = graph, ["expectedPlanHash"] = new string('a', 64), ["expectedRevision"] = rig.Token() } };
-            Refused(rig.Service.Handle(request), "part_construction_unverified");
+            Refused(rig.Service.Handle(request), "plan_changed");
         }
 
         [TestMethod] public void AnUnsupportedConfigurationIsRefused()

@@ -164,7 +164,8 @@ public class PlannerTests
         Assert.IsTrue(CraftPlanner.Plan(g, cat).Issues.Any(i => i.Code == "unknown_part"));
         cat = Fx.TwinCatalog(); cat.Parts["fuelTankSmall"].Buildable = false; cat.Parts["liquidEngine.v2"].ConstructionSupport = "unverified";
         var issues = CraftPlanner.Plan(Fx.TwinGraph(), cat).Issues.Select(i => i.Code).ToList();
-        CollectionAssert.IsSubsetOf(new[] { "part_not_buildable", "part_construction_unverified" }, issues);
+        CollectionAssert.Contains(issues, "part_not_buildable");
+        CollectionAssert.DoesNotContain(issues, "part_construction_unverified", "construction support is informational, never an issue");
         g = Fx.TwinGraph(); g.Parts[2].ParentNode = "top"; g.Parts[1].ParentNode = "bottom";
         g.Parts[2].Parent = "pod"; g.Parts[2].ParentNode = "bottom";
         Assert.IsTrue(CraftPlanner.Plan(g, Fx.TwinCatalog()).Issues.Any(i => i.Code == "node_occupied"));

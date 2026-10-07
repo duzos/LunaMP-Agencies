@@ -218,14 +218,15 @@ internal static class CatalogFx
   var c=CatalogFx.Stock(); c.Parts["fuelTankSmall"]["buildable"]=false; c.Parts["liquidEngine.v2"]["constructionSupport"]="unverified";
   var data=Data(await Plan(CatalogFx.Pod(),c));
   var issues=((JArray)data["issues"]!).Select(i => $"{(string)i["code"]!}:{(string?)i["partId"]}").ToArray();
-  CollectionAssert.Contains(issues,"part_not_buildable:tank"); CollectionAssert.Contains(issues,"part_construction_unverified:engine");
+  CollectionAssert.Contains(issues,"part_not_buildable:tank"); Assert.IsFalse(issues.Any(i => i.StartsWith("part_construction_unverified",StringComparison.Ordinal)));
   CollectionAssert.AreEqual(new[] { "liquidEngine.v2" },((JArray)data["catalog"]!["unverified"]!).Select(t => (string)t!).ToArray());
  }
 
- [TestMethod] public async Task UnverifiedStockParts()
+ [TestMethod] public async Task UnverifiedStockPartsPlanAndAreListedForInformationOnly()
  {
   var data=Data(await Plan(CatalogFx.T1(),CatalogFx.Stock("unverified")));
-  Assert.AreEqual(3,Codes(data).Count(c => c=="part_construction_unverified")); Assert.IsFalse((bool)data["ok"]!);
+  Assert.AreEqual(0,Codes(data).Count(c => c=="part_construction_unverified")); Assert.IsTrue((bool)data["ok"]!);
+  Assert.AreEqual(3,((JArray)data["catalog"]!["unverified"]!).Count);
  }
 
  [TestMethod] public async Task SandboxWithoutResearchIsReported()
@@ -403,12 +404,11 @@ internal static class CatalogFx
   Assert.IsFalse((bool)data["ok"]!); Assert.AreEqual(3,Codes(data).Count(c => c=="part_locked")); Assert.AreEqual("unreadable",(string?)data["catalog"]!["researchAndDevelopment"]);
  }
 
- [TestMethod] public async Task T3WithTheRealDefaultSupportPolicyIsRefusedAsUnverified()
+ [TestMethod] public async Task T3WithTheRealDefaultSupportPolicyPlansAndReportsUnverifiedPartsAsInformation()
  {
   var data=Data(await Plan(CatalogFx.T3(2),new MapperBackedCatalog(CatalogFx.Stock())));
-  Assert.IsFalse((bool)data["ok"]!);
-  var unverified=((JArray)data["issues"]!).Where(i => (string?)i["code"]=="part_construction_unverified").Select(i => (string)i["partId"]!).OrderBy(x => x).ToArray();
-  CollectionAssert.AreEqual(new[] { "cone","rd","srb" },unverified);
+  Assert.IsTrue((bool)data["ok"]!,data["issues"]!.ToString());
+  Assert.IsFalse(((JArray)data["issues"]!).Any(i => (string?)i["code"]=="part_construction_unverified"));
   CollectionAssert.AreEquivalent(new[] { "radialDecoupler","solidBooster.sm.v2","pointyNoseConeB" },((JArray)data["catalog"]!["unverified"]!).Select(t => (string)t!).ToArray());
  }
 

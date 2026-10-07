@@ -100,7 +100,6 @@ namespace KspControl.EditorModel
                 var def = catalog.Find(p.Part);
                 if (def == null) { issues.Add(new PlanIssue("unknown_part", p.Id)); continue; }
                 if (!def.Buildable) issues.Add(new PlanIssue("part_not_buildable", p.Id));
-                if (!def.IsVerified) issues.Add(new PlanIssue("part_construction_unverified", p.Id));
             }
             var children = new Dictionary<string, List<GraphPartDto>>(StringComparer.Ordinal);
             foreach (var p in graph.Parts)

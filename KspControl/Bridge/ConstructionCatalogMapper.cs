@@ -63,12 +63,15 @@ namespace KspControl.Bridge
         CatalogPartSource Read(string partName);
     }
 
-    /// <summary>Which stock parts have construction evidence (S0 twin comparison). Everything else is reported "unverified" and the planner refuses it.</summary>
+    /// <summary>
+    /// Which stock parts have construction evidence (S0 twin comparison). Informational only: the catalog reports "verified" or "unverified",
+    /// and the planner plans every installed, buildable part either way (user decision 2026-10-07).
+    /// </summary>
     public sealed class ConstructionSupportPolicy
     {
         /// <summary>
         /// The one data table of parts with live structural-load evidence (plan 37 revision 5; 33-log S0-t1 and S0-t2, sandbox).
-        /// Add a row, with its evidence, when a part is verified live. Anything not listed is reported "unverified" and the planner refuses it.
+        /// Add a row, with its evidence, when a part is verified live. Anything not listed is reported "unverified" (informational; never refused).
         /// </summary>
         public static readonly KeyValuePair<string, string>[] VerifiedTable =
         {

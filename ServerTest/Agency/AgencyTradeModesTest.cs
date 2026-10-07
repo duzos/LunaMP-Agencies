@@ -387,6 +387,26 @@ namespace ServerTest.Agency
             finally { GeneralSettings.SettingsStore.GameMode = mode; }
         }
 
+        [TestMethod]
+        public void AcceptOutsideCareerStoresNoPrepayEvenIfTheOfferPromisedOne()
+        {
+            var mode = GeneralSettings.SettingsStore.GameMode;
+            try
+            {
+                using (var f = Start())
+                {
+                    var offer = SingleOffer(f);
+                    var created = f.Economy.Execute(offer);
+                    Assert.IsTrue(created.Success, created.Reason);
+                    GeneralSettings.SettingsStore.GameMode = GameMode.Science;
+                    var accepted = f.Buy(Accept(offer.Trade.OfferId));
+                    Assert.IsTrue(accepted.Success, accepted.Reason);
+                    Assert.AreEqual(0d, Held(f).Single().PrepaidFunds, "Nothing was charged, so a later career switch must not redeem a prepay.");
+                }
+            }
+            finally { GeneralSettings.SettingsStore.GameMode = mode; }
+        }
+
         private static JObject Written(AgencyTradeTest.Fixture f)
         {
             var path = AgencyEconomyStore.FilePath;

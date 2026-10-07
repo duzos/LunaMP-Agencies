@@ -224,7 +224,7 @@ namespace Server.Agency
                 // The seller builds to order: the prepayment is taken now, after the price has been received.
                 if (UsesFunds && sellerBalance.Funds < trade.PrepaidLaunchFunds) throw new InvalidOperationException("Seller cannot prepay the launch.");
                 Charge(sellerBalance, trade.PrepaidLaunchFunds);
-                AddEntitlement(candidate, trade.BuyerAgencyId, new TradeEntitlement { EntitlementId = Guid.NewGuid(), SellerAgencyId = trade.SellerAgencyId, Fingerprint = trade.DesignFingerprint, BlueprintName = trade.BlueprintName, Editor = trade.Editor, BlueprintHash = saved.BlueprintHash, BlueprintData = Copy(saved.Blueprint), Kind = TradeEntitlementKind.SingleLaunch, PrepaidFunds = trade.PrepaidLaunchFunds, LaunchMultiplier = trade.LaunchMultiplier });
+                AddEntitlement(candidate, trade.BuyerAgencyId, new TradeEntitlement { EntitlementId = Guid.NewGuid(), SellerAgencyId = trade.SellerAgencyId, Fingerprint = trade.DesignFingerprint, BlueprintName = trade.BlueprintName, Editor = trade.Editor, BlueprintHash = saved.BlueprintHash, BlueprintData = Copy(saved.Blueprint), Kind = TradeEntitlementKind.SingleLaunch, PrepaidFunds = UsesFunds ? trade.PrepaidLaunchFunds : 0, LaunchMultiplier = trade.LaunchMultiplier });
             }
             else if (saved.Design != null)
             {

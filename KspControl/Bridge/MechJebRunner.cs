@@ -40,9 +40,9 @@ namespace KspControl.Bridge
             {
                 if (job.Kind == AutopilotKind.Ascent)
                 {
-                    job.Settings = mechjeb.ConfigureAscent(job.TargetAltitudeMeters, job.InclinationDegrees, job.Autostage);
+                    job.Settings = mechjeb.ConfigureAscent(job.VesselId, job.TargetAltitudeMeters, job.InclinationDegrees, job.Autostage);
                     job.Dispatched = true; job.EffectsApplied.Add("ascent_settings_written");
-                    mechjeb.EngageAscent(job.User);
+                    mechjeb.EngageAscent(job.VesselId, job.User);
                     job.Engaged = true; job.EffectsApplied.Add("ascent_engaged");
                     job.Phase = "ascending";
                 }
@@ -50,7 +50,7 @@ namespace KspControl.Bridge
                 {
                     job.StartNodes = flight.Read()?.ManeuverNodes ?? 0;
                     job.Dispatched = true;
-                    mechjeb.EngageNode(job.User, job.All);
+                    job.SavedAutowarp = mechjeb.EngageNode(job.VesselId, job.User, job.All);
                     job.Engaged = true; job.EffectsApplied.Add(job.All ? "node_executor_engaged_all" : "node_executor_engaged_one");
                     job.Phase = "executing_node";
                 }
@@ -107,7 +107,7 @@ namespace KspControl.Bridge
             // 4. Someone else engaged a controller (a person in the MechJeb window, AtmosphereAutopilot).
             if (options.ScanEveryFrames > 0 && job.Frames % options.ScanEveryFrames == 0)
             {
-                var others = mechjeb.FindCompetitors(job.User, true);
+                var others = mechjeb.FindCompetitors(job.VesselId, job.User);
                 if (others.Count > 0) { Takeover(job, "another controller engaged: " + string.Join(",", others)); return; }
             }
 
@@ -116,14 +116,22 @@ namespace KspControl.Bridge
 
         private void StepAscent(AutopilotJob job, FlightTelemetry t)
         {
-            var reading = mechjeb.ReadAscent(job.User);
+            var reading = mechjeb.ReadAscent(job.VesselId, job.User);
             job.ModuleStatus = reading.Status;
             if (reading.OtherUsers > 0) { Takeover(job, "another user engaged the ascent module"); return; }
             var now = clock();
             var ended = !reading.Enabled || !reading.OwnUserPresent;
-            var inOrbit = t.Orbiting && t.PeriapsisMeters > t.AtmosphereTopMeters;
+            var inOrbit = t.Orbiting && t.PeriapsisMeters > t.OrbitFloorMeters;
             if (!job.OrbitReached)
             {
+                if (ended)
+                {
+                    // MechJeb is done: judge the orbit as it is now, there is nothing left to wait for.
+                    if (inOrbit) { job.OrbitReached = true; job.AscentFinished = true; Finish(job, JobStatuses.Completed, null, "periapsis is above the orbit floor and MechJeb ended its ascent"); return; }
+                    // Engaged through the ascent window, an end before orbit is the Disengage button (or MechJeb giving up): leave the vessel to the person.
+                    if (reading.ViaWindow) { Takeover(job, "the ascent was switched off in MechJeb before the orbit was reached"); return; }
+                    Finish(job, JobStatuses.Failed, AutopilotReasons.AscentEndedWithoutOrbit, "MechJeb ended or was switched off before periapsis cleared the orbit floor"); return;
+                }
                 if (inOrbit)
                 {
                     if (job.OrbitSince < 0) job.OrbitSince = now;
@@ -138,14 +146,13 @@ namespace KspControl.Bridge
                 { job.AscentFinished = false; Finish(job, JobStatuses.Completed, null, "periapsis is above the atmosphere; MechJeb was still refining the orbit and was released"); }
                 return;
             }
-            if (ended) { Finish(job, JobStatuses.Failed, AutopilotReasons.AscentEndedWithoutOrbit, "MechJeb ended or was switched off before periapsis cleared the atmosphere"); return; }
             if (now - job.StartedAt > options.AscentTimeoutMs) { Finish(job, JobStatuses.Failed, AutopilotReasons.Timeout, "no orbit within the time allowed"); return; }
-            job.Phase = t.AltitudeMeters < 1000 ? "launch" : t.AltitudeMeters < t.AtmosphereTopMeters ? "ascending" : "coasting_to_circularize";
+            job.Phase = t.AltitudeMeters < 1000 ? "launch" : t.AltitudeMeters < t.OrbitFloorMeters ? "ascending" : "coasting_to_circularize";
         }
 
         private void StepNode(AutopilotJob job, FlightTelemetry t)
         {
-            var reading = mechjeb.ReadNode(job.User);
+            var reading = mechjeb.ReadNode(job.VesselId, job.User);
             job.NodeState = reading.State;
             if (reading.OtherUsers > 0) { Takeover(job, "another user engaged the node executor"); return; }
             if (!reading.Enabled || !reading.OwnUserPresent)
@@ -179,14 +186,14 @@ namespace KspControl.Bridge
             if (job.Kind != AutopilotKind.Ascent && job.Kind != AutopilotKind.ExecuteNode) return;
             if (job.Engaged || job.Dispatched)
             {
-                try { if (job.Kind == AutopilotKind.Ascent) mechjeb.DisengageAscent(job.User); else mechjeb.DisengageNode(job.User); job.EffectsApplied.Add("released"); }
+                try { if (job.Kind == AutopilotKind.Ascent) mechjeb.DisengageAscent(job.VesselId, job.User); else mechjeb.DisengageNode(job.VesselId, job.User, job.SavedAutowarp); job.EffectsApplied.Add("released"); }
                 catch (Exception) { job.EffectsApplied.Add("release_failed"); }
                 job.Engaged = false;
             }
             // A finished job leaves the throttle as MechJeb set it; every other ending cuts it, so no engine keeps burning unattended.
             if (!cutThrottle || (!job.Dispatched && !job.Engaged)) return;
-            try { mechjeb.ThrustOff(); } catch (Exception) { }
-            try { flight.CutThrottle(); job.EffectsApplied.Add("throttle_cut"); } catch (Exception) { }
+            try { mechjeb.ThrustOff(job.VesselId); } catch (Exception) { }
+            try { flight.CutThrottle(job.VesselId); job.EffectsApplied.Add("throttle_cut"); } catch (Exception) { }
         }
 
         /// <summary>Exception messages in this assembly are reason codes. Anything else is hidden.</summary>

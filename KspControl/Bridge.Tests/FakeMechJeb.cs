@@ -61,6 +61,7 @@ namespace FakeMechJeb
         public string NextNodeBurnTime() { return "00:01:30"; }
     }
 
+    public class MechJebModuleAscentMenu : ComputerModule { }
     public class MechJebModuleLandingAutopilot : ComputerModule { }
     public class MechJebModuleRendezvousAutopilot : ComputerModule { }
     public class MechJebModuleDockingAutopilot : ComputerModule { }
@@ -91,10 +92,15 @@ namespace FakeMechJeb
         public MechJebModuleRendezvousAutopilot Rendezvous = new MechJebModuleRendezvousAutopilot();
         public MechJebModuleDockingAutopilot Docking = new MechJebModuleDockingAutopilot();
         public MechJebModuleSpaceplaneAutopilot Spaceplane = new MechJebModuleSpaceplaneAutopilot();
+        public MechJebModuleAscentMenu AscentMenu = new MechJebModuleAscentMenu();
+        /// <summary>False models an install whose ascent window module cannot be found.</summary>
+        public bool HasMenu = true;
         public MechJebCore() { MasterMechJeb = this; }
+        /// <summary>What MechJeb does when the ascent reaches its circularization: the node executor and the attitude controller are used with the ascent module as the user.</summary>
+        public void HandOffToNode() { Node.Users.Add(Ascent); Node.Enabled = true; Attitude.Users.Add(Ascent); Attitude.Enabled = true; }
         public T GetComputerModule<T>() where T : class
         {
-            return new ComputerModule[] { Rendezvous, Docking, Spaceplane, Landing }.OfType<T>().FirstOrDefault();
+            return new ComputerModule[] { Rendezvous, Docking, Spaceplane, Landing, HasMenu ? AscentMenu : null }.OfType<T>().FirstOrDefault();
         }
     }
 }

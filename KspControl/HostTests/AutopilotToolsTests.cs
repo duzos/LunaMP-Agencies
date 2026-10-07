@@ -17,8 +17,8 @@ namespace KspControl.HostTests;
   var mutations=new MutationService(bridge,keeper,journal) { PollInterval=TimeSpan.FromMilliseconds(5) };
   return new Rig(bridge,keeper,journal,new ControlTools(bridge,keeper,journal),mutations,new AutopilotTools(bridge,new AutopilotService(mutations)),new MutationTools(mutations));
  }
- private static JObject Acquired()=>new() { ["leaseId"]=Lease,["purpose"]="fly to orbit",["expiresInSeconds"]=300,["grantId"]="grant-1",["generation"]=3,["epoch"]="epoch-9",["entity"]=AutopilotOperations.Entity };
- private static JObject StatusData(params string[] operations)=>new() { ["grant"]=new JObject { ["state"]="valid",["id"]="grant-1",["generation"]=3,["operations"]=new JArray(operations.Length==0 ? new[]{ AutopilotOperations.Effect } : operations),["facilities"]=new JArray("VAB"),["expiresUtc"]="2099-01-01T00:00:00.000Z" },["lease"]=new JObject { ["held"]=false },["cooldownSeconds"]=0 };
+ private static JObject Acquired()=>new() { ["leaseId"]=Lease,["purpose"]="fly to orbit",["expiresInSeconds"]=300,["grantId"]="grant-1",["generation"]=3,["epoch"]="epoch-9",["entity"]=AutopilotOperations.EntityPrefix+"vessel-1" };
+ private static JObject StatusData(params string[] operations)=>new() { ["grant"]=new JObject { ["state"]="valid",["id"]="grant-1",["generation"]=3,["operations"]=new JArray(operations.Length==0 ? new[]{ AutopilotOperations.Effect } : operations),["facilities"]=new JArray(operations.Contains(AutopilotOperations.Effect)||operations.Length==0 ? "FLIGHT" : "VAB"),["expiresUtc"]="2099-01-01T00:00:00.000Z" },["lease"]=new JObject { ["held"]=false },["cooldownSeconds"]=0 };
  private static BridgeResponse Running(string requestId,string phase="ascending")=>new() { Status="running",Data=new JObject { ["operation"]="autopilot_ascent",["requestId"]=requestId,["phase"]=phase,["notDispatched"]=false } };
  private static BridgeResponse Done(string requestId,string status="completed",string? reason=null)=>new() { Status=status,ReasonCode=reason,Data=new JObject { ["operation"]="autopilot_ascent",["requestId"]=requestId,["phase"]="done",["notDispatched"]=false,["orbitReached"]=status=="completed" } };
  private static BridgeResponse ControlOrElse(BridgeRequest r,Func<BridgeRequest,BridgeResponse> other,params string[] operations)=>r.Operation switch
@@ -80,13 +80,13 @@ namespace KspControl.HostTests;
  [TestMethod] public async Task AnEditorOnlyGrantMirrorHasNoFlightEntity()
  {
   using var bridge=new FakeBridge(r=>ControlOrElse(r,_=>FakeBridge.Ok(new JObject()),OperationEffects.ReplaceCraft)); var rig=await Acquire(OperationEffects.ReplaceCraft);
-  CollectionAssert.DoesNotContain(rig.Journal.CurrentGrant!.Entities,AutopilotOperations.Entity); rig.Journal.Dispose();
+  CollectionAssert.DoesNotContain(rig.Journal.CurrentGrant!.Entities,AutopilotOperations.JournalEntity); rig.Journal.Dispose();
  }
 
  [TestMethod] public async Task TheFlightFamilyAddsTheFlightSceneEntityToTheMirror()
  {
   using var bridge=new FakeBridge(r=>ControlOrElse(r,_=>FakeBridge.Ok(new JObject()))); var rig=await Acquire();
-  CollectionAssert.Contains(rig.Journal.CurrentGrant!.Entities,AutopilotOperations.Entity); CollectionAssert.Contains(rig.Journal.CurrentGrant.Operations,AutopilotOperations.Effect); rig.Journal.Dispose();
+  CollectionAssert.Contains(rig.Journal.CurrentGrant!.Entities,AutopilotOperations.JournalEntity); CollectionAssert.Contains(rig.Journal.CurrentGrant.Operations,AutopilotOperations.Effect); rig.Journal.Dispose();
  }
 
  // ---- the journaled flow ----
@@ -108,7 +108,7 @@ namespace KspControl.HostTests;
   Assert.AreEqual(28.5,(double)ascent.Arguments["inclinationDegrees"]!); Assert.AreEqual(true,(bool)ascent.Arguments["autostage"]!); Assert.AreEqual(false,(bool)ascent.Arguments["autoWarp"]!);
   Assert.IsFalse(bridge.Requests.Any(r=>r.Operation==EditorOperations.OperationStatus),"an autopilot job is never polled through the editor status operation");
   var job=rig.Journal.TryGet()!.Get("ascent-0001");
-  Assert.AreEqual("completed",job.Status); Assert.AreEqual(AutopilotOperations.Effect,job.Operation); Assert.AreEqual(AutopilotOperations.Entity,job.EntityId); Assert.AreEqual("grant-1",job.GrantId); Assert.AreEqual("epoch-9",job.WorldEpoch);
+  Assert.AreEqual("completed",job.Status); Assert.AreEqual(AutopilotOperations.Effect,job.Operation); Assert.AreEqual(AutopilotOperations.JournalEntity,job.EntityId); Assert.AreEqual("grant-1",job.GrantId); Assert.AreEqual("epoch-9",job.WorldEpoch);
   rig.Journal.Dispose();
  }
 

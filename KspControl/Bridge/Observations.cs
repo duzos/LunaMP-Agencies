@@ -44,7 +44,7 @@ namespace KspControl.Bridge
             try { return FacadeCompatible ? (Guid)(facade.GetProperty("AgencyId", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) ?? Guid.Empty) : Guid.Empty; }
             catch { return Guid.Empty; }
         }
-        private bool MayInspect(Vessel vessel)
+        internal bool MayInspect(Vessel vessel)
         {
             try { return FacadeCompatible && vessel != null && agency != Guid.Empty && (bool)(facade.GetMethod("MayInspectActiveVessel")?.Invoke(null, new object[] { vessel.id }) ?? false); }
             catch { return false; }

@@ -74,6 +74,8 @@ namespace KspControl.Bridge
         internal long StartedAt, OrbitSince = -1, OrbitReachedAt;
         internal int HumanFrames, Frames;
         internal bool Engaged;
+        /// <summary>The node executor's Autowarp before we forced it off, restored on release.</summary>
+        internal bool? SavedAutowarp;
 
         public static string OperationName(AutopilotKind kind)
         {

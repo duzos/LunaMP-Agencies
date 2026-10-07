@@ -29,6 +29,7 @@ namespace KspControl.Bridge
                 VesselId = vessel.id.ToString(), BodyName = body == null ? null : body.bodyName,
                 AltitudeMeters = vessel.altitude, ApoapsisMeters = orbit == null ? double.NaN : orbit.ApA, PeriapsisMeters = orbit == null ? double.NaN : orbit.PeA,
                 AtmosphereTopMeters = body != null && body.atmosphere ? body.atmosphereDepth : 0,
+                SafeAltitudeMeters = body == null ? 0 : Math.Max(0, body.minOrbitalDistance - body.Radius),
                 Situation = vessel.situation.ToString(), Orbiting = vessel.situation == Vessel.Situations.ORBITING && orbit != null && orbit.eccentricity < 1,
                 ManeuverNodes = nodes, UniversalTime = Planetarium.GetUniversalTime()
             };
@@ -52,11 +53,13 @@ namespace KspControl.Bridge
         private static bool Key(KeyBinding binding) { return binding != null && binding.GetKey(); }
         private static bool Moved(AxisBinding axis) { return axis != null && !axis.IsNeutral() && Math.Abs(axis.GetAxis()) > AxisThreshold; }
 
-        public void CutThrottle()
+        /// <summary>Cuts the throttle of the vessel the job was bound to. The live input state is the active vessel's, so it is only touched while that vessel is still active.</summary>
+        public void CutThrottle(string vesselId)
         {
-            if (FlightInputHandler.state != null) FlightInputHandler.state.mainThrottle = 0f;
-            var vessel = FlightGlobals.ActiveVessel;
-            if (vessel != null && vessel.ctrlState != null) vessel.ctrlState.mainThrottle = 0f;
+            var vessel = MechJebSources.FindVessel(vesselId);
+            if (vessel == null) return;
+            if (vessel.ctrlState != null) vessel.ctrlState.mainThrottle = 0f;
+            if (ReferenceEquals(vessel, FlightGlobals.ActiveVessel) && FlightInputHandler.state != null) FlightInputHandler.state.mainThrottle = 0f;
         }
 
         // ---------------------------------------------------------------- stock maneuver-node plans
@@ -133,10 +136,20 @@ namespace KspControl.Bridge
     /// <summary>Where the adapter gets the live objects. Re-evaluated on every call: nothing is held between frames.</summary>
     internal static class MechJebSources
     {
-        public static object Core()
+        /// <summary>The vessel with that id (null: the active vessel). Null when the scene is not flight or the vessel is gone.</summary>
+        public static Vessel FindVessel(string vesselId)
         {
-            var vessel = FlightGlobals.ActiveVessel;
-            if (!HighLogic.LoadedSceneIsFlight || vessel == null || vessel.parts == null) return null;
+            if (!HighLogic.LoadedSceneIsFlight) return null;
+            if (vesselId == null) return FlightGlobals.ActiveVessel;
+            Guid id;
+            return Guid.TryParse(vesselId, out id) ? FlightGlobals.FindVessel(id) : null;
+        }
+
+        /// <summary>MechJeb's core on that vessel. An unloaded vessel has no live modules, so it yields null rather than stale ones.</summary>
+        public static object Core(string vesselId)
+        {
+            var vessel = FindVessel(vesselId);
+            if (vessel == null || !vessel.loaded || vessel.parts == null) return null;
             foreach (var part in vessel.parts)
             {
                 if (part == null) continue;
@@ -146,6 +159,6 @@ namespace KspControl.Bridge
             return null;
         }
 
-        public static object Vessel() { return HighLogic.LoadedSceneIsFlight ? FlightGlobals.ActiveVessel : null; }
+        public static object Vessel(string vesselId) { return FindVessel(vesselId); }
     }
 }

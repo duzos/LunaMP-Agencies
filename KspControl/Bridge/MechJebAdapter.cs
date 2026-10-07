@@ -98,8 +98,8 @@ namespace KspControl.Bridge
         private const string CoreTypeName = "MuMech.MechJebCore";
         private const string AtmosphereTypeName = "AtmosphereAutopilot.AtmosphereAutopilot";
 
-        private readonly Func<object> coreSource;
-        private readonly Func<object> vesselSource;
+        private readonly Func<string, object> coreSource;
+        private readonly Func<string, object> vesselSource;
         private readonly Func<Type> coreTypeSource;
         private readonly Func<Type> atmosphereTypeSource;
         private readonly Func<Type, Version> versionSource;
@@ -129,16 +129,17 @@ namespace KspControl.Bridge
             new ModuleSpec { Name = "docking", TypeName = "MechJebModuleDockingAutopilot", Members = new[] { "Enabled", "Users" }, ViaGeneric = true, Autopilot = true, Scanned = true },
             new ModuleSpec { Name = "spaceplane", TypeName = "MechJebModuleSpaceplaneAutopilot", Members = new[] { "Enabled", "Users" }, ViaGeneric = true, Autopilot = true, Scanned = true },
             new ModuleSpec { Name = "airplane", CoreMember = "Airplane", TypeName = "MechJebModuleAirplaneAutopilot", Members = new[] { "Enabled", "Users" }, Autopilot = true, Scanned = true },
+            new ModuleSpec { Name = "ascentMenu", TypeName = "MechJebModuleAscentMenu", Members = new string[0], ViaGeneric = true },
             new ModuleSpec { Name = "attitude", CoreMember = "Attitude", TypeName = "MechJebModuleAttitudeController", Members = new[] { "Enabled", "Users" }, Scanned = true },
             new ModuleSpec { Name = "rover", CoreMember = "Rover", TypeName = "MechJebModuleRoverController", Members = new[] { "Enabled", "Users" }, Scanned = true },
-            new ModuleSpec { Name = "thrust", CoreMember = "Thrust", TypeName = "MechJebModuleThrustController", Members = new[] { "Enabled", "Users", "ThrustOff" } },
+            new ModuleSpec { Name = "thrust", CoreMember = "Thrust", TypeName = "MechJebModuleThrustController", Members = new[] { "Enabled", "Users", "ThrustOff" }, Scanned = true },
             new ModuleSpec { Name = "warp", CoreMember = "Warp", TypeName = "MechJebModuleWarpController", Members = new[] { "Enabled" } }
         };
 
-        public MechJebAdapter(Func<object> coreSource, Func<object> vesselSource = null, Func<Type> coreTypeSource = null, Func<Type> atmosphereTypeSource = null, Func<Type, Version> versionSource = null)
+        public MechJebAdapter(Func<string, object> coreSource, Func<string, object> vesselSource = null, Func<Type> coreTypeSource = null, Func<Type> atmosphereTypeSource = null, Func<Type, Version> versionSource = null)
         {
             this.coreSource = coreSource ?? throw new ArgumentNullException(nameof(coreSource));
-            this.vesselSource = vesselSource ?? (() => null);
+            this.vesselSource = vesselSource ?? (id => null);
             this.coreTypeSource = coreTypeSource ?? (() => FindType(CoreTypeName));
             this.atmosphereTypeSource = atmosphereTypeSource ?? (() => FindType(AtmosphereTypeName));
             this.versionSource = versionSource ?? InstalledVersion;
@@ -233,11 +234,12 @@ namespace KspControl.Bridge
 
         // ---------------------------------------------------------------- live objects (never cached)
 
-        public bool HasCore() { try { return Core() != null; } catch (Exception) { return false; } }
+        public bool HasCore(string vesselId) { try { return Core(vesselId) != null; } catch (Exception) { return false; } }
 
-        private object Core()
+        /// <summary>The core of the named vessel (null: the active vessel). Never another vessel's.</summary>
+        private object Core(string vesselId)
         {
-            var raw = coreSource();
+            var raw = coreSource(vesselId);
             if (raw == null) return null;
             // A vessel can carry several cores; the master is the one that drives.
             var master = Reflect.Has(raw.GetType(), "MasterMechJeb") ? Reflect.Get(raw, "MasterMechJeb") : null;
@@ -257,24 +259,51 @@ namespace KspControl.Bridge
             return Reflect.Get(core, spec.CoreMember);
         }
 
-        private object Require(string name)
+        private object Require(string vesselId, string name)
         {
             if (!Capabilities.Usable) throw new MechJebException(Capabilities.Reason ?? KspControl.Contracts.AutopilotReasons.MechJebUnavailable);
-            var core = Core();
-            if (core == null) throw new MechJebException(KspControl.Contracts.AutopilotReasons.MechJebUnavailable, "the active vessel has no MechJeb core");
+            var core = Core(vesselId);
+            if (core == null) throw new MechJebException(KspControl.Contracts.AutopilotReasons.MechJebUnavailable, "that vessel has no MechJeb core (or it is not loaded)");
             var module = Module(core, name);
             if (module == null) throw new MechJebException(KspControl.Contracts.AutopilotReasons.MechJebModuleUnavailable, name);
             return module;
         }
 
+        /// <summary>The ascent window module, through which the bridge engages the ascent so MechJeb's own Disengage button stops it. Null when absent.</summary>
+        private object Window(object core)
+        {
+            try { return core == null || !Capabilities.Has("ascentMenu") ? null : Module(core, "ascentMenu"); } catch (Exception) { return null; }
+        }
+
         // ---------------------------------------------------------------- users
 
-        private static void Users(object module, object own, out bool ownPresent, out int others)
+        private static bool Same(object a, object b) { return a != null && ReferenceEquals(a, b); }
+
+        /// <summary>True when the user is one of ours, or a MechJeb module whose own user set (recursively, MechJeb's RecursiveUser) contains one of ours.</summary>
+        private static bool IsOurs(object user, object own, object window, int depth, List<object> seen)
         {
-            ownPresent = false; others = 0;
+            if (Same(user, own) || Same(user, window)) return true;
+            if (user == null || depth >= 4 || seen.Any(x => ReferenceEquals(x, user))) return false;
+            seen.Add(user);
+            if (!Reflect.Has(user.GetType(), "Users")) return false;
+            var list = Reflect.Get(user, "Users") as IEnumerable;
+            if (list == null) return false;
+            foreach (var inner in list) if (IsOurs(inner, own, window, depth + 1, seen)) return true;
+            return false;
+        }
+
+        /// <summary>Counts the module's users: those that are directly ours, those that are ours by recursion (a MechJeb module acting for us), and the rest.</summary>
+        private static void Users(object module, object own, object window, out bool ownDirect, out int ours, out int others)
+        {
+            ownDirect = false; ours = 0; others = 0;
             var list = Reflect.Get(module, "Users") as IEnumerable;
             if (list == null) return;
-            foreach (var user in list) { if (ReferenceEquals(user, own)) ownPresent = true; else others++; }
+            foreach (var user in list)
+            {
+                if (Same(user, own) || Same(user, window)) { ownDirect = true; ours++; }
+                else if (IsOurs(user, own, window, 0, new List<object>())) ours++;
+                else others++;
+            }
         }
 
         private static bool Enabled(object module) { return (bool)Reflect.Get(module, "Enabled"); }
@@ -287,38 +316,46 @@ namespace KspControl.Bridge
             if (!Enabled(module)) throw new MechJebException(KspControl.Contracts.AutopilotReasons.EngageFailed, "the module did not enable");
         }
 
-        private static void Disengage(object module, object user)
+        private static void RemoveUsers(object module, params object[] users)
         {
-            var errors = 0;
-            try { Reflect.Call(Reflect.Get(module, "Users"), "Remove", user); } catch (Exception) { errors++; }
-            try
+            var errors = 0; var tried = 0;
+            foreach (var user in users)
             {
-                bool own; int others; Users(module, user, out own, out others);
-                if (!own && others == 0 && Enabled(module)) Reflect.Set(module, "Enabled", false);
+                if (user == null) continue;
+                tried++;
+                try { Reflect.Call(Reflect.Get(module, "Users"), "Remove", user); } catch (Exception) { errors++; }
             }
-            catch (Exception) { errors++; }
-            if (errors == 2) throw new MechJebException(KspControl.Contracts.AutopilotReasons.EngageFailed, "could not release the module");
+            if (tried > 0 && errors == tried) throw new MechJebException(KspControl.Contracts.AutopilotReasons.EngageFailed, "could not release the module");
+        }
+
+        /// <summary>Disables the module once nobody holds it. Best effort: the users were already removed.</summary>
+        private static void DisableIfUnused(object module)
+        {
+            try { if (((Reflect.Get(module, "Users") as ICollection)?.Count ?? 0) == 0 && Enabled(module)) Reflect.Set(module, "Enabled", false); } catch (Exception) { }
         }
 
         // ---------------------------------------------------------------- competitors
 
-        public List<string> FindCompetitors(object ownUser, bool autopilotsOnly)
+        public List<string> FindCompetitors(string vesselId, object ownUser)
         {
             var found = new List<string>();
             if (Capabilities.Installed)
             {
                 try
                 {
-                    var core = Core();
+                    var core = Core(vesselId);
+                    // The window module is ours only for a caller that has an identity; a new caller sees an engaged ascent as someone else's.
+                    var window = ownUser == null ? null : Window(core);
                     if (core != null)
-                        foreach (var spec in Specs.Where(s => s.Scanned && (!autopilotsOnly || s.Autopilot) && Capabilities.Has(s.Name)))
+                        foreach (var spec in Specs.Where(s => s.Scanned && Capabilities.Has(s.Name)))
                         {
                             try
                             {
                                 var module = Module(core, spec.Name);
                                 if (module == null) continue;
-                                bool own; int others; Users(module, ownUser, out own, out others);
-                                var engaged = spec.Autopilot ? (Enabled(module) && (others > 0 || !own)) : others > 0;
+                                bool direct; int ours, others; Users(module, ownUser, window, out direct, out ours, out others);
+                                // An autopilot that is enabled with no user of ours is someone else's; a support module only counts for a foreign user.
+                                var engaged = spec.Autopilot ? (Enabled(module) && (others > 0 || ours == 0)) : others > 0;
                                 if (engaged) found.Add("mechjeb." + spec.Name);
                             }
                             catch (Exception) { found.Add("mechjeb." + spec.Name + ":unreadable"); }
@@ -326,17 +363,17 @@ namespace KspControl.Bridge
                 }
                 catch (Exception) { found.Add("mechjeb:unreadable"); }
             }
-            AtmosphereAutopilot(found);
+            AtmosphereAutopilot(vesselId, found);
             return found;
         }
 
-        private void AtmosphereAutopilot(List<string> found)
+        private void AtmosphereAutopilot(string vesselId, List<string> found)
         {
             if (Capabilities.AtmosphereAutopilotInstalled == false) return;
             try
             {
                 var instance = Reflect.StaticProperty(atmosphereType, "Instance");
-                var vessel = vesselSource();
+                var vessel = vesselSource(vesselId);
                 if (instance == null || vessel == null) return;
                 var modules = Reflect.Call(instance, "getVesselModules", vessel) as IDictionary;
                 if (modules == null) return;
@@ -349,9 +386,9 @@ namespace KspControl.Bridge
 
         // ---------------------------------------------------------------- ascent
 
-        public AscentSettingsView ConfigureAscent(double altitudeMeters, double inclinationDegrees, bool autostage)
+        public AscentSettingsView ConfigureAscent(string vesselId, double altitudeMeters, double inclinationDegrees, bool autostage)
         {
-            var settings = Require("ascentSettings");
+            var settings = Require(vesselId, "ascentSettings");
             Reflect.Set(Reflect.Get(settings, "DesiredOrbitAltitude"), "Val", altitudeMeters);
             Reflect.Set(Reflect.Get(settings, "DesiredInclination"), "Val", inclinationDegrees);
             Reflect.Set(settings, "Autostage", autostage);
@@ -374,52 +411,77 @@ namespace KspControl.Bridge
             return view;
         }
 
-        public void EngageAscent(object user) { Engage(Require("ascent"), user); }
-        public void DisengageAscent(object user) { Disengage(Require("ascent"), user); }
-
-        public AscentReading ReadAscent(object user)
+        public void EngageAscent(string vesselId, object user)
         {
-            var module = Require("ascent");
-            bool own; int others; Users(module, user, out own, out others);
+            var ascent = Require(vesselId, "ascent");
+            var window = Window(Core(vesselId));
+            Engage(ascent, window ?? user);
+        }
+
+        public void DisengageAscent(string vesselId, object user)
+        {
+            var ascent = Require(vesselId, "ascent");
+            var window = Window(Core(vesselId));
+            RemoveUsers(ascent, user, window);
+            DisableIfUnused(ascent);
+        }
+
+        public AscentReading ReadAscent(string vesselId, object user)
+        {
+            var ascent = Require(vesselId, "ascent");
+            var window = Window(Core(vesselId));
+            bool direct; int ours, others; Users(ascent, user, window, out direct, out ours, out others);
             string status = null;
-            try { status = Reflect.Get(module, "Status") as string; } catch (Exception) { }
-            return new AscentReading { Enabled = Enabled(module), Status = status, OwnUserPresent = own, OtherUsers = others };
+            try { status = Reflect.Get(ascent, "Status") as string; } catch (Exception) { }
+            return new AscentReading { Enabled = Enabled(ascent), Status = status, OwnUserPresent = direct, OtherUsers = others, ViaWindow = window != null };
         }
 
         // ---------------------------------------------------------------- node executor
 
-        public void EngageNode(object user, bool all)
+        public bool EngageNode(string vesselId, object user, bool all)
         {
-            var node = Require("node");
-            // The agent tools never warp: the executor's own warping would bypass the bridge's warp policy.
+            var node = Require(vesselId, "node");
+            var previous = (bool)Reflect.Get(node, "Autowarp");
+            // The agent tools never warp: the executor's own warping would bypass the bridge's warp policy. The old value is restored on release.
             Reflect.Set(node, "Autowarp", false);
             if (all) Reflect.Call(node, "ExecuteAllNodes", user); else Reflect.Call(node, "ExecuteOneNode", user);
             if (!Enabled(node)) { try { Reflect.Set(node, "Enabled", true); } catch (Exception) { } }
             if (!Enabled(node)) throw new MechJebException(KspControl.Contracts.AutopilotReasons.EngageFailed, "the node executor did not enable");
+            return previous;
         }
 
-        public void DisengageNode(object user)
+        public void DisengageNode(string vesselId, object user, bool? restoreAutowarp)
         {
-            var node = Require("node");
+            var node = Require(vesselId, "node");
             var errors = 0;
-            try { Reflect.Call(node, "Abort"); } catch (Exception) { errors++; }
-            try { Disengage(node, user); } catch (MechJebException) { errors++; }
-            if (errors == 2) throw new MechJebException(KspControl.Contracts.AutopilotReasons.EngageFailed, "could not release the node executor");
+            try
+            {
+                bool direct; int ours, others; Users(node, user, Window(Core(vesselId)), out direct, out ours, out others);
+                if (others > 0) RemoveUsers(node, user); // someone else is using the executor: leave their burn alone
+                else
+                {
+                    try { Reflect.Call(node, "Abort"); } catch (Exception) { errors++; }
+                    try { RemoveUsers(node, user); DisableIfUnused(node); } catch (MechJebException) { errors++; }
+                }
+            }
+            catch (Exception) { errors += 2; }
+            if (restoreAutowarp.HasValue) { try { Reflect.Set(node, "Autowarp", restoreAutowarp.Value); } catch (Exception) { } }
+            if (errors >= 2) throw new MechJebException(KspControl.Contracts.AutopilotReasons.EngageFailed, "could not release the node executor");
         }
 
-        public NodeReading ReadNode(object user)
+        public NodeReading ReadNode(string vesselId, object user)
         {
-            var node = Require("node");
-            bool own; int others; Users(node, user, out own, out others);
-            var reading = new NodeReading { Enabled = Enabled(node), OwnUserPresent = own, OtherUsers = others };
+            var node = Require(vesselId, "node");
+            bool direct; int ours, others; Users(node, user, Window(Core(vesselId)), out direct, out ours, out others);
+            var reading = new NodeReading { Enabled = Enabled(node), OwnUserPresent = direct, OtherUsers = others };
             try { reading.State = Convert.ToString(Reflect.Get(node, "State"), CultureInfo.InvariantCulture); } catch (Exception) { }
             try { reading.Autowarp = (bool)Reflect.Get(node, "Autowarp"); } catch (Exception) { }
             return reading;
         }
 
-        public void ThrustOff()
+        public void ThrustOff(string vesselId)
         {
-            try { var thrust = Require("thrust"); Reflect.Call(thrust, "ThrustOff"); } catch (Exception) { /* the stock throttle is cut separately */ }
+            try { var thrust = Require(vesselId, "thrust"); Reflect.Call(thrust, "ThrustOff"); } catch (Exception) { /* the stock throttle is cut separately */ }
         }
 
         // ---------------------------------------------------------------- status
@@ -438,9 +500,9 @@ namespace KspControl.Bridge
             foreach (var spec in Specs) modules[spec.Name] = new JObject { ["supported"] = caps.Has(spec.Name) };
             status["modules"] = modules;
             object core = null;
-            try { core = caps.Installed ? Core() : null; } catch (Exception) { }
+            try { core = caps.Installed ? Core(null) : null; } catch (Exception) { }
             status["vesselCore"] = core != null;
-            if (core == null || !caps.Usable) { status["competingControllers"] = new JArray(FindCompetitors(null, false)); return status; }
+            if (core == null || !caps.Usable) { status["competingControllers"] = new JArray(FindCompetitors(null, null)); return status; }
             foreach (var spec in Specs.Where(s => caps.Has(s.Name)))
             {
                 var entry = (JObject)modules[spec.Name];
@@ -469,7 +531,7 @@ namespace KspControl.Bridge
                 }
                 catch (Exception error) { entry["ready"] = false; entry["error"] = error is TargetInvocationException ? "read_failed" : error.GetType().Name; }
             }
-            status["competingControllers"] = new JArray(FindCompetitors(null, false));
+            status["competingControllers"] = new JArray(FindCompetitors(null, null));
             return status;
         }
 

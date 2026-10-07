@@ -16,20 +16,21 @@ namespace KspControl.Bridge
 
     internal static class GrantMapping
     {
-        /// <summary>Effects the bridge knows how to classify. The flight family (flight.autopilot) is granted per scene, not per facility.</summary>
+        /// <summary>Effects the bridge knows how to classify. The flight family (flight.autopilot) needs the FLIGHT facility.</summary>
         internal static readonly string[] KnownEffects = { "editor.replace_craft", "editor.restore_snapshot", "craft.write", AutopilotOperations.Effect };
 
         internal static TrustedExecutionGrant ToGrant(GrantPayload payload)
         {
             var known = payload.Operations.Distinct(StringComparer.Ordinal).Where(o => Array.IndexOf(KnownEffects, o) >= 0).ToArray();
-            var facilityEffects = known.Where(o => !o.StartsWith("flight.", StringComparison.Ordinal));
-            var permissions = facilityEffects
-                .SelectMany(o => payload.Facilities.Select(f => new EffectPermission(o, (o.StartsWith("craft.", StringComparison.Ordinal) ? "ships:" : "editor:") + f))).ToList();
-            var entities = payload.Facilities.Select(f => "editor:" + f).ToList();
-            if (known.Contains(AutopilotOperations.Effect, StringComparer.Ordinal))
+            // The FLIGHT facility binds the flight families to whichever vessel is active ("vessel:*"); every other facility is an editor.
+            var editorFacilities = payload.Facilities.Where(f => f != AutopilotOperations.Facility).ToArray();
+            var permissions = known.Where(o => !o.StartsWith("flight.", StringComparison.Ordinal))
+                .SelectMany(o => editorFacilities.Select(f => new EffectPermission(o, (o.StartsWith("craft.", StringComparison.Ordinal) ? "ships:" : "editor:") + f))).ToList();
+            var entities = editorFacilities.Select(f => "editor:" + f).ToList();
+            if (Array.IndexOf(payload.Facilities, AutopilotOperations.Facility) >= 0)
             {
-                permissions.Add(new EffectPermission(AutopilotOperations.Effect, AutopilotOperations.Recipient));
-                entities.Add(AutopilotOperations.Entity);
+                entities.Add(AutopilotOperations.EntityWildcard);
+                if (known.Contains(AutopilotOperations.Effect, StringComparer.Ordinal)) permissions.Add(new EffectPermission(AutopilotOperations.Effect, AutopilotOperations.EntityWildcard));
             }
             return new TrustedExecutionGrant(payload.GrantId, payload.Generation, GrantBinding.From(payload.Binding), payload.ExpiresAt, permissions, entities);
         }

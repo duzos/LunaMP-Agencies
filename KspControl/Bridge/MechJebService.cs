@@ -120,8 +120,10 @@ namespace KspControl.Bridge
                 return Envelope(request, existing);
             }
 
-            // Authority: the lease, the grant's flight.autopilot family, the scene. The revision is whatever the authority published this frame.
-            var effects = new[] { new ClassifiedEffect(AutopilotOperations.Effect, AutopilotOperations.Recipient, 0) };
+            // Authority: the lease, the grant's flight.autopilot family (FLIGHT facility), the vessel the lease is bound to. The recipient is that lease's entity
+            // ("vessel:<guid>"); the grant's "vessel:*" matches it. The revision is whatever the authority published this frame.
+            var leaseEntity = authority.DescribeLease(leaseId)?.Entity;
+            var effects = new[] { new ClassifiedEffect(AutopilotOperations.Effect, leaseEntity ?? AutopilotOperations.EntityWildcard, 0) };
             ExecutionTicket ticket;
             try { ticket = authority.Admit(leaseId, authority.PublishedRevision, effects); }
             catch (InvalidOperationException error) { return RefuseAdmission(request, MapAdmission(error.Message), error.Message == "authority_unavailable" ? null : error.Message, leaseId); }
@@ -130,6 +132,8 @@ namespace KspControl.Bridge
             if (!flight.InFlight) return Refuse(request, AutopilotReasons.FlightUnavailable, "not in the flight scene");
             var telemetry = flight.Read();
             if (telemetry == null) return Refuse(request, AutopilotReasons.FlightUnavailable, "there is no active vessel");
+            if (!string.Equals(leaseEntity, AutopilotOperations.EntityPrefix + telemetry.VesselId, StringComparison.Ordinal))
+                return Refuse(request, AutopilotReasons.VesselChanged, "the lease is bound to another vessel than the active one; acquire a new lease");
 
             var job = new AutopilotJob
             {
@@ -140,26 +144,29 @@ namespace KspControl.Bridge
 
             if (kind == AutopilotKind.PlanCircularize || kind == AutopilotKind.PlanHohmann) return Plan(request, job);
 
-            var refusal = CheckMechJeb(request, kind, telemetry);
+            var refusal = CheckMechJeb(request, job, telemetry);
             if (refusal != null) return refusal;
             jobs.Add(job);
             runner.Start(job);
             return Envelope(request, job);
         }
 
-        private BridgeResponse CheckMechJeb(BridgeRequest request, AutopilotKind kind, FlightTelemetry telemetry)
+        private BridgeResponse CheckMechJeb(BridgeRequest request, AutopilotJob job, FlightTelemetry telemetry)
         {
+            var kind = job.Kind;
             var caps = mechjeb.Capabilities;
             if (!caps.Installed) return Refuse(request, AutopilotReasons.MechJebUnavailable, "MechJeb is not installed or its core type was not found");
             if (!caps.VersionSupported) return Refuse(request, AutopilotReasons.MechJebVersionUnsupported, "installed MechJeb " + caps.Version + "; this adapter supports 2.15.x");
-            if (!mechjeb.HasCore()) return Refuse(request, AutopilotReasons.MechJebUnavailable, "the active vessel carries no MechJeb core (part module)");
+            if (!mechjeb.HasCore(telemetry.VesselId)) return Refuse(request, AutopilotReasons.MechJebUnavailable, "the active vessel carries no MechJeb core (part module)");
             if (kind == AutopilotKind.Ascent && !(caps.Has("ascent") && caps.Has("ascentSettings"))) return Refuse(request, AutopilotReasons.MechJebModuleUnavailable, "ascent module members were not found");
             if (kind == AutopilotKind.ExecuteNode && !caps.Has("node")) return Refuse(request, AutopilotReasons.MechJebModuleUnavailable, "node executor members were not found");
-            var competitors = mechjeb.FindCompetitors(null, false);
+            var competitors = mechjeb.FindCompetitors(telemetry.VesselId, null);
             if (competitors.Count > 0) return Refuse(request, AutopilotReasons.CompetingController, "another controller is engaged: " + string.Join(", ", competitors), new JObject { ["competitors"] = new JArray(competitors) });
             if (kind == AutopilotKind.ExecuteNode && telemetry.ManeuverNodes <= 0) return Refuse(request, AutopilotReasons.NoManeuverNode, "the active vessel has no maneuver node");
-            if (kind == AutopilotKind.Ascent && telemetry.Orbiting && telemetry.PeriapsisMeters > telemetry.AtmosphereTopMeters)
+            if (kind == AutopilotKind.Ascent && telemetry.Orbiting && telemetry.PeriapsisMeters > telemetry.OrbitFloorMeters)
                 return Refuse(request, AutopilotReasons.NotApplicable, "the vessel is already in orbit around " + telemetry.BodyName);
+            if (kind == AutopilotKind.Ascent && telemetry.SafeAltitudeMeters > 0 && job.TargetAltitudeMeters <= telemetry.SafeAltitudeMeters)
+                return Refuse(request, ControlReasons.InvalidArgument, "targetAltitudeMeters must be above the safe orbit altitude of " + telemetry.BodyName + " (" + Math.Round(telemetry.SafeAltitudeMeters) + " m)");
             return null;
         }
 

@@ -44,9 +44,7 @@ public sealed class JournalAccess : IDisposable
    long generation=(long)data["generation"]!; int seconds=(int?)data["expiresInSeconds"]??30;
    var grantInfo=status?["grant"] as JObject;
    var operations=(grantInfo?["operations"] as JArray)?.Select(t=>(string)t!).ToArray() ?? Array.Empty<string>();
-   var entities=(grantInfo?["facilities"] as JArray)?.Select(t=>"editor:"+(string)t!).ToArray() ?? Array.Empty<string>();
-   // The flight family is granted per scene: its lease entity is the flight scene, not a facility.
-   if(operations.Contains(KspControl.Contracts.AutopilotOperations.Effect,StringComparer.Ordinal)) entities=entities.Append(KspControl.Contracts.AutopilotOperations.Entity).ToArray();
+   var entities=(grantInfo?["facilities"] as JArray)?.Select(t=>(string)t! is KspControl.Contracts.AutopilotOperations.Facility ? KspControl.Contracts.AutopilotOperations.JournalEntity : "editor:"+(string)t!).ToArray() ?? Array.Empty<string>();
    DateTimeOffset expires=DateTimeOffset.TryParse((string?)grantInfo?["expiresUtc"],out var parsed) ? parsed : DateTimeOffset.UtcNow.AddMinutes(5);
    var reported=new MissionGrant(grantId,generation,"bridge_reported",expires,0,operations,entities);
    try { j.ProvisionGrant(reported); } catch(InvalidOperationException) { /* already mirrored in this run, or revoked here */ }

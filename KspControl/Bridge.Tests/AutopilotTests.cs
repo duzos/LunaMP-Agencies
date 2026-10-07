@@ -34,11 +34,34 @@ namespace KspControl.BridgeTests
             Refused(rig.Service.Handle(rig.Ascent(requestId: "ascent-0002", lease: new string('a', 32))), "lease_invalid");
         }
 
-        [TestMethod] public void AGrantWithoutTheFlightFamilyCannotLeaseTheFlightScene()
+        [TestMethod] public void AGrantWithoutTheFlightFacilityCannotLeaseAVessel()
         {
-            rig = new AutopilotRig(lease: false, operations: new[] { OperationEffects.ReplaceCraft });
+            rig = new AutopilotRig(lease: false, facilities: new[] { "VAB" });
             Assert.AreEqual("facility_mismatch", Assert.ThrowsException<InvalidOperationException>(() => rig.AcquireLease()).Message);
             Refused(rig.Service.Handle(rig.Ascent(lease: new string('a', 32))), "lease_invalid");
+        }
+
+        [TestMethod] public void AGrantThatDoesNotListTheFlightFamilyDeniesEveryMutation()
+        {
+            rig = new AutopilotRig(operations: new[] { OperationEffects.ReplaceCraft });
+            Refused(rig.Service.Handle(rig.Ascent()), "grant_operation_denied");
+            Refused(rig.Service.Handle(rig.ExecuteNode(requestId: "node-0002")), "grant_operation_denied");
+            Refused(rig.Service.Handle(rig.PlanCircularize(requestId: "circ-0002")), "grant_operation_denied");
+        }
+
+        [TestMethod] public void ALeaseBoundToAnotherVesselThanTheActiveOneIsRefused()
+        {
+            rig.Flight.Telemetry.VesselId = "vessel-2";
+            Refused(rig.Service.Handle(rig.Ascent()), "vessel_changed");
+            Refused(rig.Service.Handle(rig.PlanCircularize()), "vessel_changed");
+        }
+
+        [TestMethod] public void ATargetBelowTheBodysSafeOrbitAltitudeIsRefused()
+        {
+            rig.Flight.Telemetry.AtmosphereTopMeters = 0; rig.Flight.Telemetry.SafeAltitudeMeters = 90000; rig.Flight.Telemetry.BodyName = "Eve-like";
+            var response = Refused(rig.Service.Handle(rig.Ascent(altitude: 90000)), "invalid_argument");
+            StringAssert.Contains((string)response.Data["detail"], "safe orbit altitude");
+            Assert.AreEqual("running", rig.Service.Handle(rig.Ascent(requestId: "ascent-0002", altitude: 90001)).Status);
         }
 
         [TestMethod] public void ARevokedLeaseIsAuthorityRevoked()
@@ -115,7 +138,7 @@ namespace KspControl.BridgeTests
             CollectionAssert.AreEqual(new[] { "mechjeb.landing", "atmosphere_autopilot.Cruise" }, ((JArray)response.Data["competitors"]).Select(t => (string)t).ToArray());
             rig.Flight.Telemetry.ManeuverNodes = 1;
             Refused(rig.Service.Handle(rig.ExecuteNode()), "competing_controller");
-            Assert.AreEqual("all", rig.MechJeb.CompetitorQueries[0], "admission scans the support modules too");
+            Assert.AreEqual("vessel-1", rig.MechJeb.CompetitorQueries[0], "the scan names the job vessel");
         }
 
         [TestMethod] public void ExecutingNeedsANodeAndAscendingNeedsToNotBeInOrbitAlready()
@@ -289,6 +312,44 @@ namespace KspControl.BridgeTests
             Assert.IsTrue(job.OrbitReached);
         }
 
+        [TestMethod] public void WhenMechJebEndedTheOrbitIsJudgedAtOnceWithoutTheConfirmationWait()
+        {
+            var job = StartAscent();
+            rig.Telemetry(100000, 100500, 99000, true); rig.MechJeb.AscentEnabled = false; rig.MechJeb.AscentOwn = false;
+            rig.Frame(16);
+            Assert.AreEqual("completed", job.Status, job.Detail); Assert.AreEqual(true, job.AscentFinished); Assert.IsTrue(job.OrbitReached);
+        }
+
+        [TestMethod] public void TheOrbitFloorIsTheHigherOfTheAtmosphereAndTheBodysSafeAltitude()
+        {
+            rig.Flight.Telemetry.AtmosphereTopMeters = 0; rig.Flight.Telemetry.SafeAltitudeMeters = 25000; // an airless body
+            var job = StartAscent(altitude: 30000 + 70000);
+            rig.Telemetry(60000, 62000, 20000, true); rig.Frame(1500); rig.Frame(1500);
+            Assert.IsFalse(job.OrbitReached, "periapsis 20 km is under the 25 km safe altitude");
+            rig.Telemetry(60000, 62000, 26000, true); rig.Frame(600); rig.Frame(600); rig.Frame(600);
+            Assert.IsTrue(job.OrbitReached);
+        }
+
+        [TestMethod] public void SwitchingTheAscentOffInMechJebBeforeOrbitIsATakeoverWhenEngagedThroughTheWindow()
+        {
+            rig.MechJeb.ViaWindow = true;
+            var job = StartAscent();
+            rig.Telemetry(40000, 60000, -100000, false); rig.Frame();
+            rig.MechJeb.AscentEnabled = false; rig.MechJeb.AscentOwn = false; rig.Frame();
+            Assert.AreEqual("cancelled", job.Status); Assert.AreEqual("human_input_during_operation", job.ReasonCode); Assert.IsFalse(rig.Authority.LeaseHeld);
+            Assert.IsTrue(rig.Authority.Status().CooldownSeconds > 0); AssertReleased(throttleCut: true);
+        }
+
+        [TestMethod] public void EveryMechJebAndThrottleCallNamesTheJobsVessel()
+        {
+            var job = StartAscent();
+            rig.Frame(); rig.Authority.Stop(); rig.Runner.Abort("stopped");
+            Assert.IsTrue(rig.MechJeb.Vessels.Count > 3);
+            Assert.IsTrue(rig.MechJeb.Vessels.All(v => v == "vessel-1"), string.Join(",", rig.MechJeb.Vessels.Select(v => v ?? "<active>")));
+            CollectionAssert.AreEqual(new[] { "vessel-1" }, rig.Flight.CutVessels);
+            Assert.IsNotNull(job);
+        }
+
         [TestMethod] public void IfMechJebKeepsRefiningTheOrbitIsReportedAfterTheGraceAndMechJebIsReleased()
         {
             var job = StartAscent(); rig.Options.FinishGraceMs = 5000;
@@ -449,7 +510,7 @@ namespace KspControl.BridgeTests
             rig.Frame(); Assert.IsFalse(job.Terminal);
             rig.MechJeb.Competitors.Add("atmosphere_autopilot.Fly By Wire"); rig.Frame(); rig.Frame();
             Assert.AreEqual("cancelled", job.Status); Assert.AreEqual("human_input_during_operation", job.ReasonCode); StringAssert.Contains(job.Detail, "Fly By Wire");
-            Assert.AreEqual("autopilots", rig.MechJeb.CompetitorQueries.Last(), "support modules are expected to be busy while MechJeb flies");
+            Assert.IsTrue(rig.MechJeb.CompetitorQueries.All(q => q == "vessel-1"));
             AssertReleased(throttleCut: true);
         }
 
@@ -479,6 +540,15 @@ namespace KspControl.BridgeTests
             var job = StartNode();
             rig.MechJeb.NodeEnabled = false; rig.MechJeb.NodeOwn = false; rig.Frame();
             Assert.AreEqual("failed", job.Status); Assert.AreEqual("node_execution_ended_early", job.ReasonCode); Assert.AreEqual(1, rig.Flight.CutCalls);
+        }
+
+        [TestMethod] public void ReleasingTheNodeExecutorRestoresTheSavedAutowarp()
+        {
+            rig.MechJeb.SavedAutowarp = true;
+            var job = StartNode();
+            rig.Runner.Abort("stopped");
+            Assert.IsTrue(rig.MechJeb.RestoreSeen); Assert.AreEqual(true, rig.MechJeb.RestoredAutowarp);
+            Assert.AreEqual("cancelled", job.Status);
         }
 
         [TestMethod] public void StopAbortsTheNodeExecutor()
@@ -520,31 +590,37 @@ namespace KspControl.BridgeTests
     [TestClass]
     public class AutopilotGrantAndMathTests
     {
-        private static GrantPayload Payload(params string[] operations)
+        private static GrantPayload Payload(string[] facilities, params string[] operations)
         {
             return new GrantPayload
             {
                 GrantId = "grant", Generation = 1, IssuedUtc = GrantPayload.FormatUtc(AuthorityHelpers.Utc0), ExpiresUtc = GrantPayload.FormatUtc(AuthorityHelpers.Utc0.AddHours(1)),
-                Binding = new GrantBindingInfo { InstallId = "install", SaveFolder = "save", Agency = "agency" }, Operations = operations, Facilities = new[] { "VAB", "SPH" },
+                Binding = new GrantBindingInfo { InstallId = "install", SaveFolder = "save", Agency = "agency" }, Operations = operations, Facilities = facilities,
                 UnsavedCraftPolicy = "refuse", MaxParts = 250, SpendLimitFunds = 0, Revoked = false
             };
         }
 
-        [TestMethod] public void TheFlightFamilyIsGrantedPerSceneAndNotPerFacility()
+        [TestMethod] public void TheFlightFacilityMapsTheFamilyToAnyVesselAndNeverToAnEditor()
         {
-            var grant = GrantMapping.ToGrant(Payload("flight.autopilot", "editor.replace_craft"));
-            Assert.IsTrue(grant.Allows(new ClassifiedEffect("flight.autopilot", "flight:vessel", 0)));
+            var grant = GrantMapping.ToGrant(Payload(new[] { "VAB", "SPH", "FLIGHT" }, "flight.autopilot", "editor.replace_craft"));
+            Assert.IsTrue(grant.Allows(new ClassifiedEffect("flight.autopilot", "vessel:0a1b-2c3d", 0)));
             Assert.IsFalse(grant.Allows(new ClassifiedEffect("flight.autopilot", "editor:VAB", 0)), "not a facility effect");
+            Assert.IsFalse(grant.Allows(new ClassifiedEffect("editor.replace_craft", "vessel:0a1b-2c3d", 0)), "editor effects stay with the editors");
             Assert.IsTrue(grant.Allows(new ClassifiedEffect("editor.replace_craft", "editor:VAB", 0)));
-            Assert.IsTrue(grant.AllowsEntity("scene:FLIGHT")); Assert.IsTrue(grant.AllowsEntity("editor:SPH"));
+            Assert.IsTrue(grant.AllowsEntity("vessel:0a1b-2c3d")); Assert.IsTrue(grant.AllowsEntity("editor:SPH")); Assert.IsFalse(grant.AllowsEntity("scene:FLIGHT"));
+        }
+
+        [TestMethod] public void TheFlightFacilityWithoutTheFamilyAllowsALeaseButNoAutopilotEffect()
+        {
+            var grant = GrantMapping.ToGrant(Payload(new[] { "FLIGHT" }, "editor.replace_craft"));
+            Assert.IsTrue(grant.AllowsEntity("vessel:x")); Assert.IsFalse(grant.Allows(new ClassifiedEffect("flight.autopilot", "vessel:x", 0)));
         }
 
         [TestMethod] public void AGrantWithoutTheFlightFamilyHasNoFlightEntityAndNoLeaseInFlight()
         {
-            var grant = GrantMapping.ToGrant(Payload("editor.replace_craft"));
-            Assert.IsFalse(grant.AllowsEntity("scene:FLIGHT")); Assert.IsFalse(grant.Allows(new ClassifiedEffect("flight.autopilot", "flight:vessel", 0)));
-            var authority = new ExecutionAuthority(() => 1000, GrantMapping.KnownEffects, 2000, new MemorySuspensionStore(), () => AuthorityHelpers.Utc0);
-            authority.UpdateContext(AuthorityHelpers.Ctx(entity: "scene:FLIGHT"), AuthorityHelpers.Bind(), AuthorityHelpers.ValidStatus());
+            var grant = GrantMapping.ToGrant(Payload(new[] { "VAB" }, "flight.autopilot", "editor.replace_craft"));
+            Assert.IsFalse(grant.AllowsEntity("vessel:x")); Assert.IsFalse(grant.Allows(new ClassifiedEffect("flight.autopilot", "vessel:x", 0)), "the family needs the FLIGHT facility");             var authority = new ExecutionAuthority(() => 1000, GrantMapping.KnownEffects, 2000, new MemorySuspensionStore(), () => AuthorityHelpers.Utc0);
+            authority.UpdateContext(AuthorityHelpers.Ctx(entity: "vessel:x"), AuthorityHelpers.Bind(), AuthorityHelpers.ValidStatus());
             authority.ProvisionGrant(grant);
             Assert.AreEqual("facility_mismatch", Assert.ThrowsException<InvalidOperationException>(() => authority.AcquireLease(60000, "fly")).Message);
         }

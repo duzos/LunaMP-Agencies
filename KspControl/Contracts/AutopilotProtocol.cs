@@ -11,10 +11,14 @@ namespace KspControl.Contracts
     {
         /// <summary>The grant operation family listed in the grant's operations. The bridge classifies every mutation below as this effect.</summary>
         public const string Effect = "flight.autopilot";
-        /// <summary>The lease entity of the flight scene; the grant's entities include it when the grant lists <see cref="Effect"/>.</summary>
-        public const string Entity = "scene:FLIGHT";
-        /// <summary>The effect recipient the bridge grants for <see cref="Effect"/>.</summary>
-        public const string Recipient = "flight:vessel";
+        // Same flight lease model as the other flight tools: the grant's FLIGHT facility selects flight, the lease entity is "vessel:<guid>" of the
+        // active vessel (so a vessel switch revokes the lease), and the grant maps the facility to the wildcard "vessel:*".
+        /// <summary>The grant facility that selects flight.</summary>
+        public const string Facility = "FLIGHT";
+        public const string EntityPrefix = "vessel:";
+        public const string EntityWildcard = "vessel:*";
+        /// <summary>The journal entity the host uses for every flight mutation.</summary>
+        public const string JournalEntity = "flight:vessel";
 
         public const string MechJebStatus = "mechjeb.status";
         public const string Status = "flight.autopilot_status";

@@ -23,7 +23,7 @@ public static class GrantCli
  public static int Run(string[] args,TextWriter output,TextWriter error,Func<string,string?>? environment=null,Func<DateTime>? utcNow=null)
  {
   environment??=Environment.GetEnvironmentVariable; utcNow??=()=>DateTime.UtcNow;
-  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b (default editor families; add flight.autopilot for MechJeb flight)] [--facilities VAB] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]) (rearm: [--hours H])"); return Usage; }
+  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b (default editor families; add flight.autopilot for MechJeb flight)] [--facilities VAB,SPH,FLIGHT] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]) (rearm: [--hours H])"); return Usage; }
   var options=new Dictionary<string,string>(StringComparer.Ordinal);
   for(int i=1;i<args.Length;i+=2)
   {

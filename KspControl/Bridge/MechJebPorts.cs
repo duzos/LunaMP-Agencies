@@ -45,6 +45,8 @@ namespace KspControl.Bridge
         public bool OwnUserPresent { get; set; }
         /// <summary>Users other than ours.</summary>
         public int OtherUsers { get; set; }
+        /// <summary>The bridge engaged through the ascent window module, so MechJeb's own Disengage button ends the ascent.</summary>
+        public bool ViaWindow { get; set; }
     }
 
     internal sealed class NodeReading
@@ -58,31 +60,35 @@ namespace KspControl.Bridge
     }
 
     /// <summary>
-    /// The MechJeb operations the autopilot job needs. Main thread only. Every call re-reads the live core: nothing is cached across calls,
-    /// because the vessel and its parts can be destroyed between frames. Methods throw <see cref="MechJebException"/> with a reason code.
+    /// The MechJeb operations the autopilot job needs. Main thread only. Every call names the vessel (a vessel id, or null for the active vessel) and
+    /// re-reads that vessel's live core: nothing is cached across calls, and a job never touches the core of whatever vessel is active now.
+    /// Methods throw <see cref="MechJebException"/> with a reason code.
     /// </summary>
     internal interface IMechJebPort
     {
         MechJebCapabilities Capabilities { get; }
-        /// <summary>True when the active vessel carries a MechJeb core this frame.</summary>
-        bool HasCore();
-        /// <summary>The full status for mechjeb_status, including engaged states and current settings. Never throws.</summary>
+        /// <summary>True when that vessel carries a MechJeb core this frame.</summary>
+        bool HasCore(string vesselId);
+        /// <summary>The full status for mechjeb_status (active vessel), including engaged states and current settings. Never throws.</summary>
         JObject ReadStatus();
         /// <summary>
-        /// Names of other controllers that are engaged: MechJeb modules with a foreign user, or AtmosphereAutopilot. A module that only our own user holds is not a competitor.
-        /// <paramref name="autopilotsOnly"/> skips the support modules (attitude, rover), which MechJeb's own autopilots legitimately use while running.
+        /// Names of other controllers that are engaged: any MechJeb autopilot or support module (attitude, thrust, rover) with a user that is not ours, or
+        /// AtmosphereAutopilot. A user is ours if it is the bridge's user, the ascent window module the bridge engages through, or a MechJeb module whose own
+        /// user set contains ours (the ascent hands over to the node executor and the attitude controller with itself as the user).
         /// </summary>
-        List<string> FindCompetitors(object ownUser, bool autopilotsOnly);
+        List<string> FindCompetitors(string vesselId, object ownUser);
         /// <summary>Writes the ascent settings, then reads them back. Throws if a value did not take.</summary>
-        AscentSettingsView ConfigureAscent(double altitudeMeters, double inclinationDegrees, bool autostage);
-        void EngageAscent(object user);
-        void DisengageAscent(object user);
-        AscentReading ReadAscent(object user);
-        void EngageNode(object user, bool all);
-        void DisengageNode(object user);
-        NodeReading ReadNode(object user);
-        /// <summary>Asks MechJeb's thrust controller to stop. Never throws.</summary>
-        void ThrustOff();
+        AscentSettingsView ConfigureAscent(string vesselId, double altitudeMeters, double inclinationDegrees, bool autostage);
+        void EngageAscent(string vesselId, object user);
+        void DisengageAscent(string vesselId, object user);
+        AscentReading ReadAscent(string vesselId, object user);
+        /// <summary>Starts the node executor with Autowarp off and returns the Autowarp value it had, to be restored on release.</summary>
+        bool EngageNode(string vesselId, object user, bool all);
+        /// <summary>Removes our user. Aborts the executor only when nobody else holds it, and restores Autowarp when a saved value is given.</summary>
+        void DisengageNode(string vesselId, object user, bool? restoreAutowarp);
+        NodeReading ReadNode(string vesselId, object user);
+        /// <summary>Asks that vessel's MechJeb thrust controller to stop. Never throws.</summary>
+        void ThrustOff(string vesselId);
     }
 
     internal sealed class MechJebException : Exception
@@ -100,6 +106,10 @@ namespace KspControl.Bridge
         public double PeriapsisMeters { get; set; }
         /// <summary>Height of the atmosphere of the current body, 0 when airless.</summary>
         public double AtmosphereTopMeters { get; set; }
+        /// <summary>The body's minimum safe orbit altitude (minOrbitalDistance minus radius); 0 when unknown.</summary>
+        public double SafeAltitudeMeters { get; set; }
+        /// <summary>Periapsis must be above this for the orbit to count: the atmosphere top or the safe altitude, whichever is higher.</summary>
+        public double OrbitFloorMeters { get { return Math.Max(AtmosphereTopMeters, SafeAltitudeMeters); } }
         public string Situation { get; set; }
         /// <summary>The vessel is on a closed orbit around its main body (stock situation ORBITING or equivalent).</summary>
         public bool Orbiting { get; set; }
@@ -124,8 +134,8 @@ namespace KspControl.Bridge
         FlightTelemetry Read();
         /// <summary>A human is on the controls this frame (flight keys or axes). Throttle written by MechJeb or this bridge does not count.</summary>
         bool HumanInputDetected();
-        /// <summary>Sets the stock main throttle to zero.</summary>
-        void CutThrottle();
+        /// <summary>Sets that vessel's stock main throttle to zero (and the live input state only while it is still the active vessel).</summary>
+        void CutThrottle(string vesselId);
         PlanOutcome PlanCircularize();
         PlanOutcome PlanHohmann(string targetBodyName);
     }

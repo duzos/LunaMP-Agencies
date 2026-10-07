@@ -23,6 +23,10 @@ namespace KspControl.BridgeTests
         public bool NodeEnabled, NodeOwn; public int NodeOthers; public string NodeState = "IDLE";
         public bool NodeAll;
         public AscentSettingsView Configured;
+        /// <summary>The vessel id every call was made for: a job must only ever name its own vessel.</summary>
+        public List<string> Vessels = new List<string>();
+        public bool ViaWindow;
+        public bool SavedAutowarp = true; public bool? RestoredAutowarp; public bool RestoreSeen;
         public List<string> CompetitorQueries = new List<string>();
 
         public FakeMechJebPort()
@@ -30,61 +34,69 @@ namespace KspControl.BridgeTests
             foreach (var module in new[] { "ascent", "ascentSettings", "node", "landing", "thrust", "attitude" }) Caps.Modules[module] = true;
         }
 
-        public bool HasCore() { return Core; }
+        public bool HasCore(string vesselId) { Vessels.Add(vesselId); return Core; }
         public JObject ReadStatus() { return new JObject { ["mechjeb"] = Caps.State, ["installed"] = Caps.Installed, ["version"] = Caps.Version, ["vesselCore"] = Core }; }
 
-        public List<string> FindCompetitors(object ownUser, bool autopilotsOnly)
+        public List<string> FindCompetitors(string vesselId, object ownUser)
         {
-            CompetitorQueries.Add(autopilotsOnly ? "autopilots" : "all");
+            Vessels.Add(vesselId); CompetitorQueries.Add(vesselId);
             return Competitors.ToList();
         }
 
-        public AscentSettingsView ConfigureAscent(double altitudeMeters, double inclinationDegrees, bool autostage)
+        public AscentSettingsView ConfigureAscent(string vesselId, double altitudeMeters, double inclinationDegrees, bool autostage)
         {
+            Vessels.Add(vesselId);
             if (ConfigureFails != null) throw ConfigureFails();
             Calls.Add("configure:" + altitudeMeters + ":" + inclinationDegrees + ":" + autostage);
             return Configured = new AscentSettingsView { AscentType = "CLASSIC", TargetAltitudeMeters = altitudeMeters, InclinationDegrees = inclinationDegrees, Autostage = autostage, SkipCircularization = false };
         }
 
-        public void EngageAscent(object user)
+        public void EngageAscent(string vesselId, object user)
         {
+            Vessels.Add(vesselId);
             if (EngageFails != null) throw EngageFails();
             Calls.Add("engage_ascent"); AscentEnabled = true; AscentOwn = true;
         }
 
-        public void DisengageAscent(object user)
+        public void DisengageAscent(string vesselId, object user)
         {
+            Vessels.Add(vesselId);
             Calls.Add("disengage_ascent");
             if (ReleaseThrows) throw new MechJebException("engage_failed");
             AscentEnabled = false; AscentOwn = false;
         }
 
-        public AscentReading ReadAscent(object user)
+        public AscentReading ReadAscent(string vesselId, object user)
         {
+            Vessels.Add(vesselId);
             if (ReadFails != null) throw ReadFails();
-            return new AscentReading { Enabled = AscentEnabled, Status = AscentStatusText, OwnUserPresent = AscentOwn, OtherUsers = AscentOthers };
+            return new AscentReading { Enabled = AscentEnabled, Status = AscentStatusText, OwnUserPresent = AscentOwn, OtherUsers = AscentOthers, ViaWindow = ViaWindow };
         }
 
-        public void EngageNode(object user, bool all)
+        public bool EngageNode(string vesselId, object user, bool all)
         {
+            Vessels.Add(vesselId);
             if (EngageFails != null) throw EngageFails();
             Calls.Add(all ? "engage_node_all" : "engage_node_one"); NodeEnabled = true; NodeOwn = true; NodeAll = all; NodeState = "WARPALIGN";
+            return SavedAutowarp;
         }
 
-        public void DisengageNode(object user)
+        public void DisengageNode(string vesselId, object user, bool? restoreAutowarp)
         {
+            Vessels.Add(vesselId); RestoreSeen = true; RestoredAutowarp = restoreAutowarp;
             Calls.Add("disengage_node");
             if (ReleaseThrows) throw new MechJebException("engage_failed");
             NodeEnabled = false; NodeOwn = false; NodeState = "IDLE";
         }
 
-        public NodeReading ReadNode(object user)
+        public NodeReading ReadNode(string vesselId, object user)
         {
+            Vessels.Add(vesselId);
             if (ReadFails != null) throw ReadFails();
             return new NodeReading { Enabled = NodeEnabled, State = NodeState, OwnUserPresent = NodeOwn, OtherUsers = NodeOthers };
         }
 
-        public void ThrustOff() { Calls.Add("thrust_off"); }
+        public void ThrustOff(string vesselId) { Vessels.Add(vesselId); Calls.Add("thrust_off"); }
     }
 
     internal sealed class FakeFlightPort : IAutopilotFlightPort
@@ -95,21 +107,21 @@ namespace KspControl.BridgeTests
             VesselId = "vessel-1", BodyName = "Kerbin", AltitudeMeters = 0, ApoapsisMeters = 0, PeriapsisMeters = -600000, AtmosphereTopMeters = 70000, Situation = "PRELAUNCH", Orbiting = false, ManeuverNodes = 0
         };
         public int Throttle100 = 100;
-        public int CutCalls;
+        public int CutCalls; public List<string> CutVessels = new List<string>();
         public PlanOutcome CircularizeResult = new PlanOutcome { Ok = true, Data = new JObject { ["source"] = "stock_math", ["kind"] = "circularize_at_apoapsis", ["deltaVMetersPerSecond"] = 88.0 } };
         public PlanOutcome HohmannResult = new PlanOutcome { Ok = true, Data = new JObject { ["source"] = "stock_math", ["kind"] = "hohmann_phase_wait_estimate", ["deltaVMetersPerSecond"] = 842.0 } };
         public string HohmannTarget; public int PlanCalls;
         public bool InFlight { get { return InFlightValue; } }
         public FlightTelemetry Read() { return InFlightValue ? Telemetry : null; }
         public bool HumanInputDetected() { return Human; }
-        public void CutThrottle() { CutCalls++; Throttle100 = 0; }
+        public void CutThrottle(string vesselId) { CutCalls++; CutVessels.Add(vesselId); Throttle100 = 0; }
         public PlanOutcome PlanCircularize() { PlanCalls++; if (CircularizeResult.Ok) Telemetry.ManeuverNodes++; return CircularizeResult; }
         public PlanOutcome PlanHohmann(string targetBodyName) { PlanCalls++; HohmannTarget = targetBodyName; if (HohmannResult.Ok) Telemetry.ManeuverNodes++; return HohmannResult; }
     }
 
     internal sealed class FlightContextSource : IEditorContextSource
     {
-        public string Epoch = "epoch1", Entity = AutopilotOperations.Entity;
+        public string Epoch = "epoch1", Entity = AutopilotOperations.EntityPrefix + "vessel-1";
         public bool Ready = true;
         public LeaseContext CurrentContext() { return new LeaseContext(Epoch, Entity, 0, Ready); }
         public GrantBinding CurrentBinding() { return AuthorityHelpers.Bind(); }
@@ -137,23 +149,23 @@ namespace KspControl.BridgeTests
         public bool Heartbeats = true;
         private int counter;
 
-        public AutopilotRig(bool lease = true, string[] operations = null)
+        public AutopilotRig(bool lease = true, string[] operations = null, string[] facilities = null)
         {
             Authority = new ExecutionAuthority(() => Clock.Milliseconds, GrantMapping.KnownEffects, 2000, Store, () => Utc);
             Pump = new ControlPump(Authority, null, Context);
             Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options);
             Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc);
             Authority.UpdateContext(Context.CurrentContext(), Context.CurrentBinding(), AuthorityHelpers.ValidStatus());
-            Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect })));
+            Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect }, facilities ?? new[] { AutopilotOperations.Facility })));
             if (lease) AcquireLease();
         }
 
-        private static GrantPayload Payload(string[] operations)
+        private static GrantPayload Payload(string[] operations, string[] facilities)
         {
             return new GrantPayload
             {
                 GrantId = "grant", Generation = 1, IssuedUtc = GrantPayload.FormatUtc(AuthorityHelpers.Utc0), ExpiresUtc = GrantPayload.FormatUtc(AuthorityHelpers.Utc0.AddHours(1000)),
-                Binding = new GrantBindingInfo { InstallId = "install", SaveFolder = "save", Agency = "agency" }, Operations = operations, Facilities = new[] { "VAB" },
+                Binding = new GrantBindingInfo { InstallId = "install", SaveFolder = "save", Agency = "agency" }, Operations = operations, Facilities = facilities,
                 UnsavedCraftPolicy = "refuse", MaxParts = 250, SpendLimitFunds = 0, Revoked = false
             };
         }

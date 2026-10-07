@@ -19,9 +19,9 @@ namespace KspControl.BridgeTests
         [TestInitialize] public void Setup() { core = new MechJebCore(); vessel = new object(); AtmosphereAutopilot.Instance = null; UserPool.AddEnablesModule = true; }
         [TestCleanup] public void Cleanup() { AtmosphereAutopilot.Instance = null; UserPool.AddEnablesModule = true; }
 
-        private MechJebAdapter Make(Func<object> source = null, Type atmosphere = null, string version = "2.15.2.0", Type coreType = null)
+        private MechJebAdapter Make(Func<string, object> source = null, Type atmosphere = null, string version = "2.15.2.0", Type coreType = null)
         {
-            return new MechJebAdapter(source ?? (() => core), () => vessel,
+            return new MechJebAdapter(source ?? (id => core), id => vessel,
                 () => { typeLookups++; return coreType ?? typeof(MechJebCore); }, () => atmosphere, t => Version.Parse(version));
         }
 
@@ -40,7 +40,7 @@ namespace KspControl.BridgeTests
 
         [TestMethod] public void AMissingMechJebIsUnavailable()
         {
-            var adapter = new MechJebAdapter(() => null, null, () => null, () => null);
+            var adapter = new MechJebAdapter(id => null, null, () => null, () => null);
             var caps = adapter.Capabilities;
             Assert.IsFalse(caps.Installed); Assert.AreEqual("unavailable", caps.State); Assert.AreEqual("mechjeb_unavailable", caps.Reason);
             var status = adapter.ReadStatus();
@@ -52,8 +52,8 @@ namespace KspControl.BridgeTests
             var adapter = Make(version: "2.14.0.0");
             Assert.IsTrue(adapter.Capabilities.Installed); Assert.IsFalse(adapter.Capabilities.VersionSupported);
             Assert.AreEqual("mechjeb_version_unsupported", adapter.Capabilities.Reason); Assert.AreEqual("unsupported_version", adapter.Capabilities.State);
-            Assert.AreEqual("mechjeb_version_unsupported", Throws(() => adapter.EngageAscent(new object())).Code);
-            Assert.AreEqual("mechjeb_version_unsupported", Throws(() => adapter.ConfigureAscent(100000, 0, true)).Code);
+            Assert.AreEqual("mechjeb_version_unsupported", Throws(() => adapter.EngageAscent(null, new object())).Code);
+            Assert.AreEqual("mechjeb_version_unsupported", Throws(() => adapter.ConfigureAscent(null, 100000, 0, true)).Code);
         }
 
         [TestMethod] public void ALegacyAscentLayoutWithoutTheNeededMembersIsFlaggedPerModule()
@@ -84,7 +84,7 @@ namespace KspControl.BridgeTests
 
         [TestMethod] public void ConfigureWritesAndReadsBackTheAscentSettings()
         {
-            var view = Make().ConfigureAscent(120000, 28.5, true);
+            var view = Make().ConfigureAscent(null, 120000, 28.5, true);
             Assert.AreEqual(120000, core.AscentSettings.DesiredOrbitAltitude.Val); Assert.AreEqual(28.5, core.AscentSettings.DesiredInclination.Val);
             Assert.IsTrue(core.AscentSettings.Autostage); Assert.IsFalse(core.AscentSettings.SkipCircularization, "the bridge never lets the ascent skip its circularization");
             Assert.AreEqual(120000, view.TargetAltitudeMeters); Assert.AreEqual(28.5, view.InclinationDegrees); Assert.AreEqual(true, view.Autostage); Assert.AreEqual("CLASSIC", view.AscentType);
@@ -93,32 +93,32 @@ namespace KspControl.BridgeTests
         [TestMethod] public void ASettingMechJebDoesNotKeepFailsTheConfiguration()
         {
             core.AscentSettings.DesiredOrbitAltitude = new FrozenDouble();
-            Assert.AreEqual("engage_failed", Throws(() => Make().ConfigureAscent(120000, 0, false)).Code);
+            Assert.AreEqual("engage_failed", Throws(() => Make().ConfigureAscent(null, 120000, 0, false)).Code);
         }
 
         [TestMethod] public void EngagingAddsOurUserAndEnablesTheModuleWhetherOrNotAddDoes()
         {
             var user = new object(); var adapter = Make();
-            adapter.EngageAscent(user);
-            Assert.IsTrue(core.Ascent.Enabled); CollectionAssert.AreEqual(new[] { user }, core.Ascent.Users.ToArray());
-            var reading = adapter.ReadAscent(user);
+            adapter.EngageAscent(null, user);
+            Assert.IsTrue(core.Ascent.Enabled); CollectionAssert.AreEqual(new object[] { core.AscentMenu }, core.Ascent.Users.ToArray(), "engaged through the ascent window module");
+            var reading = adapter.ReadAscent(null, user);
             Assert.IsTrue(reading.Enabled && reading.OwnUserPresent); Assert.AreEqual(0, reading.OtherUsers); Assert.AreEqual("Pre-launch", reading.Status);
-            adapter.DisengageAscent(user);
+            adapter.DisengageAscent(null, user);
             Assert.IsFalse(core.Ascent.Enabled); Assert.AreEqual(0, core.Ascent.Users.Count);
 
             core = new MechJebCore(); UserPool.AddEnablesModule = false; var second = new object(); var other = Make();
-            other.EngageAscent(second);
+            other.EngageAscent(null, second);
             Assert.IsTrue(core.Ascent.Enabled, "enabled explicitly when the pool did not");
-            other.DisengageAscent(second);
+            other.DisengageAscent(null, second);
             Assert.IsFalse(core.Ascent.Enabled);
         }
 
         [TestMethod] public void DisengagingLeavesAnotherUsersHoldAlone()
         {
             var ours = new object(); var theirs = new object(); var adapter = Make();
-            core.Ascent.Users.Add(theirs); adapter.EngageAscent(ours);
-            var reading = adapter.ReadAscent(ours); Assert.AreEqual(1, reading.OtherUsers);
-            adapter.DisengageAscent(ours);
+            core.Ascent.Users.Add(theirs); adapter.EngageAscent(null, ours);
+            var reading = adapter.ReadAscent(null, ours); Assert.AreEqual(1, reading.OtherUsers);
+            adapter.DisengageAscent(null, ours);
             Assert.IsTrue(core.Ascent.Enabled, "someone else still holds it");
             CollectionAssert.AreEqual(new[] { theirs }, core.Ascent.Users.ToArray());
         }
@@ -127,18 +127,18 @@ namespace KspControl.BridgeTests
         {
             var master = new MechJebCore(); core.MasterMechJeb = master;
             var adapter = Make();
-            adapter.ConfigureAscent(150000, 10, false);
+            adapter.ConfigureAscent(null, 150000, 10, false);
             Assert.AreEqual(150000, master.AscentSettings.DesiredOrbitAltitude.Val); Assert.AreEqual(100000, core.AscentSettings.DesiredOrbitAltitude.Val);
         }
 
         [TestMethod] public void WithNoCoreOnTheVesselEveryCallRefusesAndNothingIsCached()
         {
-            MechJebCore current = null; var adapter = Make(() => current);
-            Assert.IsFalse(adapter.HasCore());
-            Assert.AreEqual("mechjeb_unavailable", Throws(() => adapter.EngageAscent(new object())).Code);
-            current = core; Assert.IsTrue(adapter.HasCore());
-            adapter.EngageAscent(new object()); Assert.IsTrue(core.Ascent.Enabled);
-            current = null; Assert.IsFalse(adapter.HasCore(), "the vessel was destroyed: the stale core is not remembered");
+            MechJebCore current = null; var adapter = Make(id => current);
+            Assert.IsFalse(adapter.HasCore(null));
+            Assert.AreEqual("mechjeb_unavailable", Throws(() => adapter.EngageAscent(null, new object())).Code);
+            current = core; Assert.IsTrue(adapter.HasCore(null));
+            adapter.EngageAscent(null, new object()); Assert.IsTrue(core.Ascent.Enabled);
+            current = null; Assert.IsFalse(adapter.HasCore(null), "the vessel was destroyed: the stale core is not remembered");
         }
 
         // ---- node executor ----
@@ -146,19 +146,19 @@ namespace KspControl.BridgeTests
         [TestMethod] public void ExecutingANodeForcesAutowarpOffAndAbortOnDisengage()
         {
             var user = new object(); var adapter = Make();
-            adapter.EngageNode(user, false);
+            adapter.EngageNode(null, user, false);
             Assert.IsFalse(core.Node.Autowarp); Assert.AreEqual(1, core.Node.ExecuteOne); Assert.AreEqual(0, core.Node.ExecuteAll);
-            var reading = adapter.ReadNode(user);
+            var reading = adapter.ReadNode(null, user);
             Assert.IsTrue(reading.Enabled && reading.OwnUserPresent); Assert.AreEqual("WARPALIGN", reading.State); Assert.IsFalse(reading.Autowarp);
-            adapter.DisengageNode(user);
+            adapter.DisengageNode(null, user, null);
             Assert.AreEqual(1, core.Node.Aborts); Assert.IsFalse(core.Node.Enabled);
-            adapter.EngageNode(user, true);
+            adapter.EngageNode(null, user, true);
             Assert.AreEqual(1, core.Node.ExecuteAll);
         }
 
         [TestMethod] public void ThrustOffReachesTheThrustController()
         {
-            Make().ThrustOff();
+            Make().ThrustOff(null);
             Assert.AreEqual(1, core.Thrust.Off);
         }
 
@@ -167,32 +167,100 @@ namespace KspControl.BridgeTests
         [TestMethod] public void OurOwnHoldIsNotACompetitorButAnyoneElsesIs()
         {
             var ours = new object(); var adapter = Make();
-            Assert.AreEqual(0, adapter.FindCompetitors(ours, false).Count);
-            adapter.EngageAscent(ours);
-            Assert.AreEqual(0, adapter.FindCompetitors(ours, false).Count, "only our user holds the ascent module");
-            CollectionAssert.AreEqual(new[] { "mechjeb.ascent" }, adapter.FindCompetitors(null, false).ToArray(), "to a new caller it is engaged");
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours).Count);
+            adapter.EngageAscent(null, ours);
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours).Count, "only our user holds the ascent module");
+            CollectionAssert.AreEqual(new[] { "mechjeb.ascent" }, adapter.FindCompetitors(null, null).ToArray(), "to a new caller it is engaged");
             core.Node.Users.Add(new object());
-            CollectionAssert.AreEqual(new[] { "mechjeb.node" }, adapter.FindCompetitors(ours, false).ToArray());
+            CollectionAssert.AreEqual(new[] { "mechjeb.node" }, adapter.FindCompetitors(null, ours).ToArray());
         }
 
         [TestMethod] public void AnEnabledAutopilotWithNoUsersIsStillACompetitor()
         {
             core.Landing.Enabled = true;
-            CollectionAssert.AreEqual(new[] { "mechjeb.landing" }, Make().FindCompetitors(new object(), false).ToArray());
+            CollectionAssert.AreEqual(new[] { "mechjeb.landing" }, Make().FindCompetitors(null, new object()).ToArray());
         }
 
         [TestMethod] public void SupportModulesCountOnlyAtAdmission()
         {
-            core.Attitude.Users.Add(new object());
+            core.Attitude.Users.Add(new object()); core.Rover.Users.Add(new object()); core.Thrust.Users.Add(new object());
             var adapter = Make();
-            CollectionAssert.AreEqual(new[] { "mechjeb.attitude" }, adapter.FindCompetitors(null, false).ToArray());
-            Assert.AreEqual(0, adapter.FindCompetitors(null, true).Count, "MechJeb's own ascent holds the attitude controller while it flies");
+            CollectionAssert.AreEquivalent(new[] { "mechjeb.attitude", "mechjeb.rover", "mechjeb.thrust" }, adapter.FindCompetitors(null, new object()).ToArray(), "a foreign user of a support module is a competitor, in the running scan too");
+        }
+
+        [TestMethod] public void TheAscentHandingOverToTheNodeExecutorAndAttitudeControllerIsNotACompetitor()
+        {
+            var ours = new object(); var adapter = Make();
+            adapter.EngageAscent(null, ours);
+            core.HandOffToNode(); // MechJeb's circularization: node executor and attitude controller with the ascent module as the user
+            Assert.IsTrue(core.Node.Enabled);
+            Assert.AreEqual(0, adapter.FindCompetitors(null, ours).Count, "the ascent module acts for us");
+            var reading = adapter.ReadNode(null, ours);
+            Assert.AreEqual(0, reading.OtherUsers, "no foreign user on the node executor"); Assert.IsFalse(reading.OwnUserPresent, "not a direct user of ours");
+            core.Node.Users.Add(new object());
+            CollectionAssert.AreEqual(new[] { "mechjeb.node" }, adapter.FindCompetitors(null, ours).ToArray(), "a foreign user next to the ascent is still caught");
+        }
+
+        [TestMethod] public void AnAscentModuleThatDoesNotActForUsIsAForeignUser()
+        {
+            var adapter = Make();
+            core.Ascent.Users.Add(new object()); // someone else started the ascent
+            core.HandOffToNode();
+            CollectionAssert.AreEquivalent(new[] { "mechjeb.ascent", "mechjeb.node", "mechjeb.attitude" }, adapter.FindCompetitors(null, new object()).ToArray());
+        }
+
+        [TestMethod] public void WithoutAWindowModuleTheBridgeUserItselfEngagesTheAscent()
+        {
+            core.HasMenu = false; var user = new object(); var adapter = Make();
+            adapter.EngageAscent(null, user);
+            CollectionAssert.AreEqual(new[] { user }, core.Ascent.Users.ToArray());
+            var reading = adapter.ReadAscent(null, user); Assert.IsFalse(reading.ViaWindow); Assert.IsTrue(reading.OwnUserPresent);
+            adapter.DisengageAscent(null, user); Assert.IsFalse(core.Ascent.Enabled);
+        }
+
+        [TestMethod] public void TheWindowDisengageButtonRemovesTheAscentUser()
+        {
+            var user = new object(); var adapter = Make();
+            adapter.EngageAscent(null, user);
+            var before = adapter.ReadAscent(null, user); Assert.IsTrue(before.ViaWindow && before.OwnUserPresent);
+            core.Ascent.Users.Remove(core.AscentMenu); // what MechJeb's button does
+            var after = adapter.ReadAscent(null, user);
+            Assert.IsFalse(after.Enabled); Assert.IsFalse(after.OwnUserPresent); Assert.IsTrue(after.ViaWindow);
+        }
+
+        [TestMethod] public void ReleasingTheNodeExecutorLeavesAnotherUsersBurnAlone()
+        {
+            var user = new object(); var theirs = new object(); var adapter = Make();
+            core.Node.Users.Add(theirs); adapter.EngageNode(null, user, false);
+            adapter.DisengageNode(null, user, null);
+            Assert.AreEqual(0, core.Node.Aborts, "no Abort while someone else holds the executor");
+            CollectionAssert.AreEqual(new[] { theirs }, core.Node.Users.ToArray()); Assert.IsTrue(core.Node.Enabled);
+        }
+
+        [TestMethod] public void AutowarpIsRestoredOnRelease()
+        {
+            var user = new object(); var adapter = Make(); core.Node.Autowarp = true;
+            var saved = adapter.EngageNode(null, user, false);
+            Assert.IsTrue(saved); Assert.IsFalse(core.Node.Autowarp);
+            adapter.DisengageNode(null, user, saved);
+            Assert.IsTrue(core.Node.Autowarp); Assert.AreEqual(1, core.Node.Aborts);
+        }
+
+        [TestMethod] public void EveryCallTargetsTheNamedVesselNeverTheActiveOne()
+        {
+            var other = new MechJebCore(); string asked = null;
+            var adapter = new MechJebAdapter(id => { asked = id; return id == "vessel-b" ? other : core; }, id => vessel, () => typeof(MechJebCore), () => null, t => new Version(2, 15, 2, 0));
+            adapter.ConfigureAscent("vessel-b", 130000, 0, false);
+            Assert.AreEqual("vessel-b", asked); Assert.AreEqual(130000, other.AscentSettings.DesiredOrbitAltitude.Val); Assert.AreEqual(100000, core.AscentSettings.DesiredOrbitAltitude.Val);
+            adapter.EngageAscent("vessel-b", new object()); Assert.IsTrue(other.Ascent.Enabled); Assert.IsFalse(core.Ascent.Enabled);
+            adapter.ThrustOff("vessel-b"); Assert.AreEqual(1, other.Thrust.Off); Assert.AreEqual(0, core.Thrust.Off);
+            adapter.DisengageAscent("vessel-b", new object()); Assert.IsFalse(other.Ascent.Enabled);
         }
 
         [TestMethod] public void ModulesFoundThroughTheGenericLookupAreScannedToo()
         {
             core.Rendezvous.Users.Add(new object());
-            CollectionAssert.AreEqual(new[] { "mechjeb.rendezvous" }, Make().FindCompetitors(null, true).ToArray());
+            CollectionAssert.AreEqual(new[] { "mechjeb.rendezvous" }, Make().FindCompetitors(null, null).ToArray());
         }
 
         [TestMethod] public void AnActiveAtmosphereAutopilotModuleIsACompetitor()
@@ -201,15 +269,15 @@ namespace KspControl.BridgeTests
             aa.Modules[typeof(string)] = new FakeAtmosphere.AutopilotModule { Active = false, ModuleName = "Cruise" };
             var adapter = Make(atmosphere: typeof(AtmosphereAutopilot));
             Assert.IsTrue(adapter.Capabilities.AtmosphereAutopilotInstalled);
-            Assert.AreEqual(0, adapter.FindCompetitors(null, true).Count);
+            Assert.AreEqual(0, adapter.FindCompetitors(null, null).Count);
             aa.Modules[typeof(int)] = new FakeAtmosphere.AutopilotModule { Active = true, ModuleName = "Fly By Wire" };
-            CollectionAssert.AreEqual(new[] { "atmosphere_autopilot.Fly By Wire" }, adapter.FindCompetitors(null, true).ToArray());
+            CollectionAssert.AreEqual(new[] { "atmosphere_autopilot.Fly By Wire" }, adapter.FindCompetitors(null, null).ToArray());
         }
 
         [TestMethod] public void AnUnreadableAtmosphereAutopilotFailsClosed()
         {
             var aa = new AtmosphereAutopilot { Throw = true }; AtmosphereAutopilot.Instance = aa;
-            var found = Make(atmosphere: typeof(AtmosphereAutopilot)).FindCompetitors(null, true);
+            var found = Make(atmosphere: typeof(AtmosphereAutopilot)).FindCompetitors(null, null);
             CollectionAssert.AreEqual(new[] { "atmosphere_autopilot:unreadable" }, found.ToArray());
         }
 
@@ -218,7 +286,7 @@ namespace KspControl.BridgeTests
         [TestMethod] public void StatusReportsPresenceVersionModulesSettingsAndEngagedStates()
         {
             var adapter = Make();
-            adapter.ConfigureAscent(110000, 5, true); adapter.EngageAscent(new object());
+            adapter.ConfigureAscent(null, 110000, 5, true); adapter.EngageAscent(null, new object());
             var status = adapter.ReadStatus();
             Assert.AreEqual("available", (string)status["mechjeb"]); Assert.AreEqual("2.15.2.0", (string)status["version"]); Assert.AreEqual(true, (bool)status["vesselCore"]);
             Assert.AreEqual(true, (bool)status["modules"]["ascent"]["supported"]); Assert.AreEqual(true, (bool)status["modules"]["ascent"]["engaged"]); Assert.AreEqual("Pre-launch", (string)status["modules"]["ascent"]["status"]);
@@ -230,7 +298,7 @@ namespace KspControl.BridgeTests
 
         [TestMethod] public void StatusWithoutACoreStillDescribesTheInstall()
         {
-            var adapter = Make(() => null);
+            var adapter = Make(id => null);
             var status = adapter.ReadStatus();
             Assert.AreEqual("available", (string)status["mechjeb"]); Assert.AreEqual(false, (bool)status["vesselCore"]);
             Assert.AreEqual(true, (bool)status["modules"]["ascent"]["supported"]);

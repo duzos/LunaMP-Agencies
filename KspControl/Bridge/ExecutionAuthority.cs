@@ -92,8 +92,14 @@ namespace KspControl.Bridge
             if (this.permissions.Length > 1024 || this.permissions.Any(p => p == null)) throw new ArgumentException("invalid_permissions");
             this.entities = (entities ?? throw new ArgumentNullException(nameof(entities))).Select(e => Identifiers.Required(e)).ToArray();
         }
-        internal bool Allows(ClassifiedEffect effect) => permissions.Any(p => p.Operation == effect.Operation && p.Recipient == effect.Recipient);
-        internal bool AllowsEntity(string entity) => entities.Contains(entity, StringComparer.Ordinal);
+        internal bool Allows(ClassifiedEffect effect) => permissions.Any(p => p.Operation == effect.Operation && Matches(p.Recipient, effect.Recipient));
+        internal bool AllowsEntity(string entity) => entities.Any(e => Matches(e, entity));
+        /// <summary>Exact match, or a trailing "*" meaning "this prefix" (used by the flight grant, whose vessel is not known when it is issued).</summary>
+        private static bool Matches(string pattern, string value)
+        {
+            if (pattern.Length > 1 && pattern[pattern.Length - 1] == '*') return value.StartsWith(pattern.Substring(0, pattern.Length - 1), StringComparison.Ordinal);
+            return string.Equals(pattern, value, StringComparison.Ordinal);
+        }
     }
 
     internal sealed class ExecutionTicket

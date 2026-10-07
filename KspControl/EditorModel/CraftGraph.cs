@@ -76,10 +76,10 @@ namespace KspControl.EditorModel
                 parts.Add(part.Id,part);
                 if(!part.Position.IsFinite || part.Position.LengthSquared>1e12 || !part.Rotation.IsUnit) add("invalid_transform",part.Id);
                 if(part.Stage < -1 || part.Stage>999) add("invalid_stage",part.Id);
-                if(part.Definition==null || !catalog.TryGetValue(part.Definition,out var definition)) { add("unknown_part",part.Id);continue; }
+                if(part.Definition==null || !catalog.TryGetValue(part.Definition,out var definition)||definition==null) { add("unknown_part",part.Id);continue; }
                 if(!definition.Unlocked) add("part_locked",part.Id);
                 if(!definition.ConfigurationVerified) add("configuration_unverified",part.Id);
-                if(definition.Nodes==null || definition.Nodes.Any(n=>n==null||!Handle(n.Name)||!n.Position.IsFinite||!n.Orientation.IsFinite) || definition.Nodes.Where(n=>n!=null).GroupBy(n=>n.Name).Any(g=>g.Count()>1)) add("invalid_catalog_nodes",part.Id);
+                if(definition.Nodes==null || definition.Nodes.Any(n=>n==null||!Handle(n.Name)||!n.Position.IsFinite||!n.Orientation.IsFinite||n.Orientation.LengthSquared<1e-12||n.Orientation.LengthSquared>1e12) || definition.Nodes.Where(n=>n!=null).GroupBy(n=>n.Name).Any(g=>g.Count()>1)) add("invalid_catalog_nodes",part.Id);
             }
             if(graph.RootId==null || !parts.TryGetValue(graph.RootId,out var root)) add("missing_root",null);
             else if(root.ParentId!=null) add("root_has_parent",root.Id);
@@ -88,7 +88,7 @@ namespace KspControl.EditorModel
             {
                 if(part.Id==graph.RootId) continue;
                 if(part.ParentId==null || !parts.TryGetValue(part.ParentId,out var parent)) { add("missing_parent",part.Id);continue; }
-                if(!catalog.TryGetValue(part.Definition??"",out var childDefinition)||!catalog.TryGetValue(parent.Definition??"",out var parentDefinition)) continue;
+                if(!catalog.TryGetValue(part.Definition??"",out var childDefinition)||!catalog.TryGetValue(parent.Definition??"",out var parentDefinition)||childDefinition==null||parentDefinition==null) continue;
                 var childNode=(childDefinition.Nodes??new List<AttachNodeDefinition>()).FirstOrDefault(n=>n!=null&&part.ChildNode!=null&&n.Name==part.ChildNode&&n.Kind==part.Attachment);
                 if(childNode==null) add("missing_child_node",part.Id);
                 if(part.Attachment==AttachmentKind.Stack)
@@ -116,4 +116,5 @@ namespace KspControl.EditorModel
         private static bool Handle(string value) => !string.IsNullOrEmpty(value)&&value.Length<=64&&value.All(c=>char.IsLetterOrDigit(c)||c=='-'||c=='_');
     }
 }
+
 

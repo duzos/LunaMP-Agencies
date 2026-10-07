@@ -143,12 +143,15 @@ namespace KspControl.Bridge
         private readonly ExecutionAuthority authority;
         private readonly GrantWatcher watcher;
         private readonly IEditorContextSource source;
-        public ControlPump(ExecutionAuthority authority, GrantWatcher watcher, IEditorContextSource source)
-        { this.authority = authority; this.watcher = watcher; this.source = source; }
+        private readonly EditorRevisionTracker tracker;
+        public ControlPump(ExecutionAuthority authority, GrantWatcher watcher, IEditorContextSource source, EditorRevisionTracker tracker = null)
+        { this.authority = authority; this.watcher = watcher; this.source = source; this.tracker = tracker; }
 
         public void Update()
         {
             // Every step is isolated so one failing input can never skip the rest, in particular Tick.
+            // The tracker runs first: a human edit takes over the lease before the context (and its revision) is published.
+            try { tracker?.Update(); } catch (Exception) { /* editor teardown: the next frame observes again */ }
             LeaseContext context = null; GrantBinding binding = null;
             try { context = source.CurrentContext(); } catch (Exception) { /* scene teardown: keep the last published context */ }
             try { binding = source.CurrentBinding(); } catch (Exception) { binding = null; /* invalid binding means binding_mismatch */ }

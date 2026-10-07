@@ -2,9 +2,21 @@
   <PropertyGroup><TargetFramework>net472</TargetFramework><LangVersion>7.3</LangVersion><AssemblyName>KspControlBridge</AssemblyName></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Contracts/KspControl.Contracts.csproj" />
+    <!-- Pure EditorModel sources are linked, not referenced: no new DLL ships and the package allowlist is unchanged. -->
+    <Compile Include="../EditorModel/AttachmentGeometry.cs" Link="EditorModel/AttachmentGeometry.cs" />
+    <Compile Include="../EditorModel/CraftGraph.cs" Link="EditorModel/CraftGraph.cs" />
+    <Compile Include="../EditorModel/ConfigText.cs" Link="EditorModel/ConfigText.cs" />
+    <Compile Include="../EditorModel/CraftModel.cs" Link="EditorModel/CraftModel.cs" />
+    <Compile Include="../EditorModel/CraftComparator.cs" Link="EditorModel/CraftComparator.cs" />
+    <Compile Include="../EditorModel/CraftFingerprint.cs" Link="EditorModel/CraftFingerprint.cs" />
+    <Compile Include="../EditorModel/RotationMath.cs" Link="EditorModel/RotationMath.cs" />
+    <Compile Include="../EditorModel/ValueRule.cs" Link="EditorModel/ValueRule.cs" />
+    <Compile Include="../EditorModel/RoundtripVolatileKeys.cs" Link="EditorModel/RoundtripVolatileKeys.cs" />
+    <Compile Include="../EditorModel/EditorRevisionToken.cs" Link="EditorModel/EditorRevisionToken.cs" />
     <Reference Include="Assembly-CSharp"><HintPath>../../External/KSPLibraries/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>../../External/KSPLibraries/UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>../../External/KSPLibraries/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>../../External/KSPLibraries/UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.IMGUIModule"><HintPath>../../External/KSPLibraries/UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.InputLegacyModule"><HintPath>../../External/KSPLibraries/UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>

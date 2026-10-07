@@ -13,7 +13,23 @@
     <Compile Include="../Bridge/GrantWatcher.cs" Link="GrantWatcher.cs" />
     <Compile Include="../Bridge/SuspensionStore.cs" Link="SuspensionStore.cs" />
     <Compile Include="../Bridge/PartFilters.cs" Link="PartFilters.cs" />
+    <Compile Include="../Bridge/EditorPort.cs" Link="EditorPort.cs" />
+    <Compile Include="../Bridge/EditorIdle.cs" Link="EditorIdle.cs" />
+    <Compile Include="../Bridge/EditorReflection.cs" Link="EditorReflection.cs" />
+    <Compile Include="../Bridge/EditorRevisionTracker.cs" Link="EditorRevisionTracker.cs" />
+    <Compile Include="../Bridge/EditorObservationService.cs" Link="EditorObservationService.cs" />
+    <Compile Include="../EditorModel/AttachmentGeometry.cs" Link="EditorModel/AttachmentGeometry.cs" />
+    <Compile Include="../EditorModel/CraftGraph.cs" Link="EditorModel/CraftGraph.cs" />
+    <Compile Include="../EditorModel/ConfigText.cs" Link="EditorModel/ConfigText.cs" />
+    <Compile Include="../EditorModel/CraftModel.cs" Link="EditorModel/CraftModel.cs" />
+    <Compile Include="../EditorModel/CraftComparator.cs" Link="EditorModel/CraftComparator.cs" />
+    <Compile Include="../EditorModel/CraftFingerprint.cs" Link="EditorModel/CraftFingerprint.cs" />
+    <Compile Include="../EditorModel/RotationMath.cs" Link="EditorModel/RotationMath.cs" />
+    <Compile Include="../EditorModel/ValueRule.cs" Link="EditorModel/ValueRule.cs" />
+    <Compile Include="../EditorModel/RoundtripVolatileKeys.cs" Link="EditorModel/RoundtripVolatileKeys.cs" />
+    <Compile Include="../EditorModel/EditorRevisionToken.cs" Link="EditorModel/EditorRevisionToken.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
+    <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.key" Link="Fixtures/grant-fixture.key" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

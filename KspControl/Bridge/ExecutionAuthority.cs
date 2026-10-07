@@ -235,6 +235,8 @@ namespace KspControl.Bridge
         public bool IsBurned(string grantId, long grantGeneration)
         { lock (gate) return IsBurnedLocked(grantId, grantGeneration); }
 
+        /// <summary>True while a lease is held. Cheap enough to read every frame.</summary>
+        public bool LeaseHeld { get { lock (gate) return leaseId != null; } }
         public string CurrentGrantId { get { lock (gate) return grant?.Id; } }
         public long CurrentGrantGeneration { get { lock (gate) return grant?.Generation ?? 0; } }
 

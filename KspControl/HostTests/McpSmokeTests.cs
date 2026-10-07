@@ -28,7 +28,7 @@ namespace KspControl.HostTests;
    var list=await Request(new { jsonrpc="2.0",id=2,method="tools/list",@params=new {} },2);
    var names=list.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t=>t.GetProperty("name").GetString()).ToArray();
    CollectionAssert.Contains(names,"context");
-   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease"}) CollectionAssert.Contains(names,expected);
+   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease","editor_state","editor_engineering"}) CollectionAssert.Contains(names,expected);
    // Schema scan over the real tool list: nothing accepts grant payloads or key material.
    foreach(var tool in list.GetProperty("result").GetProperty("tools").EnumerateArray())
    {
@@ -39,6 +39,13 @@ namespace KspControl.HostTests;
       foreach(var word in new[]{"grant","payload","mac","key","secret","token","password","envelope"})
        Assert.IsFalse(property.Name.Contains(word,StringComparison.OrdinalIgnoreCase),$"{name}.{property.Name}");
    }
+   // The editor observation tools are read-only: no lease, request id or revision argument, and only the documented properties.
+   var stateSchema=list.GetProperty("result").GetProperty("tools").EnumerateArray().Single(t=>t.GetProperty("name").GetString()=="editor_state").GetProperty("inputSchema");
+   Assert.IsFalse(stateSchema.TryGetProperty("properties",out var stateProperties) && stateProperties.EnumerateObject().Any());
+   var engineering=list.GetProperty("result").GetProperty("tools").EnumerateArray().Single(t=>t.GetProperty("name").GetString()=="editor_engineering").GetProperty("inputSchema").GetProperty("properties");
+   CollectionAssert.AreEquivalent(new[]{"offset","limit","includeDeltaV"},engineering.EnumerateObject().Select(p=>p.Name).ToArray());
+   Assert.AreEqual(0,engineering.GetProperty("offset").GetProperty("minimum").GetInt32()); Assert.AreEqual(100000,engineering.GetProperty("offset").GetProperty("maximum").GetInt32());
+   Assert.AreEqual(1,engineering.GetProperty("limit").GetProperty("minimum").GetInt32()); Assert.AreEqual(50,engineering.GetProperty("limit").GetProperty("maximum").GetInt32());
    var control=list.GetProperty("result").GetProperty("tools").EnumerateArray().Single(t=>t.GetProperty("name").GetString()=="control_acquire_lease").GetProperty("inputSchema").GetProperty("properties");
    Assert.AreEqual(2,control.EnumerateObject().Count()); Assert.IsTrue(control.TryGetProperty("purpose",out _)); Assert.IsTrue(control.TryGetProperty("durationSeconds",out _));
    var call=await Request(new { jsonrpc="2.0",id=3,method="tools/call",@params=new { name="context",arguments=new {} } },3);
@@ -48,6 +55,12 @@ namespace KspControl.HostTests;
    using var statusFailure=JsonDocument.Parse(status.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
    Assert.AreEqual("credential_not_configured",statusFailure.RootElement.GetProperty("ReasonCode").GetString());
    Assert.AreEqual("available",statusFailure.RootElement.GetProperty("Data").GetProperty("host").GetProperty("journal").GetString());
+   var editorState=await Request(new { jsonrpc="2.0",id=6,method="tools/call",@params=new { name="editor_state",arguments=new {} } },6);
+   using var editorStateResult=JsonDocument.Parse(editorState.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("credential_not_configured",editorStateResult.RootElement.GetProperty("ReasonCode").GetString());
+   var badEngineering=await Request(new { jsonrpc="2.0",id=7,method="tools/call",@params=new { name="editor_engineering",arguments=new { limit=0 } } },7);
+   using var badEngineeringResult=JsonDocument.Parse(badEngineering.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("invalid_argument",badEngineeringResult.RootElement.GetProperty("ReasonCode").GetString());
    var invalid=await Request(new { jsonrpc="2.0",id=5,method="tools/call",@params=new { name="control_acquire_lease",arguments=new { purpose="x",durationSeconds=5 } } },5);
    using var invalidResult=JsonDocument.Parse(invalid.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
    Assert.AreEqual("invalid_argument",invalidResult.RootElement.GetProperty("ReasonCode").GetString());

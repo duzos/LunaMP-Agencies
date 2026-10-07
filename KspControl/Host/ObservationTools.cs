@@ -63,6 +63,14 @@ public sealed class ObservationTools(BridgeClient bridge)
   [Description("Page size, 1..20.")] [Range(1,ObservationLimits.MaxSnapshotPage)] int limit=ObservationLimits.DefaultPage,
   [Description("Include bounded native craft text. Default false.")] bool includeNative=false,
   CancellationToken cancellationToken=default) => Page(offset,limit,ObservationLimits.MaxSnapshotPage,"editor.snapshot",new JObject { ["includeNative"]=includeNative },cancellationToken);
+ [McpServerTool, Description("Read the editor revision state without changing anything or taking a lease. Returns editorRevision (an opaque token for later mutation preconditions; null when the craft fingerprint could not be computed), editRevision, generation, partCount, facility, shipName (the editor name field), unsaved (true, false or \"unknown\"), idle, fsmState (or \"unavailable\"), busy[] (part_held, fsm_not_idle, modal_lock:<id>, operation_running, launch_pending), capabilities (fsm, unsavedMarker, saveOverwriteGuard: available or unavailable), lastSavedName, fingerprintMode (full or dirty_tracked) and lastPollCostMs. Returns reasonCode editor_unavailable outside the editor. No arguments.")]
+ public Task<string> EditorState(CancellationToken cancellationToken=default) => bridge.ReadAsync(EditorOperations.State,null,cancellationToken);
+ [McpServerTool, Description("Read an engineering report of the current editor craft from stock game data only. No lease, no change. Returns totals (dry and fuel mass and cost, allPartsConnected, shipPartsUnlocked), stageable parts per stage, optional per-stage delta-V (includeDeltaV, default true; ready=false while the stock calculation has not finished), a paged part table (craft id, name, parent, stack node pair or surface, symmetry group, stage, mass), the largest linked stack-node gap, partsStockAllowed (every part is researched and its model purchased; null in a save without research), craftIdentifiersValid, provenance labels, and toolingQuote and launchResearchAllowance as deferred_to_P3. limit 1..50, offset 0..100000. Invalid arguments return reasonCode invalid_argument.")]
+ public Task<string> EditorEngineering(
+  [Description("Part position in the part table, 0..100000.")] [Range(0,ObservationLimits.MaxOffset)] int offset=0,
+  [Description("Part table page size, 1..50.")] [Range(1,ObservationLimits.MaxPage)] int limit=ObservationLimits.DefaultPage,
+  [Description("Include per-stage delta-V from the stock editor calculation. Default true.")] bool includeDeltaV=true,
+  CancellationToken cancellationToken=default) => Page(offset,limit,ObservationLimits.MaxPage,EditorOperations.Engineering,new JObject { ["includeDeltaV"]=includeDeltaV },cancellationToken);
  private Task<string> Page(int offset,int limit,int maxLimit,string operation,JObject? extra,CancellationToken cancellationToken)
  {
   var bad=CheckPage(offset,limit,maxLimit);

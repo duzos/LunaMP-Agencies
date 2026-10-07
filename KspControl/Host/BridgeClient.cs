@@ -11,7 +11,7 @@ namespace KspControl.Host;
 /// </summary>
 public sealed class BridgeClient
 {
- public static readonly IReadOnlySet<string> ReadOperations = new HashSet<string>(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot" };
+ public static readonly IReadOnlySet<string> ReadOperations = new HashSet<string>(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot",EditorOperations.State,EditorOperations.Engineering };
  public static readonly IReadOnlySet<string> ControlOperationSet = new HashSet<string>(ControlOperations.All,StringComparer.Ordinal);
  /// <summary>Mutations are never reachable through this client yet; they must go through the journal.</summary>
  public static readonly IReadOnlySet<string> MutationOperations = new HashSet<string>(StringComparer.Ordinal);

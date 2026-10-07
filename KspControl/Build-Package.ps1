@@ -23,7 +23,7 @@ try {
     New-Item -ItemType Directory -Path $stage,$publish | Out-Null
     & $Dotnet build KspControl/Bridge/KspControl.Bridge.csproj -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Bridge build failed.' }
-    & $Dotnet publish KspControl/Host/KspControl.Host.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None -o $publish
+    & $Dotnet publish KspControl/Host/KspControl.Host.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o $publish
     if ($LASTEXITCODE -ne 0) { throw 'Host publish failed.' }
     Assert-CleanSource
     if ((& git rev-parse HEAD).Trim() -ne $commit) { throw 'Source commit changed during build; discard this incomplete output.' }
@@ -67,6 +67,9 @@ try {
         }
     } finally { $archive.Dispose() }
     (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($zip) | Set-Content -LiteralPath (Join-Path $output 'SHA256SUMS.txt')
+    Assert-CleanSource
+    if ((& git rev-parse HEAD).Trim() -ne $commit) { throw 'Source commit changed during packaging; this output is not verified.' }
     Write-Output "Offline preview verified: $zip"
 } finally { Pop-Location }
+
 

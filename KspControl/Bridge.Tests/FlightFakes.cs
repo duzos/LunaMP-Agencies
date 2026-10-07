@@ -32,10 +32,10 @@ namespace KspControl.BridgeTests
                 VesselId = "11111111-1111-1111-1111-111111111111", VesselName = "Probe", Owned = true, Controllable = true, Situation = "ORBITING", Body = "Kerbin",
                 UniversalTime = 1234.5, Altitude = 100000, VerticalSpeed = 1.5, SurfaceSpeed = 2200, OrbitalSpeed = 2300, CrewCount = 0, PartCount = 12,
                 Orbit = new FlightOrbit { ReferenceBody = "Kerbin", ApoapsisAltitude = 101000, PeriapsisAltitude = 99000, InclinationDegrees = 0.1, Eccentricity = 0.001, SemiMajorAxis = 700000, PeriodSeconds = 1800, TimeToApoapsis = 900, TimeToPeriapsis = 1800, PatchEndTransition = "FINAL" },
-                Controls = new FlightControlStates { CurrentStage = 2, StageCount = 3 },
+                Controls = new FlightControlStates { CurrentStage = 3, StageCount = 3 },
                 Warp = new FlightWarpInfo { Mode = "rails", CurrentIndex = 0, CurrentRate = 1, Rates = new float[] { 1, 5, 10, 50, 100, 1000, 10000, 100000 }, AltitudeLimitIndex = 7 }
             };
-            foreach (var g in FlightLimits.ActionGroups.Concat(new[] { "Abort" })) { Groups[g] = false; Bindings[g] = new List<FlightPartAction>(); }
+            foreach (var g in FlightLimits.ActionGroups.Concat(new[] { "Abort", "Stage" })) { Groups[g] = false; Bindings[g] = new List<FlightPartAction>(); }
         }
 
         public static FlightPartAction Act(string module, string part = "100", string action = "Toggle", bool onStaging = false)

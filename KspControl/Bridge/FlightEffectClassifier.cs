@@ -77,6 +77,15 @@ namespace KspControl.Bridge
             return plan;
         }
 
+        /// <summary>Joins two plans for one request. The second plan's leading vessel effect is dropped; order stays deterministic.</summary>
+        public static FlightEffectPlan Merge(FlightEffectPlan first, FlightEffectPlan second)
+        {
+            var merged = new FlightEffectPlan { Effects = first.Effects.Concat(second.Effects.Skip(1)).ToArray() };
+            merged.Consequential.AddRange(first.Consequential); merged.Consequential.AddRange(second.Consequential);
+            merged.Unclassified.AddRange(first.Unclassified); merged.Unclassified.AddRange(second.Unclassified);
+            return merged;
+        }
+
         public static string EntityOf(string vesselId) { return FlightEffects.EntityPrefix + vesselId; }
 
         private static string Clip(string text) { return text.Length <= 256 ? text : text.Substring(0, 256); }

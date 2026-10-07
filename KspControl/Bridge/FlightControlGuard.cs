@@ -84,7 +84,8 @@ namespace KspControl.Bridge
             if (neutral)
             {
                 // Zero first, then remove the callback: even a failing Detach leaves the throttle cut.
-                Safely(() => port.WriteThrottle(0f));
+                // Only a throttle the guard itself wrote: a warp-only hold must never touch a vessel it does not control.
+                if (engaged) Safely(() => port.WriteThrottle(0f));
                 if (warpCommanded) Safely(port.CancelWarp);
             }
             if (engaged) Safely(port.Detach);

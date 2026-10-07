@@ -212,7 +212,10 @@ namespace KspControl.Bridge
             switch (intent.Operation)
             {
                 case FlightOperations.Stage:
-                    return FlightEffectClassifier.Plan(snapshot.VesselId, port.PartsInStage(intent.ExpectedStage), true);
+                    // KSP's CurrentStage is the last stage activated; ActivateNextStage fires the parts of CurrentStage - 1, and also toggles the Stage action group.
+                    var next = FlightEffectClassifier.Plan(snapshot.VesselId, port.PartsInStage(intent.ExpectedStage - 1), true);
+                    var stageGroup = FlightEffectClassifier.Plan(snapshot.VesselId, port.GroupBindings("Stage"), false);
+                    return FlightEffectClassifier.Merge(next, stageGroup);
                 case FlightOperations.ActionGroup:
                     return FlightEffectClassifier.Plan(snapshot.VesselId, port.GroupBindings(intent.Group), false);
                 case FlightOperations.Abort:
@@ -224,6 +227,15 @@ namespace KspControl.Bridge
                 default:
                     return FlightEffectClassifier.Plan(snapshot.VesselId, null, false);
             }
+        }
+
+        /// <summary>The throttle a set_controls request would leave: the explicit value, or the commanded (else current) throttle plus the delta, clamped.</summary>
+        private float WantedThrottle(Intent intent, FlightSnapshot s)
+        {
+            if (intent.Throttle.HasValue) return (float)intent.Throttle.Value;
+            var basis = guard.Engaged ? guard.CommandedThrottle : (float)s.Controls.Throttle;
+            if (!intent.ThrottleDelta.HasValue) return basis;
+            return (float)Math.Max(0, Math.Min(1, basis + intent.ThrottleDelta.Value));
         }
 
         private static List<KeyValuePair<string, bool>> RequestedGroups(Intent intent)
@@ -250,11 +262,15 @@ namespace KspControl.Bridge
                         extra = new JObject { ["currentStage"] = s.Controls.CurrentStage, ["expectedStage"] = intent.ExpectedStage };
                         return FlightReasons.StageMismatch;
                     }
-                    if (s.Controls.CurrentStage < 0) return FlightReasons.NoStageToActivate;
+                    if (s.Controls.CurrentStage <= 0) { detail = "there is no stage left to activate"; return FlightReasons.NoStageToActivate; }
                     if (port.StagingLocked) { detail = "staging is locked right now"; return FlightReasons.StagingLocked; }
                     return null;
                 case FlightOperations.Warp:
                     return PrecheckWarp(intent, s, out detail, out extra);
+                case FlightOperations.SetControls:
+                    if (s.Warp.CurrentIndex > 0 && WantedThrottle(intent, s) > 0.001f)
+                    { detail = "time warp is active; return to real time before raising the throttle"; return FlightReasons.WarpThrottleActive; }
+                    return null;
                 default:
                     return null;
             }
@@ -339,8 +355,7 @@ namespace KspControl.Bridge
             // The throttle goes first: if a later step fails, the one change that matters most to a burning vessel has already been made.
             if (intent.Throttle.HasValue || intent.ThrottleDelta.HasValue)
             {
-                var basis = guard.Engaged ? guard.CommandedThrottle : (float)run.Before.Controls.Throttle;
-                var wanted = intent.Throttle.HasValue ? (float)intent.Throttle.Value : (float)Math.Max(0, Math.Min(1, basis + intent.ThrottleDelta.Value));
+                var wanted = WantedThrottle(intent, run.Before);
                 if (!Revalidate(run)) return;
                 run.Dispatched = true;
                 if (!guard.Engage(wanted)) { Fail(run, JobStatuses.Indeterminate, "throttle_unavailable", "the fly-by-wire hook could not be installed or the lease ended"); return; }

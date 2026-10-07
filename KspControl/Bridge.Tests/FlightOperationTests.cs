@@ -233,10 +233,10 @@ namespace KspControl.BridgeTests
             {
                 FakeFlight.Act("ModuleDecouple", "10", "Decouple", true), FakeFlight.Act("ModuleEnginesFX", "11", "Activate", true), FakeFlight.Act("ModuleCommand", "12")
             };
-            var r = rig.Stage("req-stage-0001", 2);
+            var r = rig.Stage("req-stage-0001", 3);
             Assert.AreEqual(JobStatuses.Completed, r.Status, r.Data.ToString());
-            Assert.AreEqual(1, flight.Count("stage")); Assert.AreEqual(1, flight.Snap.Controls.CurrentStage);
-            Assert.AreEqual(2, (int)r.Data["stageBefore"]); Assert.AreEqual(1, (int)r.Data["stageAfter"]);
+            Assert.AreEqual(1, flight.Count("stage")); Assert.AreEqual(2, flight.Snap.Controls.CurrentStage);
+            Assert.AreEqual(3, (int)r.Data["stageBefore"]); Assert.AreEqual(2, (int)r.Data["stageAfter"]);
             CollectionAssert.AreEquivalent(new[] { "decouple:10/ModuleDecouple.Decouple", "engine:11/ModuleEnginesFX.Activate" }, r.Data["consequential"].Select(t => (string)t).ToArray());
         }
 
@@ -245,7 +245,7 @@ namespace KspControl.BridgeTests
         {
             var r = rig.Stage("req-mismatch-01", 1);
             AssertRefused(r, FlightReasons.StageMismatch);
-            Assert.AreEqual(2, (int)r.Data["currentStage"]); Assert.AreEqual(1, (int)r.Data["expectedStage"]);
+            Assert.AreEqual(3, (int)r.Data["currentStage"]); Assert.AreEqual(1, (int)r.Data["expectedStage"]);
             Assert.AreEqual(0, flight.Count("stage"));
         }
 
@@ -253,10 +253,10 @@ namespace KspControl.BridgeTests
         public void AnUnknownModuleThatActsOnStagingRefusesTheStageButAnInertOneDoesNot()
         {
             flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleInertMod", "5", null, false) };
-            Assert.AreEqual(JobStatuses.Completed, rig.Stage("req-inert-0001", 2).Status);
-            flight.Snap.Controls.CurrentStage = 2;
+            Assert.AreEqual(JobStatuses.Completed, rig.Stage("req-inert-0001", 3).Status);
+            flight.Snap.Controls.CurrentStage = 3;
             flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleNukeMod", "6", null, true) };
-            var r = rig.Stage("req-nuke-00001", 2);
+            var r = rig.Stage("req-nuke-00001", 3);
             AssertRefused(r, FlightReasons.UnclassifiedEffect);
             Assert.AreEqual(1, flight.Count("stage"), "only the first, inert stage ran");
         }
@@ -265,7 +265,7 @@ namespace KspControl.BridgeTests
         public void LockedStagingIsRefused()
         {
             flight.Locked = true;
-            AssertRefused(rig.Stage("req-locked-0001", 2), FlightReasons.StagingLocked);
+            AssertRefused(rig.Stage("req-locked-0001", 3), FlightReasons.StagingLocked);
             Assert.AreEqual(0, flight.Count("stage"));
         }
 
@@ -273,10 +273,78 @@ namespace KspControl.BridgeTests
         public void AStageThatDoesNotAdvanceIsIndeterminateAndTheRequestIdStaysUsable()
         {
             flight.StageIgnored = true;
-            var r = rig.Stage("req-noadv-0001", 2);
+            var r = rig.Stage("req-noadv-0001", 3);
             Assert.AreEqual(JobStatuses.Indeterminate, r.Status); Assert.AreEqual(FlightReasons.NotConfirmed, r.ReasonCode);
-            var again = rig.Stage("req-noadv-0001", 2); // same id, same arguments: the remembered answer, no second activation
+            var again = rig.Stage("req-noadv-0001", 3); // same id, same arguments: the remembered answer, no second activation
             Assert.IsTrue((bool)again.Data["replayed"]); Assert.AreEqual(1, flight.Count("stage"));
+        }
+
+        [TestMethod]
+        public void TheStageAboutToFireIsClassifiedNotTheOneAlreadyActivated()
+        {
+            // CurrentStage is 3 (last activated): ActivateNextStage fires the parts of stage 2.
+            flight.StageParts[3] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleNukeMod", "1", null, true) };
+            flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleDecouple", "2", "Decouple", true) };
+            var r = rig.Stage("req-next-00001", 3);
+            Assert.AreEqual(JobStatuses.Completed, r.Status, r.Data.ToString());
+            CollectionAssert.AreEqual(new[] { "decouple:2/ModuleDecouple.Decouple" }, r.Data["consequential"].Select(t => (string)t).ToArray());
+        }
+
+        [TestMethod]
+        public void AnUnknownModuleOnTheNextStageRefusesEvenWhenTheCurrentOneIsClean()
+        {
+            flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction> { FakeFlight.Act("ModuleNukeMod", "6", null, true) };
+            AssertRefused(rig.Stage("req-next-00002", 3), FlightReasons.UnclassifiedEffect);
+            Assert.AreEqual(0, flight.Count("stage"));
+        }
+
+        [TestMethod]
+        public void StagingAlsoClassifiesTheStageActionGroupBindings()
+        {
+            flight.StageParts[2] = new System.Collections.Generic.List<FlightPartAction>();
+            flight.Bindings["Stage"].Add(FakeFlight.Act("ModuleMysteryMod", "8", "Fire"));
+            AssertRefused(rig.Stage("req-grpstage-01", 3), FlightReasons.UnclassifiedEffect);
+            Assert.AreEqual(0, flight.Count("stage"));
+            flight.Bindings["Stage"].Clear(); flight.Bindings["Stage"].Add(FakeFlight.Act("ModuleParachute", "9", "Deploy"));
+            var ok = rig.Stage("req-grpstage-02", 3);
+            Assert.AreEqual(JobStatuses.Completed, ok.Status);
+            CollectionAssert.AreEqual(new[] { "chute:9/ModuleParachute.Deploy" }, ok.Data["consequential"].Select(t => (string)t).ToArray());
+        }
+
+        [TestMethod]
+        public void StageBindingsThatChangeAfterAdmissionAreStale()
+        {
+            flight.OnRead = n => { if (n == 2) flight.Bindings["Stage"].Add(FakeFlight.Act("ModuleDecouple", "9", "Decouple")); };
+            var r = rig.Stage("req-stale-stage1", 3);
+            Assert.AreEqual("effects_changed", r.ReasonCode); Assert.AreEqual(0, flight.Count("stage"));
+        }
+
+        [TestMethod]
+        public void WhenNothingHasBeenLeftToActivateTheStageIsRefused()
+        {
+            flight.Snap.Controls.CurrentStage = 0;
+            AssertRefused(rig.Stage("req-nostage-001", 0), FlightReasons.NoStageToActivate);
+            Assert.AreEqual(0, flight.Count("stage"));
+        }
+
+        [TestMethod]
+        public void RaisingTheThrottleDuringWarpIsRefusedButCuttingItIsNot()
+        {
+            flight.Snap.Warp.CurrentIndex = 3; flight.Snap.Warp.CurrentRate = 50;
+            AssertRefused(rig.SetControls("req-wthr-00001", "throttle", 0.5), FlightReasons.WarpThrottleActive);
+            AssertRefused(rig.SetControls("req-wthr-00002", "throttleDelta", 0.2), FlightReasons.WarpThrottleActive);
+            Assert.AreEqual(0, flight.Calls.Count);
+            Assert.AreEqual(JobStatuses.Completed, rig.SetControls("req-wthr-00003", "throttle", 0.0).Status);
+            Assert.AreEqual(JobStatuses.Completed, rig.SetControls("req-wthr-00004", "gear", true).Status);
+        }
+
+        [TestMethod]
+        public void AWarpOnlyReleaseNeverWritesAThrottle()
+        {
+            rig.Warp("req-wonly-0001", 2);
+            rig.Authority.Stop(); rig.Frame();
+            CollectionAssert.DoesNotContain(flight.Calls, "throttle:0");
+            Assert.AreEqual(1, flight.Count("cancelwarp"));
         }
 
         // ---------------------------------------------------------------- action groups
@@ -452,7 +520,7 @@ namespace KspControl.BridgeTests
         public void ARefusalDoesNotReserveTheRequestId()
         {
             AssertRefused(rig.Stage("req-retry-0001", 1), FlightReasons.StageMismatch);
-            Assert.AreEqual(JobStatuses.Completed, rig.Stage("req-retry-0001", 2).Status, "a refusal never reached a callback, so the id is evaluated afresh");
+            Assert.AreEqual(JobStatuses.Completed, rig.Stage("req-retry-0001", 3).Status, "a refusal never reached a callback, so the id is evaluated afresh");
         }
 
         [TestMethod]

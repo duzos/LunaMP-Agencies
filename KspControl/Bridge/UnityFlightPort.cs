@@ -19,7 +19,6 @@ namespace KspControl.Bridge
         private Guid mechJebVessel;
         private bool mechJebPresent;
         private float mechJebCheckedAt = -100f;
-        private int stageLatch;
 
         public UnityFlightPort(Func<Vessel, bool> mayInspect) { this.mayInspect = mayInspect ?? (v => false); }
 
@@ -230,16 +229,51 @@ namespace KspControl.Bridge
 
         // ---------------------------------------------------------------- IFlightHumanInput
 
+        private const float AxisChange = 0.1f;
+        private readonly float[] lastAxes = new float[4];
+        private int lastAxisFrame = -100;
+        private int inputLatch;
+
+        private static IEnumerable<KeyBinding> HeldKeys()
+        {
+            yield return GameSettings.PITCH_UP; yield return GameSettings.PITCH_DOWN; yield return GameSettings.YAW_LEFT; yield return GameSettings.YAW_RIGHT;
+            yield return GameSettings.ROLL_LEFT; yield return GameSettings.ROLL_RIGHT; yield return GameSettings.THROTTLE_UP; yield return GameSettings.THROTTLE_DOWN;
+            yield return GameSettings.THROTTLE_FULL; yield return GameSettings.THROTTLE_CUTOFF; yield return GameSettings.SAS_HOLD;
+            yield return GameSettings.TRANSLATE_UP; yield return GameSettings.TRANSLATE_DOWN; yield return GameSettings.TRANSLATE_LEFT; yield return GameSettings.TRANSLATE_RIGHT;
+            yield return GameSettings.TRANSLATE_FWD; yield return GameSettings.TRANSLATE_BACK;
+            yield return GameSettings.WHEEL_STEER_LEFT; yield return GameSettings.WHEEL_STEER_RIGHT; yield return GameSettings.WHEEL_THROTTLE_UP; yield return GameSettings.WHEEL_THROTTLE_DOWN;
+        }
+
+        /// <summary>Single-press keys: staging, toggles, groups, abort and vessel switching. A press lasts one frame, so it is latched.</summary>
+        private static IEnumerable<KeyBinding> PressKeys()
+        {
+            yield return GameSettings.LAUNCH_STAGES; yield return GameSettings.SAS_TOGGLE; yield return GameSettings.RCS_TOGGLE; yield return GameSettings.BRAKES;
+            yield return GameSettings.LANDING_GEAR; yield return GameSettings.HEADLIGHT_TOGGLE; yield return GameSettings.AbortActionGroup;
+            yield return GameSettings.CustomActionGroup1; yield return GameSettings.CustomActionGroup2; yield return GameSettings.CustomActionGroup3;
+            yield return GameSettings.CustomActionGroup4; yield return GameSettings.CustomActionGroup5; yield return GameSettings.CustomActionGroup6;
+            yield return GameSettings.CustomActionGroup7; yield return GameSettings.CustomActionGroup8; yield return GameSettings.CustomActionGroup9;
+            yield return GameSettings.CustomActionGroup10; yield return GameSettings.FOCUS_NEXT_VESSEL; yield return GameSettings.FOCUS_PREV_VESSEL;
+        }
+
+        /// <summary>
+        /// Axes count only when they change by more than 0.1 since the previous frame: a stick resting off-centre or a throttle axis parked at a value
+        /// is not input. The first call after a gap in frames only sets the baseline.
+        /// </summary>
         public bool PlayerIsInputting()
         {
-            if (Mathf.Abs(GameSettings.AXIS_PITCH.GetAxis()) > 0.1f || Mathf.Abs(GameSettings.AXIS_ROLL.GetAxis()) > 0.1f || Mathf.Abs(GameSettings.AXIS_YAW.GetAxis()) > 0.1f
-                || Mathf.Abs(GameSettings.AXIS_THROTTLE.GetAxis()) > 0.1f) return true;
-            if (GameSettings.PITCH_UP.GetKey(false) || GameSettings.PITCH_DOWN.GetKey(false) || GameSettings.YAW_LEFT.GetKey(false) || GameSettings.YAW_RIGHT.GetKey(false)
-                || GameSettings.ROLL_LEFT.GetKey(false) || GameSettings.ROLL_RIGHT.GetKey(false) || GameSettings.THROTTLE_UP.GetKey(false) || GameSettings.THROTTLE_DOWN.GetKey(false)
-                || GameSettings.THROTTLE_FULL.GetKey(false) || GameSettings.THROTTLE_CUTOFF.GetKey(false)) return true;
-            // A stage key press lasts one frame, so it is latched for a few frames to survive the watcher's debounce.
-            if (GameSettings.LAUNCH_STAGES.GetKeyDown(false)) stageLatch = 4;
-            if (stageLatch > 0) { stageLatch--; return true; }
+            var readings = new[] { GameSettings.AXIS_PITCH.GetAxis(), GameSettings.AXIS_ROLL.GetAxis(), GameSettings.AXIS_YAW.GetAxis(), GameSettings.AXIS_THROTTLE.GetAxis() };
+            var gap = Time.frameCount - lastAxisFrame > 1;
+            var changed = false;
+            for (var i = 0; i < readings.Length; i++)
+            {
+                if (!gap && Mathf.Abs(readings[i] - lastAxes[i]) > AxisChange) changed = true;
+                lastAxes[i] = readings[i];
+            }
+            lastAxisFrame = Time.frameCount;
+            if (changed) inputLatch = 4;
+            foreach (var key in HeldKeys()) if (key != null && key.GetKey(false)) return true;
+            foreach (var key in PressKeys()) if (key != null && key.GetKeyDown(false)) inputLatch = 4;
+            if (inputLatch > 0) { inputLatch--; return true; }
             return false;
         }
     }

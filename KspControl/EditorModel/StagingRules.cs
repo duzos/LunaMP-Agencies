@@ -8,8 +8,10 @@ namespace KspControl.EditorModel
     /// Classifies the placed layout into the topologies the staging rules cover.
     /// T1: command, tank(s), engine in one stack chain. T2: a stack chain whose sections are separated by stack decouplers.
     /// T3: a T1 core with a radially symmetric group (pair, quad, ...) of radial decoupler -> booster (-> optional nose cone) on a core tank.
-    /// Each shape may also carry one parachute (Mk16 parachuteSingle) on the command pod's top node; it is the last stage group (number 0).
-    /// Everything else (other parachute placements, fins, fairings, struts, other staged parts, radial parts on a T2 core) is Unsupported.
+    /// Each shape may also carry one parachute (Mk16 parachuteSingle) on the command pod's top node; it is the last stage group (number 0), and one heat shield
+    /// as the command pod's child on a downward node (never staged; stock Science Jr). Non-staged utility parts (category other, e.g. a science module) may sit
+    /// anywhere in the core chain; they take their parent's stage. Everything else (other parachute or heat shield placements, fins, fairings, struts, other
+    /// staged parts, radial parts on a T2 core) is Unsupported.
     /// </summary>
     public static class TopologyClassifier
     {
@@ -21,18 +23,34 @@ namespace KspControl.EditorModel
             var chute = StagingMath.Chute(layout);
             if (layout.Parts.Count(p => p.Definition.Category == PartCategories.Parachute) > 1) { reason = "more than one parachute"; return TopologyKind.Unsupported; }
             if (chute != null && !ChuteOnTopNode(layout, chute)) { reason = "a parachute is supported only on the command pod's top node"; return TopologyKind.Unsupported; }
+            var shields = layout.Parts.Where(p => p.Definition.Category == PartCategories.HeatShield).ToList();
+            if (shields.Count > 1) { reason = "more than one heat shield"; return TopologyKind.Unsupported; }
+            if (shields.Count == 1 && !ShieldUnderPod(layout, shields[0])) { reason = "a heat shield is supported only as the command pod's stack child on a downward node"; return TopologyKind.Unsupported; }
             var core = layout.Parts.Where(p => p != chute && !InSurfaceSubtree(layout, p)).ToList();
             var surface = layout.Parts.Where(p => InSurfaceSubtree(layout, p)).ToList();
             if (!IsChain(core)) { reason = "core is not a single stack chain"; return TopologyKind.Unsupported; }
-            var cats = core.Select(p => p.Definition.Category).ToList();
-            if (cats.Any(c => c != PartCategories.Command && c != PartCategories.Tank && c != PartCategories.Engine && c != PartCategories.Decoupler))
-            { reason = "core has parts outside command/tank/engine/decoupler"; return TopologyKind.Unsupported; }
+            if (core.Any(p => !CoreCategory(p.Definition.Category)))
+            { reason = "core has parts outside command/tank/engine/decoupler/heat shield/other"; return TopologyKind.Unsupported; }
+            // Heat shields and non-staged utility parts are transparent to the section pattern.
+            var cats = core.Select(p => p.Definition.Category).Where(c => c != PartCategories.HeatShield && c != PartCategories.Other).ToList();
             int sections;
             if (!ParseSections(cats, out sections)) { reason = "core stack chain does not match the command/tank/engine/decoupler section pattern"; return TopologyKind.Unsupported; }
             if (surface.Count == 0) return sections == 0 ? TopologyKind.T1 : TopologyKind.T2;
             if (sections != 0) { reason = "radial parts are supported on a T1 core only"; return TopologyKind.Unsupported; }
             if (!RadialGroup(layout, surface, out reason)) return TopologyKind.Unsupported;
             return TopologyKind.T3;
+        }
+        private static bool CoreCategory(string c)
+        {
+            return c == PartCategories.Command || c == PartCategories.Tank || c == PartCategories.Engine || c == PartCategories.Decoupler
+                || c == PartCategories.HeatShield || c == PartCategories.Other;
+        }
+        /// <summary>The heat shield is a stack child of the root command part on a node that points down.</summary>
+        private static bool ShieldUnderPod(StructuralLayout layout, LayoutPart shield)
+        {
+            if (shield.Kind != AttachKind.Stack || shield.ParentIndex != 0) return false;
+            var node = layout.Parts[0].Definition.FindNode(shield.ParentNodeId);
+            return node != null && node.Orientation.Y < -0.5;
         }
         /// <summary>The parachute is a stack child of the root command part, on a node that points up, and has nothing attached.</summary>
         private static bool ChuteOnTopNode(StructuralLayout layout, LayoutPart chute)
@@ -142,7 +160,8 @@ namespace KspControl.EditorModel
     /// both staged in the KSP editor. Rules:
     ///  * Stage groups are numbered so the last group to fire is 0 and the first is the highest. A group's number is its istg.
     ///  * istg: a stageable part (engine, decoupler, parachute) takes its group number; any other part takes its parent's istg (the root is -1).
-    ///  * dstg = parent.dstg + (child is decoupler ? 1 : 0) + (parent is decoupler ? 1 : 0), root 0.
+    ///  * dstg = parent.dstg + (child is decoupler ? 1 : 0) + (parent is decoupler ? 1 : 0), root 0. A heat shield counts as a decoupler here only
+    ///    (stock Science Jr: HeatShield1 dstg 1, the TD-12 under it dstg 3); it is not stageable and takes its parent's istg and sepI.
     ///  * sepI: a decoupler's sepI is its own istg; every other part takes its parent's sepI (-1 above any decoupler).
     ///  * sidx: index of a stageable part inside its group (counterparts of a symmetric part share one index); -1 otherwise.
     ///  * sqor: the group's slot number. Each supported group occupies one slot, so sqor = istg (GDLV3 shows an extra slot only
@@ -165,6 +184,8 @@ namespace KspControl.EditorModel
             if (chute != null) groups.Add(new List<List<LayoutPart>> { new List<LayoutPart> { chute } });
         }
         public static bool IsDecoupler(LayoutPart p) { return p.Definition.Category == PartCategories.Decoupler; }
+        /// <summary>Parts KSP counts as decouplers for dstg: staged decouplers and the (unstaged) heat shield decoupler.</summary>
+        public static bool SplitsDstg(LayoutPart p) { return IsDecoupler(p) || p.Definition.Category == PartCategories.HeatShield; }
         /// <param name="groups">Firing order, first to fire first; within a group, parts in sidx order (a list per sidx).</param>
         public static bool Build(StructuralLayout layout, List<List<List<LayoutPart>>> groups, out List<StagingFields> fields, out string reason)
         {
@@ -184,7 +205,7 @@ namespace KspControl.EditorModel
                 var parent = root ? null : layout.Parts[p.ParentIndex];
                 if (!IsStageable(p)) istg[p.Index] = root ? -1 : istg[parent.Index];
                 else if (istg[p.Index] == int.MinValue) { reason = "stageable part '" + p.Source.Id + "' is not in any stage group"; return false; }
-                dstg[p.Index] = root ? 0 : dstg[parent.Index] + (IsDecoupler(p) ? 1 : 0) + (IsDecoupler(parent) ? 1 : 0);
+                dstg[p.Index] = root ? 0 : dstg[parent.Index] + (SplitsDstg(p) ? 1 : 0) + (SplitsDstg(parent) ? 1 : 0);
                 sepI[p.Index] = IsDecoupler(p) ? istg[p.Index] : (root ? -1 : sepI[parent.Index]);
                 if (p.Source.Stage.HasValue && p.Source.Stage.Value != istg[p.Index])
                 { reason = "stage override " + p.Source.Stage.Value + " on '" + p.Source.Id + "' differs from the derived stage " + istg[p.Index]; return false; }

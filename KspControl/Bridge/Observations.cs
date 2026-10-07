@@ -28,6 +28,8 @@ namespace KspControl.Bridge
         private static readonly string ProcessId = Guid.NewGuid().ToString("N");
         internal EditorObservationService Editor { get; set; }
         internal EditorRevisionTracker EditorTracker { get; set; }
+        /// <summary>Admission and status for the mutation operations. Null leaves them unavailable.</summary>
+        internal EditorOperationService Operations { get; set; }
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -74,6 +76,12 @@ namespace KspControl.Bridge
                         return failed;
                     }
                     data = editorResult.Data; break;
+                case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.OperationStatus:
+                    // Mutations answer with their own envelope: not an observation, so no readOnly marker and no size cap.
+                    if (Operations == null) return Fail(request, "operation_unavailable");
+                    var operation = Operations.Handle(request);
+                    operation.WorldEpoch = epoch; operation.Revision = ++revision;
+                    return operation;
                 case "editor.snapshot":
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) return Fail(request, "editor_unavailable");
                     data = EditorSnapshot(EditorLogic.fetch.ship, request.Arguments); break;
@@ -118,14 +126,16 @@ namespace KspControl.Bridge
             ["scene"] = HighLogic.LoadedScene.ToString(), ["agencyId"] = agency == Guid.Empty ? null : agency.ToString(),
             ["agencyAdapterAvailable"] = FacadeCompatible, ["processId"] = Process.GetCurrentProcess().Id,
             ["protocolVersion"] = 1, ["bridgeVersion"] = BridgeVersion, ["universalTimeSeconds"] = game == null ? null : Finite(Planetarium.GetUniversalTime()),
-            ["mutationAuthority"] = "unavailable", ["revisionSemantics"] = "observation_sequence_not_mutation_precondition"
+            ["mutationAuthority"] = Operations == null ? "unavailable" : "lease_and_grant_required", ["revisionSemantics"] = "observation_sequence_not_mutation_precondition"
         };
-        private static JObject Capabilities() => new JObject
+        private JObject Capabilities() => new JObject
         {
             ["bridgeVersion"] = BridgeVersion,
-            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", ConstructionOperations.Catalog, "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
+            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", ConstructionOperations.Catalog, "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect",
+                EditorOperations.OperationStatus),
+            ["mutations"] = new JArray(Operations == null ? new string[0] : EditorOperations.Mutations),
             ["inline"] = new JArray(ControlOperations.All),
-            ["unavailable"] = new JObject { ["mutations"] = "authority_and_job_execution_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
+            ["unavailable"] = new JObject { ["mutations"] = Operations == null ? "operation_layer_not_wired" : "editor_load_craft_editor_save_craft_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },
             ["maximumPageSize"] = ObservationLimits.MaxPage
         };

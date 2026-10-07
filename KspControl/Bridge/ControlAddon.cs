@@ -17,6 +17,7 @@ namespace KspControl.Bridge
         private ControlPump pump;
         private EditorRevisionTracker tracker;
         private EditorEvents editorEvents;
+        private EditorOperationRunner runner;
         private KeyCode stopKey = KeyCode.None;
         private string panelLine = "";
         private float panelRefreshed = -1f;
@@ -44,6 +45,14 @@ namespace KspControl.Bridge
                 observations.EditorTracker = tracker;
                 observations.Editor = new EditorObservationService(editorPort, tracker, () => observations.WorldEpoch);
                 var source = new KspContextSource(observations, tracker);
+                // Mutations: the runner advances one job a frame; the service admits requests on the queued observation path.
+                var files = new DiskOperationFiles();
+                Func<EditorModel.CraftPaths> paths = () => new EditorModel.CraftPaths(KSPUtil.ApplicationRootPath, HighLogic.SaveFolder, files.IsReparsePoint);
+                var jobs = new OperationJobs();
+                runner = new EditorOperationRunner(editorPort, tracker, authority, source, files, paths, jobs, () => MonotonicClock.Milliseconds, () => observations.WorldEpoch);
+                var operations = new EditorOperationService(editorPort, tracker, authority, runner, jobs, () => new UnityConstructionCatalogReader(), paths, files, () => observations.WorldEpoch);
+                observations.Operations = operations;
+                observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");
                 var keyFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_KEY_FILE");
@@ -70,6 +79,7 @@ namespace KspControl.Bridge
             try { observations.RefreshContext(); }
             catch { return; } // Scene teardown can invalidate game objects; pending requests expire without disclosure.
             try { pump.Update(); } catch { /* the trust layer must never break the frame */ }
+            try { runner.Update(); } catch { /* the runner reports its own failures in the job; it must never break the frame */ }
             queue.Drain(observations.Execute);
         }
         public void OnGUI()
@@ -88,6 +98,11 @@ namespace KspControl.Bridge
             if (status.StopPersistFailed) text.Append(" | WARNING: stop not saved to disk");
             return text.ToString();
         }
-        public void OnDestroy() { server?.Dispose(); queue.Stop(); editorEvents?.Dispose(); }
+        public void OnDestroy()
+        {
+            server?.Dispose(); queue.Stop();
+            try { runner?.Abort(); } catch { /* teardown: the locks are released best effort */ }
+            editorEvents?.Dispose();
+        }
     }
 }

@@ -24,8 +24,8 @@ namespace Server.Message
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
             var messageData = message.Data as VesselBaseMsgData;
-            if (!AgencyEconomyStore.MayPublish(client)) return;
-            if ((VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled) && (VesselOwnershipSystem.IsRejected(client) || !AgencyVesselMap.Ready || (messageData != null && AgencyVesselMap.IsAbsorbed(messageData.VesselId) && messageData.VesselMessageType != VesselMessageType.Couple))) return;
+            if (!AgencyEconomyStore.MayPublish(client)) { RejectSplit(client, messageData, "Publication is blocked."); return; }
+            if ((VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled) && (VesselOwnershipSystem.IsRejected(client) || !AgencyVesselMap.Ready || (messageData != null && AgencyVesselMap.IsAbsorbed(messageData.VesselId) && messageData.VesselMessageType != VesselMessageType.Couple))) { RejectSplit(client, messageData, "Split was rejected by the server."); return; }
             switch (messageData?.VesselMessageType)
             {
                 case VesselMessageType.Sync:
@@ -33,7 +33,7 @@ namespace Server.Message
                     message.Recycle();
                     break;
                 case VesselMessageType.Proto:
-                    HandleVesselProto(client, messageData);
+                    HandleVesselProtoAnswered(client, messageData);
                     break;
                 case VesselMessageType.Remove:
                     HandleVesselRemove(client, messageData);
@@ -74,6 +74,8 @@ namespace Server.Message
                     VesselDataUpdater.WriteFairingDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
+                // A refused Decouple/Undock below returns silently: it carries no operation id. The child proto that follows on the same
+                // reliable-ordered channel finds no pending split and is answered with a failed Split result (see AnswerSplit).
                 case VesselMessageType.Decouple:
                     if (VesselOwnershipSystem.Enabled || AgencyEconomyStore.ToolingEnabled) { var split=(VesselDecoupleMsgData)messageData; lock(AgencyVesselMap.TransactionGate) if(!VesselOwnershipSystem.CanControl(client,split.VesselId) || !AgencyVesselMap.RestoreSplit(split.VesselId,split.NewVesselId,0,split.PartFlightId,null,client.UniqueIdentifier,client.ConnectionTime.Ticks)) return; VesselOwnershipSystem.Changed(); }
                     if (!AgencyEconomyStore.ToolingEnabled) MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
@@ -101,6 +103,46 @@ namespace Server.Message
             });
         }
 
+        // Owner of "every split child proto gets exactly one Split result". A refused Decouple/Undock is not answered where it is
+        // refused (it has no operation id); the child proto follows on the same reliable-ordered channel and is answered here.
+        // Every refusal is RecoveryRequired: the client already split locally, so it must reconnect rather than carry on desynced.
+        [ThreadStatic] private static Guid _answeredSplit;
+
+        private static void AnswerSplit(ClientStructure client, VesselProtoMsgData msgData, EconomyResult result)
+        {
+            if (_answeredSplit == msgData.EconomySplitOperationId) return;
+            _answeredSplit = msgData.EconomySplitOperationId;
+            result.Operation = EconomyOperation.Split; result.RequestId = msgData.EconomySplitOperationId; result.VesselId = msgData.VesselId;
+            AgencyEconomyStore.SendResult(client, result);
+        }
+
+        private static void RejectSplit(ClientStructure client, VesselBaseMsgData message, string reason)
+        {
+            var msgData = message as VesselProtoMsgData;
+            if (msgData == null || !AgencyEconomyStore.ToolingEnabled || msgData.EconomySplitOperationId == Guid.Empty || _answeredSplit == msgData.EconomySplitOperationId) return;
+            PlaytestDiagnostics.Write("vessel.split.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} operation={msgData.EconomySplitOperationId} reason={reason}");
+            // A pending split left behind would pin its parent forever.
+            try { AgencyVesselMap.CancelPendingSplits(client.UniqueIdentifier, client.ConnectionTime.Ticks, msgData.VesselId); }
+            catch (Exception e) { LunaLog.Warning($"Could not cancel the pending split of {msgData.VesselId}: {e.Message}"); }
+            AnswerSplit(client, msgData, new EconomyResult { Success = false, RecoveryRequired = true, Reason = reason });
+        }
+
+        private static void HandleVesselProtoAnswered(ClientStructure client, VesselBaseMsgData message)
+        {
+            var msgData = (VesselProtoMsgData)message;
+            _answeredSplit = Guid.Empty;
+            try { HandleVesselProto(client, message); }
+            catch (Exception e)
+            {
+                // A failed send must not mask the original exception.
+                try { RejectSplit(client, msgData, "Split failed on the server: " + e.Message); }
+                catch (Exception sendFailure) { LunaLog.Warning($"Could not answer the failed split of {msgData.VesselId}: {sendFailure.Message}"); }
+                throw;
+            }
+            // Any return path that did not answer an operation-carrying proto still must.
+            RejectSplit(client, msgData, "Split was rejected by the server.");
+        }
+
         private static void HandleVesselProto(ClientStructure client, VesselBaseMsgData message)
         {
             var msgData = (VesselProtoMsgData)message;
@@ -108,6 +150,7 @@ namespace Server.Message
             if (AgencyVesselMap.IsDeleted(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId))
             {
                 PlaytestDiagnostics.Write("vessel.proto.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} reason=removed");
+                RejectSplit(client, msgData, "Split vessel was removed.");
                 return;
             }
 
@@ -115,6 +158,7 @@ namespace Server.Message
             {
                 PlaytestDiagnostics.Write("vessel.proto.reject", () => $"{PlaytestDiagnostics.Client(client)} vessel={msgData.VesselId} reason=empty");
                 LunaLog.Warning($"Received a vessel with 0 bytes ({msgData.VesselId}) from {client.PlayerName}.");
+                RejectSplit(client, msgData, "Split vessel data was empty.");
                 return;
             }
 
@@ -124,23 +168,25 @@ namespace Server.Message
             {
                 lock(AgencyVesselMap.TransactionGate)
                 {
-                    if(!AgencyVesselMap.Ready || AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.Ready || AgencyVesselMap.IsAbsorbed(msgData.VesselId) || AgencyVesselMap.IsDeleted(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
+                    if(!AgencyVesselMap.Ready || AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.Ready || AgencyVesselMap.IsAbsorbed(msgData.VesselId) || AgencyVesselMap.IsDeleted(msgData.VesselId) || VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) { RejectSplit(client, msgData, "Split vessel is unavailable."); return; }
                     global::Server.System.Vessel.Classes.Vessel parsed;
-                    try { parsed=new global::Server.System.Vessel.Classes.Vessel(vesselText); } catch { return; }
-                    if(!Guid.TryParse(parsed.Fields.GetSingle("pid")?.Value,out var parsedId) || parsedId!=msgData.VesselId) return;
-                    if (!VesselStoreSystem.VesselExists(msgData.VesselId) && !AgencyEconomyStore.ValidateTradeEntitlement(client.AgencyId, msgData.TradeEntitlementId, parsed)) return;
-                    if(global::Server.Settings.Structures.GeneralSettings.SettingsStore.ModControl && parsed.Parts.GetAllValues().Select(p=>p.Fields.GetSingle("name").Value).Except(ModFileSystem.ModControl.AllowedParts).Any()) return;
-                    if (AgencyEconomyStore.ToolingEnabled && AgencyVesselMap.IsSplitParent(msgData.VesselId)) return;
+                    try { parsed=new global::Server.System.Vessel.Classes.Vessel(vesselText); } catch { RejectSplit(client, msgData, "Split vessel data is invalid."); return; }
+                    if(!Guid.TryParse(parsed.Fields.GetSingle("pid")?.Value,out var parsedId) || parsedId!=msgData.VesselId) { RejectSplit(client, msgData, "Split vessel id does not match."); return; }
+                    // The decouple/undock announcement was refused (parent deleted, not controlled, boundary unknown), so this child has no pending split. Fail it here, not as a launch.
+                    if (AgencyEconomyStore.ToolingEnabled && msgData.EconomySplitOperationId != Guid.Empty && AgencyVesselMap.PendingSplitParent(msgData.VesselId) == Guid.Empty) { RejectSplit(client, msgData, "Split was not accepted by the server."); return; }
+                    if (!VesselStoreSystem.VesselExists(msgData.VesselId) && !AgencyEconomyStore.ValidateTradeEntitlement(client.AgencyId, msgData.TradeEntitlementId, parsed)) { RejectSplit(client, msgData, "Split vessel is not entitled."); return; }
+                    if(global::Server.Settings.Structures.GeneralSettings.SettingsStore.ModControl && parsed.Parts.GetAllValues().Select(p=>p.Fields.GetSingle("name").Value).Except(ModFileSystem.ModControl.AllowedParts).Any()) { RejectSplit(client, msgData, "Split vessel uses disallowed parts."); return; }
+                    if (AgencyEconomyStore.ToolingEnabled && AgencyVesselMap.IsSplitParent(msgData.VesselId)) { RejectSplit(client, msgData, "Split vessel is already a split parent."); return; }
                     var topologyChild=AgencyVesselMap.IsPendingSplit(msgData.VesselId) || AgencyVesselMap.Get(msgData.VesselId)!=null;
-                    if (AgencyEconomyStore.ToolingEnabled && (VesselStoreSystem.VesselExists(msgData.VesselId) || AgencyVesselMap.IsPendingSplit(msgData.VesselId)) && !AgencyEconomyStore.UpdateCargoBindings(msgData.VesselId, AgencyVesselMap.PartIds(parsed), msgData.EconomyCargo)) return;
+                    if (AgencyEconomyStore.ToolingEnabled && (VesselStoreSystem.VesselExists(msgData.VesselId) || AgencyVesselMap.IsPendingSplit(msgData.VesselId)) && !AgencyEconomyStore.UpdateCargoBindings(msgData.VesselId, AgencyVesselMap.PartIds(parsed), msgData.EconomyCargo)) { RejectSplit(client, msgData, "Split cargo does not match."); return; }
                     var splitParent = AgencyVesselMap.PendingSplitParent(msgData.VesselId);
-                    if (splitParent != Guid.Empty && !AgencyVesselMap.SplitBelongsTo(msgData.VesselId, client.UniqueIdentifier, client.ConnectionTime.Ticks)) return;
-                    if (splitParent != Guid.Empty && !VesselOwnershipSystem.CanControl(client, splitParent)) return;
-                    if (AgencyEconomyStore.ToolingEnabled && splitParent != Guid.Empty && msgData.EconomySplitOperationId == Guid.Empty) return;
+                    if (splitParent != Guid.Empty && !AgencyVesselMap.SplitBelongsTo(msgData.VesselId, client.UniqueIdentifier, client.ConnectionTime.Ticks)) { RejectSplit(client, msgData, "Split belongs to another session."); return; }
+                    if (splitParent != Guid.Empty && !VesselOwnershipSystem.CanControl(client, splitParent)) { RejectSplit(client, msgData, "Split parent is not controlled."); return; }
+                    if (AgencyEconomyStore.ToolingEnabled && splitParent != Guid.Empty && msgData.EconomySplitOperationId == Guid.Empty) { RejectSplit(client, msgData, "Split operation is missing."); return; }
                     if(!AgencyVesselMap.ResolveSplit(msgData.VesselId,AgencyVesselMap.PartIds(parsed),vesselText,msgData.EconomySplitParentData.Length == 0 ? null : Encoding.UTF8.GetString(msgData.EconomySplitParentData)))
                     {
                         AgencyVesselMap.CancelPendingSplits(client.UniqueIdentifier, client.ConnectionTime.Ticks, msgData.VesselId);
-                        if (AgencyEconomyStore.ToolingEnabled && msgData.EconomySplitOperationId != Guid.Empty) AgencyEconomyStore.SendResult(client, new EconomyResult { Operation = EconomyOperation.Split, RequestId = msgData.EconomySplitOperationId, VesselId = msgData.VesselId, Reason = "Split topology does not match authoritative participants." });
+                        RejectSplit(client, msgData, "Split topology does not match authoritative participants.");
                         return;
                     }
                     if (AgencyEconomyStore.ToolingEnabled && splitParent != Guid.Empty) completedSplitParent = splitParent;
@@ -157,7 +203,7 @@ namespace Server.Message
                         }
                     }
                     if(!existing) AgencyVesselMap.RegisterNew(msgData.VesselId,client.AgencyId);
-                    if (AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.ValidatePublishedParts(msgData.VesselId, AgencyVesselMap.PartIds(parsed))) return;
+                    if (AgencyEconomyStore.ToolingEnabled && !AgencyEconomyStore.ValidatePublishedParts(msgData.VesselId, AgencyVesselMap.PartIds(parsed))) { RejectSplit(client, msgData, "Split parts do not match the published craft."); return; }
                     // At the actual store write: a crew name leaving a stored craft may be about to board EVA.
                     if (existing) AgencyEconomyStore.RecordCrewDepartures(client, msgData.VesselId, parsed);
                     VesselStoreSystem.CurrentVessels[msgData.VesselId]=parsed;
@@ -189,7 +235,7 @@ namespace Server.Message
                 if (AgencyEconomyStore.ToolingEnabled)
                 {
                     AgencyEconomyStore.Broadcast();
-                    if (msgData.EconomySplitOperationId != Guid.Empty) AgencyEconomyStore.SendResult(client, new EconomyResult { Operation = EconomyOperation.Split, RequestId = msgData.EconomySplitOperationId, VesselId = msgData.VesselId, Success = true });
+                    if (msgData.EconomySplitOperationId != Guid.Empty) AnswerSplit(client, msgData, new EconomyResult { Success = true });
                 }
                 return;
             }

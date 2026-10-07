@@ -41,7 +41,7 @@ namespace Server.Settings.Definition
         [XmlComment(Value = "Maximum length of a username.")]
         public int MaxUsernameLength { get; set; } = 15;
 
-        [XmlComment(Value = "Specify in minutes how often /dekessler automatically runs. 0 = Disabled")]
+        [XmlComment(Value = "Specify in minutes how often /dekessler automatically runs. Debris a player is loaded near (holds an Update lock on) is never cleared. 0 = Disabled")]
         public float AutoDekessler { get; set; } = 0.5f;
 
         [XmlComment(Value = "Specify in minutes how often /nukeksc automatically runs. 0 = Disabled")]

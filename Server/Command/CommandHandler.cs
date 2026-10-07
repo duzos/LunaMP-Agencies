@@ -24,7 +24,7 @@ namespace Server.Command
             RegisterCommand("clearvessels", new ClearVesselsCommand().Execute, "Clears ALL SPECIFIED vessels from universe");
             RegisterCommand("connectionstats", new ConnectionStatsCommand().Execute, "Displays network traffic usage");
             RegisterCommand("countclients", new CountClientsCommand().Execute, "Counts connected clients");
-            RegisterCommand("dekessler", new DekesslerCommand().Execute, "Clears out debris from the server");
+            RegisterCommand("dekessler", new DekesslerCommand().Execute, "Clears out debris from the server, except debris a player is actively tracking (loaded near a player)");
             RegisterCommand("help", new DisplayHelpCommand().Execute, "Displays this help");
             RegisterCommand("kick", new KickCommand().Execute, "Kicks a player from the server");
             RegisterCommand("listclients", new ListClientsCommand().Execute, "Lists connected clients");

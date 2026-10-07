@@ -1,4 +1,4 @@
-﻿using Server.Diagnostics;
+using Server.Diagnostics;
 using LmpCommon.Agency;
 using LmpCommon.Message.Data.Agency;
 using LmpCommon.Message.Interface;
@@ -143,6 +143,7 @@ namespace Server.Agency
             data.LaunchSitesRevision = launchSites.Revision;
             data.LaunchSites = launchSites.Assignments.Select(p => new LaunchSiteAssignment { SiteId = p.Key, AgencyId = p.Value }).ToArray();
             MessageQueuer.SendToClient<AgencySrvMsg>(client, data);
+            AgencyIdentitySystem.SendSnapshot(client);
         }
 
         public static void SendReply(ClientStructure client, bool success, string message)

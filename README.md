@@ -87,12 +87,26 @@ when their sole member disconnects permanently.
 `Universe/Scenarios/`, a one-off migration creates a *Default Agency* that inherits all of it
 (funds, science, reputation, tech tree, contracts). No data is lost on upgrade.
 
-**UI.** An Agency toolbar button opens a window with three tabs:
+**UI.** An Agency toolbar button opens the agency window. Its core tabs include:
 
 - *Mine* — your agency's details, resources, members, owner-only actions (rename / kick /
   transfer ownership), and inter-agency resource transfer (send funds or science to another agency).
 - *Browse* — every public agency on the server with a "Request to join" button.
 - *Create* — name and submit a new agency; you automatically become its owner.
+
+**Agency appearance.** Owners can choose an agency colour and a stock or already
+synchronised flag in *Mine*. Flags and colour accents appear in agency lists and
+leaderboards. A chosen agency colour also applies to owned craft's orbits and visible
+shared CommNet links. Agencies without a chosen colour retain the player-colour fallback.
+Custom flag files must already be available through the server's existing flag sync.
+
+**Craft detection.** With craft hiding enabled, antenna detection requires both range
+and a clear line past celestial bodies' solid spheres. Terrain and atmosphere are not
+occluders. `AgencyDetectionRangeMultiplier` defaults to `0.01`: an HG-5's nominal
+5,000 km becomes a 50 km detection radius, without reducing its communications range.
+Any detector in your agency can reveal a craft; it need not remain in range throughout
+its orbit. Visibility updates periodically. Explicit visibility sharing, your own craft,
+and close-range physics visibility remain independent of sensor detection.
 
 The in-game admin window (press Admin, enter admin password) gets a new **Agencies** tab with:
 

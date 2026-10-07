@@ -1,4 +1,4 @@
-﻿using Lidgren.Network;
+using Lidgren.Network;
 using LmpCommon.Enums;
 using LmpCommon.Message.Data.Agency;
 using LmpCommon.Message.Server.Base;
@@ -25,6 +25,8 @@ namespace LmpCommon.Message.Server
             [(ushort)AgencyMessageType.SrvDockStatus] = typeof(AgencyDockStatusMsgData),
             [(ushort)AgencyMessageType.SrvVesselOwnershipResult] = typeof(AgencyVesselOwnershipResultMsgData),
 
+            [(ushort)AgencyMessageType.SrvIdentitySnapshot] = typeof(AgencyIdentitySnapshotMsgData),
+            [(ushort)AgencyMessageType.SrvIdentityUpsert] = typeof(AgencyIdentityUpsertMsgData),
             [(ushort)AgencyMessageType.SrvSyncAll] = typeof(AgencySyncAllMsgData),
             [(ushort)AgencyMessageType.SrvUpsert] = typeof(AgencyUpsertMsgData),
             [(ushort)AgencyMessageType.SrvDelete] = typeof(AgencyDeleteMsgData),

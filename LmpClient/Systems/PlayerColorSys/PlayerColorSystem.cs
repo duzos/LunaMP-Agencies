@@ -58,6 +58,9 @@ namespace LmpClient.Systems.PlayerColorSys
         {
             if (vessel == null) return;
 
+            if (LmpClient.Systems.Agency.AgencyIdentityClient.TryColour(
+                LmpClient.Systems.Agency.AgencySystem.Singleton.GetVesselAgency(vessel.id), out var agencyColour))
+            { SetOrbitColor(vessel, agencyColour); return; }
             var vesselOwner = LockSystem.LockQuery.GetControlLockOwner(vessel.id);
             SetOrbitColor(vessel, vesselOwner == null ? DefaultColor : GetPlayerColor(vesselOwner));
         }

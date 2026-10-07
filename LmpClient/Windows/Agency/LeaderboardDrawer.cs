@@ -41,7 +41,7 @@ namespace LmpClient.Windows.Agency
             {
                 var a = rows[i];
                 GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.Label((i + 1) + ". " + a.Name + (a.Id == AgencySystem.Singleton.MyAgencyId ? " (you)" : ""));
+                DrawIdentityLabel(a.Id, (i + 1) + ". " + a.Name + (a.Id == AgencySystem.Singleton.MyAgencyId ? " (you)" : ""));
                 GUILayout.Label("Funds: " + a.Funds.ToString("N0") + "   Science: " + a.Science.ToString("N1") + "   Vessels: " + a.VesselsLaunched);
                 if (GUILayout.Button("Firsts: " + a.FirstAchievementsCount + " - details")) _firstsAgency = a.Id;
                 GUILayout.EndVertical();
@@ -51,7 +51,7 @@ namespace LmpClient.Windows.Agency
         private static void DrawFirst(AgencyInfo agency, FirstAchievement first)
         {
             GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label(AchievementWire.ReadableName(first.Key) + " - " + agency.Name);
+            DrawIdentityLabel(agency.Id, AchievementWire.ReadableName(first.Key) + " - " + agency.Name);
             var validDate = first.UtcTicks > 0 && first.UtcTicks <= DateTime.MaxValue.Ticks;
             GUILayout.Label("Awarded: " + (validDate ? new DateTime(first.UtcTicks, DateTimeKind.Utc).ToString("yyyy-MM-dd HH:mm:ss 'UTC'") : "unknown"));
             var details = first.Details;

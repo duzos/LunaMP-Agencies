@@ -1,4 +1,4 @@
-﻿using Lidgren.Network;
+using Lidgren.Network;
 using LmpCommon.Enums;
 using LmpCommon.Message.Base;
 using LmpCommon.Message.Types;
@@ -21,6 +21,7 @@ namespace LmpCommon.Message.Data.Handshake
         /// The agencies build of the server (<see cref="LmpCommon.Agency.AgenciesBuild.Number"/>). Packets from servers that predate the field read as 0.
         /// </summary>
         public int ServerAgenciesBuild;
+        public int AgencyIdentityProtocol;
 
         public override string ClassName { get; } = nameof(HandshakeReplyMsgData);
 
@@ -37,6 +38,7 @@ namespace LmpCommon.Message.Data.Handshake
             lidgrenMsg.Write(ServerStartTime);
             lidgrenMsg.Write(ModFileData);
             lidgrenMsg.Write(ServerAgenciesBuild);
+            if (AgencyIdentityProtocol != 0) lidgrenMsg.Write(AgencyIdentityProtocol);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -57,12 +59,15 @@ namespace LmpCommon.Message.Data.Handshake
             ServerAgenciesBuild = 0;
             if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 32)
                 ServerAgenciesBuild = lidgrenMsg.ReadInt32();
+            AgencyIdentityProtocol = 0;
+            if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 32)
+                AgencyIdentityProtocol = lidgrenMsg.ReadInt32();
         }
 
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(HandshakeReply) + Reason.GetByteCount() + sizeof(byte) //We write pad bits so it's size of byte
-                + sizeof(long) + ModFileData.GetByteCount() + sizeof(int);
+                + sizeof(long) + ModFileData.GetByteCount() + sizeof(int) * 2;
         }
     }
 }

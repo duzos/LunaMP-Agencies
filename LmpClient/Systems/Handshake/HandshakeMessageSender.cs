@@ -20,11 +20,13 @@ namespace LmpClient.Systems.Handshake
 
         public void SendHandshakeRequest()
         {
+            LmpClient.Systems.Agency.AgencyIdentityClient.BeginSession();
             var msgData = NetworkMain.CliMsgFactory.CreateNewMessageData<HandshakeRequestMsgData>();
             msgData.PlayerName = SettingsSystem.CurrentSettings.PlayerName;
             msgData.UniqueIdentifier = MainSystem.UniqueIdentifier;
             msgData.KspVersion = $"{CompatibilityChecker.KspVersion}";
             msgData.AgenciesBuild = AgenciesBuild.Number;
+            msgData.AgencyIdentityProtocol = 1;
 
             SendMessage(msgData);
         }

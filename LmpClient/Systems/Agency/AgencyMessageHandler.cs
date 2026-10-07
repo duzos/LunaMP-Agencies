@@ -19,6 +19,12 @@ namespace LmpClient.Systems.Agency
             LmpClient.Diagnostics.PlaytestDiagnostics.Write("client.agency.receive", () => $"subtype={data.AgencyMessageType} agency={System.MyAgencyId}", traffic: true);
             switch (data.AgencyMessageType)
             {
+                case AgencyMessageType.SrvIdentitySnapshot:
+                    foreach (var identity in ((AgencyIdentitySnapshotMsgData)data).Identities) AgencyIdentityClient.Receive(identity);
+                    break;
+                case AgencyMessageType.SrvIdentityUpsert:
+                    AgencyIdentityClient.Receive(((AgencyIdentityUpsertMsgData)data).Identity);
+                    break;
                 case AgencyMessageType.SrvVisibilitySnapshot:
                     VisibilityClient.Apply((AgencyVisibilitySnapshotMsgData)data); break;
                 case AgencyMessageType.SrvVisibilityResult:
@@ -84,6 +90,7 @@ namespace LmpClient.Systems.Agency
             System.VesselAgencyMap.Clear();
             for (int i = 0; i < data.VesselIds.Length; i++)
                 System.VesselAgencyMap[data.VesselIds[i]] = data.AgencyIds[i];
+            AgencyIdentityClient.RequestRefresh();
             foreach (var vessel in data.VesselIds) TradeClient.Registered(vessel);
             LunaLog.Log($"[Agency] VesselMapSync received: {data.VesselIds.Length} vessels.");
         }
@@ -98,6 +105,7 @@ namespace LmpClient.Systems.Agency
                 System.VesselAgencyMap.TryRemove(data.VesselId, out _);
             else
                 System.VesselAgencyMap[data.VesselId] = data.AgencyId;
+            AgencyIdentityClient.RequestRefresh();
         }
 
         private static void Handle(AgencySyncAllMsgData data)
@@ -133,6 +141,7 @@ namespace LmpClient.Systems.Agency
         private static void Handle(AgencyDeleteMsgData data)
         {
             System.KnownAgencies.TryRemove(data.AgencyId, out _);
+            AgencyIdentityClient.Remove(data.AgencyId);
             if (System.MyAgencyId == data.AgencyId) System.MyAgencyId = global::System.Guid.Empty;
             LunaLog.Log($"[Agency] Delete id={data.AgencyId}");
         }

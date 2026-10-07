@@ -1,4 +1,4 @@
-﻿namespace LmpCommon.Message.Types
+namespace LmpCommon.Message.Types
 {
     /// <summary>
     /// Subtypes carried by AgencyCliMsg / AgencySrvMsg.
@@ -8,6 +8,9 @@
     public enum AgencyMessageType
     {
         // Server -> Client
+        SrvIdentitySnapshot = 16,
+        SrvIdentityUpsert = 17,
+        CliSetIdentity = 36,
         SrvSyncAll = 0,
         SrvUpsert = 1,
         SrvDelete = 2,

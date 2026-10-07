@@ -86,6 +86,7 @@ namespace LmpClient.Systems.Agency
         protected override void OnEnabled()
         {
             base.OnEnabled();
+            SetupRoutine(new RoutineDefinition(250, RoutineExecution.Update, AgencyIdentityClient.Update));
             GameEvents.onLevelWasLoadedGUIReady.Add(EconomySceneChanged);
             LunaLog.Log("[Agency] Client AgencySystem enabled.");
         }
@@ -97,6 +98,8 @@ namespace LmpClient.Systems.Agency
         {
             GameEvents.onLevelWasLoadedGUIReady.Remove(EconomySceneChanged);
             base.OnDisabled();
+            AgencyIdentityClient.Clear();
+            LmpClient.Windows.Agency.AgencyWindow.ResetIdentityEditor();
             KnownAgencies.Clear();
             VesselAgencyMap.Clear();
             lock (RequestsLock) PendingIncomingRequests.Clear();

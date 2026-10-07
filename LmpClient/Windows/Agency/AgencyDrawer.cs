@@ -78,7 +78,8 @@ namespace LmpClient.Windows.Agency
                 return;
             }
 
-            GUILayout.Label($"Agency: {mine.Name}");
+            DrawIdentityLabel(mine.Id, $"Agency: {mine.Name}");
+            DrawIdentityEditor(mine);
             GUILayout.Label($"Owner:  {mine.OwnerDisplayName}");
             GUILayout.Label($"Members: {mine.MemberDisplayNames?.Length ?? 0}");
             GUILayout.Label($"Funds:     {mine.Funds:N0}");
@@ -231,7 +232,7 @@ namespace LmpClient.Windows.Agency
                 foreach (var a in list)
                 {
                     GUILayout.BeginHorizontal();
-                    GUILayout.Label($"{a.Name} ({a.MemberUniqueIds?.Length ?? 0} members)");
+                    DrawIdentityLabel(a.Id, $"{a.Name} ({a.MemberUniqueIds?.Length ?? 0} members)");
                     GUILayout.FlexibleSpace();
                     if (a.Id == AgencySystem.Singleton.MyAgencyId)
                     {

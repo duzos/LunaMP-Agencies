@@ -23,6 +23,7 @@ namespace LmpCommon.Message.Client
             [(ushort)AgencyMessageType.CliDockRequest] = typeof(AgencyDockRequestMsgData),
             [(ushort)AgencyMessageType.CliDockResponse] = typeof(AgencyDockResponseMsgData),
 
+            [(ushort)AgencyMessageType.CliSetIdentity] = typeof(AgencySetIdentityMsgData),
             [(ushort)AgencyMessageType.CliCreate] = typeof(AgencyCreateMsgData),
             [(ushort)AgencyMessageType.CliRename] = typeof(AgencyRenameMsgData),
             [(ushort)AgencyMessageType.CliJoinRequest] = typeof(AgencyJoinRequestMsgData),

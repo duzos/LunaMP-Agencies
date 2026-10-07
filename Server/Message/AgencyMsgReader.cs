@@ -18,6 +18,7 @@ namespace Server.Message
             PlaytestDiagnostics.Write("agency.request", () => $"{PlaytestDiagnostics.Client(client)} subtype={data.AgencyMessageType}");
             switch (data.AgencyMessageType)
             {
+                case AgencyMessageType.CliSetIdentity: AgencyIdentitySystem.Handle(client, (AgencySetIdentityMsgData)data); break;
                 case AgencyMessageType.CliEconomyCommand: AgencyEconomyStore.HandleCommand(client, ((AgencyEconomyCommandMsgData)data).Command); break;
                 case AgencyMessageType.CliVisibilityCommand: AgencyVisibilityStore.HandleCommand(client, (AgencyVisibilityCommandMsgData)data); break;
                 case AgencyMessageType.CliCommNetCommand: AgencyCommNetStore.HandleCommand(client,(AgencyCommNetCommandMsgData)data); break;

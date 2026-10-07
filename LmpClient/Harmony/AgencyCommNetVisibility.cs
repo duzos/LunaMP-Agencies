@@ -216,7 +216,8 @@ namespace LmpClient.Harmony
                 if (selected == Guid.Empty || !system.CanLinkCommNet(a.id, b.id)) return null;
                 if (current.AgencyColours.TryGetValue(selected, out var cached)) return cached;
                 Color32? colour = null;
-                if (system.KnownAgencies.TryGetValue(selected, out var agency))
+                if (AgencyIdentityClient.TryColour(selected, out var explicitColour)) colour = (Color32)explicitColour;
+                else if (system.KnownAgencies.TryGetValue(selected, out var agency))
                     colour = RepresentativeColour(agency, PlayerColorSystem.Singleton.PlayerColors,
                         SettingsSystem.CurrentSettings.PlayerName, SettingsSystem.CurrentSettings.PlayerColor);
                 current.AgencyColours[selected] = colour;

@@ -19,6 +19,7 @@ namespace Server.System
             msgData.Response = enumResponse;
             msgData.Reason = reason;
             msgData.ServerAgenciesBuild = AgenciesBuild.Number;
+            msgData.AgencyIdentityProtocol = enumResponse == HandshakeReply.HandshookSuccessfully ? client.AgencyIdentityProtocol : 0;
 
             if (enumResponse == HandshakeReply.HandshookSuccessfully)
             {

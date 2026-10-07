@@ -1,4 +1,4 @@
-﻿using Lidgren.Network;
+using Lidgren.Network;
 using LmpCommon;
 using LmpCommon.Enums;
 using LmpCommon.Message.Interface;
@@ -16,6 +16,7 @@ namespace Server.Client
 {
     public class ClientStructure
     {
+        public int AgencyIdentityProtocol;
         public IPEndPoint Endpoint => Connection.RemoteEndPoint;
 
         public string UniqueIdentifier { get; set; }

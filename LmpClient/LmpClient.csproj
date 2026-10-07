@@ -526,6 +526,8 @@
     <Compile Include="Systems\Agency\AgencyLaunchSiteState.cs" />
     <Compile Include="Systems\Agency\LaunchSiteCatalog.cs" />
     <Compile Include="Systems\Agency\KkLaunchSiteIntegration.cs" />
+    <Compile Include="Systems\Agency\AgencyIdentityClient.cs" />
+    <Compile Include="Windows\Agency\AgencyIdentityDrawer.cs" />
     <Compile Include="Systems\Agency\AgencySystem.cs" />
     <Compile Include="Systems\Agency\AgencyMessageSender.cs" />
     <Compile Include="Systems\Agency\AgencyMessageHandler.cs" />

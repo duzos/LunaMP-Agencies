@@ -83,15 +83,22 @@ namespace Server.Agency
         public static void PersistAgency(Agency agency)
         {
             if (agency == null) return;
-
-            var dir = AgencyDirectory(agency.Id);
-            if (!FileHandler.FolderExists(dir))
-                FileHandler.FolderCreate(dir);
-
-            var node = Serialize(agency);
-            lock (BackupLock)
+            lock (agency.Lock)
             {
-                FileHandler.WriteToFile(MetaPath(agency.Id), node.ToString());
+                var dir = AgencyDirectory(agency.Id);
+                Directory.CreateDirectory(dir);
+                var text = Serialize(agency).ToString();
+                lock (BackupLock)
+                {
+                    var path = MetaPath(agency.Id);
+                    var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    try
+                    {
+                        File.WriteAllText(temporary, text);
+                        File.Move(temporary, path, true);
+                    }
+                    finally { if (File.Exists(temporary)) File.Delete(temporary); }
+                }
             }
         }
 
@@ -137,6 +144,10 @@ namespace Server.Agency
             sb.Append($"createdUtcTicks = {agency.CreatedUtcTicks.ToString(inv)}\n");
             sb.Append($"isSolo = {(agency.IsSolo ? "true" : "false")}\n");
             sb.Append($"unlockedTechCount = {agency.UnlockedTechCount.ToString(inv)}\n");
+            sb.Append($"identityRevision = {agency.IdentityRevision.ToString(inv)}\n");
+            sb.Append($"flagUrl = {agency.FlagUrl}\n");
+            sb.Append($"hasColour = {agency.HasColour}\n");
+            sb.Append($"colourRed = {agency.Red}\ncolourGreen = {agency.Green}\ncolourBlue = {agency.Blue}\n");
 
             // Leaderboard metrics
             sb.Append($"lifetimeFundsEarned = {agency.LifetimeFundsEarned.ToString(inv)}\n");
@@ -224,6 +235,15 @@ namespace Server.Agency
             };
 
             var achievementsNode = FindChildNode(node, "ACHIEVEMENTS");
+            var flagUrl = GetValueOrDefault(node, "flagUrl", AgencyIdentityDefaults.DefaultFlagUrl);
+            agency.FlagUrl = AgencyIdentityDefaults.IsSafeFlagUrl(flagUrl) ? flagUrl : AgencyIdentityDefaults.DefaultFlagUrl;
+            agency.IdentityRevision = Math.Max(0, ParseLongSafe(GetValueOrDefault(node, "identityRevision", "0")));
+            agency.HasColour = bool.TryParse(GetValueOrDefault(node, "hasColour", "false"), out var hasColour) && hasColour;
+            if (byte.TryParse(GetValueOrDefault(node, "colourRed", "0"), out var red) &&
+                byte.TryParse(GetValueOrDefault(node, "colourGreen", "0"), out var green) &&
+                byte.TryParse(GetValueOrDefault(node, "colourBlue", "0"), out var blue))
+            { agency.Red = red; agency.Green = green; agency.Blue = blue; }
+            else agency.HasColour = false;
             if (achievementsNode != null)
             {
                 foreach (var an in EnumerateChildNodes(achievementsNode, "ACHIEVEMENT"))

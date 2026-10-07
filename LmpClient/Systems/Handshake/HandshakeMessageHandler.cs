@@ -38,6 +38,7 @@ namespace LmpClient.Systems.Handshake
         public void HandleHandshakeReplyReceivedMessage(HandshakeReplyMsgData data)
         {
             TimeSyncSystem.ServerStartTime = data.ServerStartTime;
+            LmpClient.Systems.Agency.AgencyIdentityClient.Negotiate(data.Response == HandshakeReply.HandshookSuccessfully ? data.AgencyIdentityProtocol : 0);
 
             switch (data.Response)
             {

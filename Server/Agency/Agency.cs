@@ -29,6 +29,15 @@ namespace Server.Agency
         public long CreatedUtcTicks;
         public bool IsSolo;
         public int UnlockedTechCount;
+        public long IdentityRevision;
+        public bool HasColour;
+        public byte Red, Green, Blue;
+        public string FlagUrl = AgencyIdentityDefaults.DefaultFlagUrl;
+
+        public AgencyIdentityInfo ToIdentity()
+        {
+            lock (Lock) return new AgencyIdentityInfo { AgencyId = Id, Revision = IdentityRevision, HasColour = HasColour, Red = Red, Green = Green, Blue = Blue, FlagUrl = FlagUrl };
+        }
 
         // ---- Leaderboard metrics (server-authoritative, monotonic) ----
         public double LifetimeFundsEarned;

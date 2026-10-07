@@ -54,6 +54,7 @@ namespace Server.System
                 client.KspVersion = string.IsNullOrWhiteSpace(data.KspVersion) ? "Unknown" : data.KspVersion;
                 client.LmpVersion = $"{data.MajorVersion}.{data.MinorVersion}.{data.BuildVersion}";
                 client.Authenticated = true;
+                client.AgencyIdentityProtocol = data.AgencyIdentityProtocol == AgencyIdentityDefaults.ProtocolVersion ? AgencyIdentityDefaults.ProtocolVersion : 0;
 
                 LmpPluginHandler.FireOnClientAuthenticated(client);
 

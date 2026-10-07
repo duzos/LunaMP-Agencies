@@ -27,7 +27,8 @@ namespace Server.Agency
     /// <summary>Exclusive exact site IDs; persistence succeeds before committed state is published.</summary>
     public static class AgencyLaunchSiteStore
     {
-        private static readonly object MutationLock = new object();
+        // Identity writes must share the agency removal gate before taking agency.Lock.
+        internal static readonly object MutationLock = new object();
         private static Dictionary<string, Guid> _assignments = new Dictionary<string, Guid>(StringComparer.Ordinal);
         private static long _revision;
         private static string _loadError;

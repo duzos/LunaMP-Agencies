@@ -51,7 +51,7 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
   return RunAsync(OperationEffects.RestoreSnapshot,EditorOperations.RestoreSnapshot,requestId,leaseId.ToLowerInvariant(),args,OperationLimits.WaitSecondsMax,cancellationToken);
  }
 
- private async Task<string> RunAsync(string effect,string bridgeOperation,string requestId,string leaseId,JObject args,int waitSeconds,CancellationToken cancellationToken)
+ internal async Task<string> RunAsync(string effect,string bridgeOperation,string requestId,string leaseId,JObject args,int waitSeconds,CancellationToken cancellationToken,string entity=Entity)
  {
   var j=journal.TryGet();
   if(j==null) return Fail(journal.State=="locked_by_other_host" ? OperationReasons.JournalLockedByOtherHost : OperationReasons.JournalUnavailable,null,requestId);
@@ -62,7 +62,7 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
   if(grant==null) return Fail(ControlReasons.GrantMissing,null,requestId);
   if(!grant.Operations.Contains(effect,StringComparer.Ordinal)) return Fail(OperationReasons.GrantOperationDenied,"the grant does not list "+effect,requestId);
   Job job;
-  try { job=j.Admit(requestId,grant.Id,grant.Generation,leaseId,lease.WorldEpoch,effect,Entity,Canonical(args),0m,DateTimeOffset.UtcNow); }
+  try { job=j.Admit(requestId,grant.Id,grant.Generation,leaseId,lease.WorldEpoch,effect,entity,Canonical(args),0m,DateTimeOffset.UtcNow); }
   catch(InvalidOperationException e) { return Fail(MapAdmission(e.Message),null,requestId); }
   catch(IOException) { return Fail(OperationReasons.JournalUnavailable,null,requestId); }
   catch(ArgumentException e) { return CraftPlanService.Invalid(e.Message); }
@@ -105,7 +105,7 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
      try { await Task.Delay(PollInterval,cancellationToken); } catch(OperationCanceledException) { return lastFailure ?? Running(job,null); }
     }
     firstRead=false;
-    try { reply=Parse(await bridge.ReadAsync(EditorOperations.OperationStatus,new JObject { ["requestId"]=job.RequestId },cancellationToken)); }
+    try { reply=Parse(await bridge.ReadAsync(StatusOperation(job.Operation),new JObject { ["requestId"]=job.RequestId },cancellationToken)); }
     catch(OperationCanceledException) { return lastFailure ?? Running(job,null); }
     if((string?)reply["Status"]=="failed" && (string?)reply["ReasonCode"]!=OperationReasons.JobUnknown && reply["Data"]?["requestId"]==null)
     {
@@ -151,7 +151,7 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
  private string Indeterminate(ControlJournal j,Job job,string reason,string detail)
  {
   Safely(()=>j.Finish(job.RequestId,"indeterminate",reason,""));
-  var data=new JObject { ["operation"]=job.Operation=="editor.restore_snapshot" ? "restore_snapshot" : "apply_craft",["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
+  var data=new JObject { ["operation"]=job.Operation==AutopilotOperations.Effect ? "autopilot" : job.Operation=="editor.restore_snapshot" ? "restore_snapshot" : "apply_craft",["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
   return JsonConvert.SerializeObject(new BridgeResponse { Status="indeterminate",ReasonCode=reason,Data=data });
  }
 
@@ -167,6 +167,9 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
   var data=new JObject { ["requestId"]=job.RequestId,["notDispatched"]=job.Status=="cancelled" && job.Reason=="not_dispatched",["detail"]="the journal holds the status but not the full envelope" };
   return JsonConvert.SerializeObject(new BridgeResponse { Status=job.Status,ReasonCode=job.Status=="completed" ? null : job.Reason,Data=data });
  }
+
+ /// <summary>The bridge operation that reports a job of this effect.</summary>
+ private static string StatusOperation(string effect) => effect==AutopilotOperations.Effect ? AutopilotOperations.Status : EditorOperations.OperationStatus;
 
  private static string MapAdmission(string code) => code switch
  {

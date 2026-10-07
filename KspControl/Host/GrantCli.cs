@@ -15,13 +15,15 @@ public static class GrantCli
 {
  public const int Ok=0,Usage=1,Failed=2;
  public static readonly string[] DefaultOperations={ "editor.replace_craft","editor.restore_snapshot","craft.write" };
+ /// <summary>Every operation family a grant may list. Defaults stay editor-only: the flight family must be asked for with --ops.</summary>
+ public static readonly string[] OperationFamilies={ "editor.replace_craft","editor.restore_snapshot","craft.write",AutopilotOperations.Effect };
  private const int DefaultHours=8,MaxHours=168;
  private static readonly HashSet<string> Flags=new(StringComparer.Ordinal) { "--trust-dir","--grant-file","--key-file","--ksp-root","--save","--agency","--ops","--facilities","--policy","--max-parts","--hours" };
 
  public static int Run(string[] args,TextWriter output,TextWriter error,Func<string,string?>? environment=null,Func<DateTime>? utcNow=null)
  {
   environment??=Environment.GetEnvironmentVariable; utcNow??=()=>DateTime.UtcNow;
-  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b] [--facilities VAB] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]) (rearm: [--hours H])"); return Usage; }
+  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b (default editor families; add flight.autopilot for MechJeb flight)] [--facilities VAB] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]) (rearm: [--hours H])"); return Usage; }
   var options=new Dictionary<string,string>(StringComparer.Ordinal);
   for(int i=1;i<args.Length;i+=2)
   {
@@ -53,11 +55,14 @@ public static class GrantCli
   string agency=GrantBindingKey.OfflinePrefix+save;
   if(o.TryGetValue("--agency",out var supplied)) { if(!Guid.TryParse(supplied,out var guid)||guid==Guid.Empty) { error.WriteLine("--agency must be a non-empty GUID"); return Usage; } agency=guid.ToString("D"); }
   int maxParts=250; if(o.TryGetValue("--max-parts",out var parts)&&!int.TryParse(parts,out maxParts)) { error.WriteLine("--max-parts must be an integer"); return Usage; }
+  var requested=Split(o.GetValueOrDefault("--ops"),DefaultOperations);
+  var unknown=requested.FirstOrDefault(op=>!OperationFamilies.Contains(op,StringComparer.Ordinal));
+  if(unknown!=null) { error.WriteLine($"unknown operation family '{unknown}'; known: {string.Join(", ",OperationFamilies)}"); return Usage; }
   var payload=new GrantPayload
   {
    GrantId=Guid.NewGuid().ToString("N"),Generation=NextGeneration(grantPath,keyPath),IssuedUtc=GrantPayload.FormatUtc(now),ExpiresUtc=GrantPayload.FormatUtc(now.AddHours(hours)),
    Binding=new GrantBindingInfo { InstallId=GrantBindingKey.InstallId(root),SaveFolder=save,Agency=agency },
-   Operations=Split(o.GetValueOrDefault("--ops"),DefaultOperations),Facilities=Split(o.GetValueOrDefault("--facilities"),new[]{"VAB"}),
+   Operations=requested,Facilities=Split(o.GetValueOrDefault("--facilities"),new[]{"VAB"}),
    UnsavedCraftPolicy=o.GetValueOrDefault("--policy") ?? "refuse",MaxParts=maxParts,SpendLimitFunds=0,Revoked=false
   };
   return Write(payload,grantPath,keyPath,create:true,output,error,"issued");

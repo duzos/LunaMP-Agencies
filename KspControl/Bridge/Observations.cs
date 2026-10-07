@@ -35,6 +35,8 @@ namespace KspControl.Bridge
         /// <summary>Flight telemetry and mutations. Null leaves the flight operations unavailable.</summary>
         internal FlightStateService FlightState { get; set; }
         internal FlightOperationService FlightMutations { get; set; }
+        /// <summary>MechJeb autopilot status and jobs. Null leaves them unavailable.</summary>
+        internal MechJebService Autopilot { get; set; }
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -109,6 +111,13 @@ namespace KspControl.Bridge
                     var flight = FlightMutations.Handle(request);
                     flight.WorldEpoch = epoch; flight.Revision = ++revision;
                     return flight;
+                case AutopilotOperations.MechJebStatus: case AutopilotOperations.Status:
+                case AutopilotOperations.Ascent: case AutopilotOperations.ExecuteNode: case AutopilotOperations.PlanCircularize: case AutopilotOperations.PlanHohmann:
+                    // Autopilot operations answer with their own envelope, like the editor mutations.
+                    if (Autopilot == null) return Fail(request, "operation_unavailable");
+                    var autopilot = Autopilot.Handle(request);
+                    autopilot.WorldEpoch = epoch; autopilot.Revision = ++revision;
+                    return autopilot;
                 case "editor.snapshot":
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) return Fail(request, "editor_unavailable");
                     data = EditorSnapshot(EditorLogic.fetch.ship, request.Arguments); break;
@@ -159,11 +168,13 @@ namespace KspControl.Bridge
         {
             ["bridgeVersion"] = BridgeVersion,
             ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", ConstructionOperations.Catalog, "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect",
-                EditorOperations.OperationStatus, CraftOperations.List, KspControl.Contracts.FlightOperations.State),
-            ["mutations"] = new JArray((Operations == null ? new string[0] : EditorOperations.Mutations).Concat(FlightMutations == null ? new string[0] : KspControl.Contracts.FlightOperations.Mutations)),
+                EditorOperations.OperationStatus, CraftOperations.List, KspControl.Contracts.FlightOperations.State,
+                AutopilotOperations.MechJebStatus, AutopilotOperations.Status),
+            ["mutations"] = new JArray((Operations == null ? new string[0] : EditorOperations.Mutations).Concat(FlightMutations == null ? new string[0] : KspControl.Contracts.FlightOperations.Mutations)
+                .Concat(Autopilot == null ? new string[0] : AutopilotOperations.Mutations)),
             ["inline"] = new JArray(ControlOperations.All),
             ["unavailable"] = new JObject { ["mutations"] = Operations == null ? "operation_layer_not_wired" : "none", ["screenshots"] = "disclosure_validation_not_implemented",
-                ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },
+                ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = Autopilot == null ? "adapter_not_wired" : "see mechjeb_status for the installed version and modules" },
             ["maximumPageSize"] = ObservationLimits.MaxPage
         };
         private static JObject Catalog(JObject args)

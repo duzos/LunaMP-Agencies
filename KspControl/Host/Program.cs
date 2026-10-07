@@ -15,6 +15,7 @@ builder.Services.AddHostedService(services => services.GetRequiredService<LeaseK
 builder.Services.AddSingleton<JournalAccess>();
 builder.Services.AddSingleton<MutationService>();
 builder.Services.AddSingleton<FlightService>();
-builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>().WithTools<MutationTools>().WithTools<LoadTools>().WithTools<FlightTools>();
+builder.Services.AddSingleton<AutopilotService>();
+builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>().WithTools<MutationTools>().WithTools<LoadTools>().WithTools<FlightTools>().WithTools<AutopilotTools>();
 await builder.Build().RunAsync();
 return 0;

@@ -319,3 +319,47 @@ a source commit change during the build. It does not install, update, launch,
 publish or release anything. The GameData payload contains only bridge/contracts
 DLLs; it requires the matching LunaMP client facade and existing Newtonsoft.Json
 13.0.0.0 assembly. This preview is explicitly unvalidated in live KSP.
+
+## MechJeb autopilot (P3b)
+
+Tools: `mechjeb_status` (read-only, no lease), `mechjeb_ascent`, `mechjeb_execute_node`, `mechjeb_plan_circularize`, `mechjeb_plan_hohmann_to_target`.
+Every mutation needs a lease taken in the flight scene and a grant that lists `flight.autopilot` with the `FLIGHT` facility: the facility maps to the entity
+`vessel:*`, the lease entity is `vessel:<guid>` of the active vessel (a vessel switch revokes it), and admission also checks that the lease vessel is the active one.
+The host journal entity is `flight:vessel`. The family is not in the CLI's default operations: `grant issue --ops flight.autopilot --facilities FLIGHT`.
+`GrantCli.AllowedOperations` lists the operations a grant may name; an unknown name is rejected. Jobs go through the same host journal as the editor
+mutations and are followed with `job_status` (the host polls `flight.autopilot_status` for them).
+
+**Adapter.** `MechJebAdapter` is guarded reflection with no compile-time reference. It resolves `MuMech.MechJebCore` and the module types once
+(capability flags: installed, version 2.15.x supported, per-module), then re-reads the live objects every call: nothing is cached across frames. Members used:
+`core.MasterMechJeb`, `core.Ascent` (`MechJebModuleAscentBaseAutopilot`: `Status`), `core.AscentSettings` (`DesiredOrbitAltitude.Val`, `DesiredInclination.Val`,
+`Autostage`, `SkipCircularization`, `AscentType`), `core.Node` (`ExecuteOneNode(object)`, `ExecuteAllNodes(object)`, `Abort()`, `State`, `Autowarp`,
+`NextNodeBurnTime()`), `core.Thrust.ThrustOff()`, `core.Landing`/`Airplane`/`Attitude`/`Rover` and `GetComputerModule<T>()` for rendezvous, docking and spaceplane,
+and each module's `Enabled` and `Users` (`UserPool.Add`/`Remove`). The user is a bridge-owned object, so the adapter can tell its hold from anyone else's.
+
+**Ascent job.** Writes the settings and reads them back (a value that did not take fails with `engage_failed`), adds the user, and reports phase, MechJeb's status
+text and altitude, apoapsis and periapsis each frame. Orbit means periapsis above the atmosphere top of the current body for one second; the job then waits for
+MechJeb to end its own circularization (up to 2 minutes) and completes with `ascentFinished` true or false. Timeout is 20 minutes; `autoWarp=true` is refused
+(`unsupported_option`): MechJeb 2.15 has no warp setting for the ascent. **Node job.** `Autowarp` is forced off; ends when the node is consumed (60 minute timeout).
+
+**Safety.** Admission refuses with `competing_controller` if any other MechJeb autopilot or support module has a user or AtmosphereAutopilot has an active
+module (an unreadable AtmosphereAutopilot fails closed). Each frame the runner revalidates the authority, the vessel id and the controls before it reads MechJeb:
+Every MechJeb, AtmosphereAutopilot and throttle call names the vessel the job was admitted on (never whichever is active now); the throttle of the live input state is only
+touched while that vessel is still active. A user counts as ours if it is the bridge user, the ascent window module the ascent is engaged through (so MechJeb's own
+Disengage button stops it; switching it off before orbit ends the job cancelled as `ascent_disengaged`, not a takeover; the window counts as ours for ascent jobs only, so a person engaging it during a node burn is a competitor), or a MechJeb module whose user set contains ours, which is how the ascent hands over to the node
+executor and attitude controller. Attitude, thrust and rover are scanned for foreign users on every pass. The node executor is aborted only when nobody else holds it, and
+its Autowarp is restored on release. An orbit needs periapsis above the higher of the atmosphere top and the body's safe altitude (`minOrbitalDistance - radius`), and a target at
+below the higher of the atmosphere top and the safe altitude plus 5 km is refused; when MechJeb has ended, the orbit is judged at once.
+Stop (button, hotkey, same call) and any loss of authority remove the user, abort the executor and cut the throttle at once; a switch of vessel or scene ends the job;
+two consecutive frames of flight-control input (keys or axes), another user entering the module, or another controller engaging is a human takeover
+(`human_input_during_operation`, `ExecutionAuthority.HumanTakeover`, lease revoked, 30 s cooldown, throttle cut).
+
+**Planning.** `mechjeb_plan_circularize` creates a stock maneuver node at the apoapsis from vis-viva arithmetic (`plan.source` is `stock_math`).
+`mechjeb_plan_hohmann_to_target` creates the departure-burn node for a moon of the current body at the next phase-angle window, assuming near-circular
+coplanar orbits, and is labelled an ESTIMATE (`hohmann_phase_wait_estimate`). MechJeb's `Operation*` planner classes exist in 2.15.2 (`OperationCircularize`,
+`OperationInterplanetaryTransfer`, ...) but their time-selector behaviour is not verified, so the planner path is not used; they are listed in
+`mechjeb_status.plannerOperations`.
+
+Not live-verified: that `UserPool.Add` enables the module (the adapter sets `Enabled` itself if not), what `core.Ascent` returns for each `AscentType` (PVG is
+untried), the `Status` strings, that the node executor disables itself after the last node, the human-input key and axis list, AtmosphereAutopilot's
+`getVesselModules`/`Active` semantics, the node delta-v frame (radial, normal, prograde in `ManeuverNode.DeltaV`), the Hohmann lead-angle sign, and that
+`FlightGlobals.ready` is the right flight-scene readiness test.

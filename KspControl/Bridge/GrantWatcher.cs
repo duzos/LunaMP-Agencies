@@ -16,20 +16,21 @@ namespace KspControl.Bridge
 
     internal static class GrantMapping
     {
-        /// <summary>Effects the bridge knows how to classify. Mutations stay unavailable in this slice.</summary>
-        internal static readonly string[] KnownEffects = { "editor.replace_craft", "editor.restore_snapshot", "craft.write", FlightEffects.Family };
+        /// <summary>Effects the bridge knows how to classify. The flight families (flight.control, flight.autopilot) need the FLIGHT facility.</summary>
+        internal static readonly string[] KnownEffects = { "editor.replace_craft", "editor.restore_snapshot", "craft.write", FlightEffects.Family, AutopilotOperations.Effect };
 
         internal static TrustedExecutionGrant ToGrant(GrantPayload payload)
         {
-            // The FLIGHT facility binds the family to whichever vessel is active ("vessel:*"); every other facility is an editor.
+            var known = payload.Operations.Distinct(StringComparer.Ordinal).Where(o => Array.IndexOf(KnownEffects, o) >= 0).ToArray();
+            // The FLIGHT facility binds the flight families to whichever vessel is active ("vessel:*"); every other facility is an editor.
             var editorFacilities = payload.Facilities.Where(f => f != FlightEffects.Facility).ToArray();
-            var permissions = payload.Operations.Distinct(StringComparer.Ordinal).Where(o => Array.IndexOf(KnownEffects, o) >= 0 && o != FlightEffects.Family)
+            var permissions = known.Where(o => !o.StartsWith("flight.", StringComparison.Ordinal))
                 .SelectMany(o => editorFacilities.Select(f => new EffectPermission(o, (o.StartsWith("craft.", StringComparison.Ordinal) ? "ships:" : "editor:") + f))).ToList();
             var entities = editorFacilities.Select(f => "editor:" + f).ToList();
             if (Array.IndexOf(payload.Facilities, FlightEffects.Facility) >= 0)
             {
                 entities.Add(FlightEffects.EntityWildcard);
-                if (Array.IndexOf(payload.Operations, FlightEffects.Family) >= 0) permissions.Add(new EffectPermission(FlightEffects.Family, FlightEffects.EntityWildcard));
+                permissions.AddRange(known.Where(o => o.StartsWith("flight.", StringComparison.Ordinal)).Select(o => new EffectPermission(o, FlightEffects.EntityWildcard)));
             }
             return new TrustedExecutionGrant(payload.GrantId, payload.Generation, GrantBinding.From(payload.Binding), payload.ExpiresAt, permissions, entities);
         }

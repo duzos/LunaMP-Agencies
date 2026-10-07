@@ -15,15 +15,16 @@ public static class GrantCli
 {
  public const int Ok=0,Usage=1,Failed=2;
  public static readonly string[] DefaultOperations={ "editor.replace_craft","editor.restore_snapshot","craft.write" };
- /// <summary>Every operation family a grant may list: the defaults plus flight.control (use it with --facilities FLIGHT). The bridge's effect map must know each one.</summary>
- public static readonly string[] AllowedOperations={ "editor.replace_craft","editor.restore_snapshot","craft.write",FlightEffects.Family };
+ /// <summary>Every operation family a grant may list: the defaults plus the flight families flight.control and flight.autopilot (ask for them with --ops and use
+ /// --facilities FLIGHT). Defaults stay editor-only. The bridge's effect map must know each one.</summary>
+ public static readonly string[] AllowedOperations={ "editor.replace_craft","editor.restore_snapshot","craft.write",FlightEffects.Family,AutopilotOperations.Effect };
  private const int DefaultHours=8,MaxHours=168;
  private static readonly HashSet<string> Flags=new(StringComparer.Ordinal) { "--trust-dir","--grant-file","--key-file","--ksp-root","--save","--agency","--ops","--facilities","--policy","--max-parts","--hours" };
 
  public static int Run(string[] args,TextWriter output,TextWriter error,Func<string,string?>? environment=null,Func<DateTime>? utcNow=null)
  {
   environment??=Environment.GetEnvironmentVariable; utcNow??=()=>DateTime.UtcNow;
-  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b] [--facilities VAB,SPH,FLIGHT] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]) (rearm: [--hours H])"); return Usage; }
+  if(args.Length==0 || args[0] is not ("issue" or "revoke" or "rearm" or "show")) { error.WriteLine("usage: KspControl.Host grant issue|revoke|rearm|show [--trust-dir D] [--grant-file F] [--key-file F] (issue: --ksp-root R --save S [--agency GUID] [--ops a,b (default editor families; add flight.control and/or flight.autopilot for flight)] [--facilities VAB,SPH,FLIGHT] [--policy refuse|snapshot_then_replace] [--max-parts N] [--hours H]) (rearm: [--hours H])"); return Usage; }
   var options=new Dictionary<string,string>(StringComparer.Ordinal);
   for(int i=1;i<args.Length;i+=2)
   {

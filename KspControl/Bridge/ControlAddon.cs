@@ -20,6 +20,7 @@ namespace KspControl.Bridge
         private EditorOperationRunner runner;
         private FlightControlGuard flightGuard;
         private FlightTakeoverWatcher flightTakeover;
+        private AutopilotRunner autopilotRunner;
         private KeyCode stopKey = KeyCode.None;
         private string panelLine = "";
         private float panelRefreshed = -1f;
@@ -62,6 +63,12 @@ namespace KspControl.Bridge
                 observations.FlightState = new FlightStateService(flightPort, () => observations.WorldEpoch);
                 observations.FlightMutations = new FlightOperationService(flightPort, flightGuard, authority, source, () => observations.WorldEpoch);
                 flightTakeover = new FlightTakeoverWatcher(flightPort, authority);
+                // MechJeb autopilot: a guarded reflection adapter (no compile-time reference) and the stock-side flight port.
+                var autopilotJobs = new AutopilotJobs();
+                var autopilotPort = new UnityAutopilotFlightPort();
+                var mechjeb = new MechJebAdapter(MechJebSources.Core, MechJebSources.Vessel);
+                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, autopilotPort, () => MonotonicClock.Milliseconds);
+                observations.Autopilot = new MechJebService(authority, autopilotRunner, autopilotJobs, mechjeb, autopilotPort, () => observations.WorldEpoch);
                 observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");
@@ -92,6 +99,7 @@ namespace KspControl.Bridge
             try { if (HighLogic.LoadedSceneIsFlight) flightTakeover?.Update(); } catch { /* takeover detection must never break the frame */ }
             try { flightGuard?.Update(); } catch { /* the guard releases on its own next frame */ }
             try { runner.Update(); } catch { /* the runner reports its own failures in the job; it must never break the frame */ }
+            try { autopilotRunner?.Update(); } catch { /* the autopilot runner releases MechJeb itself; it must never break the frame */ }
             queue.Drain(observations.Execute);
         }
         public void OnGUI()
@@ -101,11 +109,18 @@ namespace KspControl.Bridge
             GUI.Label(new Rect(8f, 4f, 640f, 22f), panelLine);
             if (GUI.Button(new Rect(8f, 26f, 72f, 22f), "Stop")) StopNow();
         }
-        /// <summary>Stop (hotkey or panel): revoke the authority, then neutralise the controls in the same frame without waiting for the next tick.</summary>
+        /// <summary>
+        /// Stop (hotkey or panel): revoke the authority, then in the same frame neutralise the flight controls and release MechJeb (cutting the throttle)
+        /// without waiting for the next tick.
+        /// </summary>
         private void StopNow()
         {
             try { authority.Stop(); }
-            finally { try { flightGuard?.Release("stop"); } catch { /* the lease is already revoked */ } }
+            finally
+            {
+                try { flightGuard?.Release("stop"); } catch { /* the lease is already revoked */ }
+                try { autopilotRunner?.Abort(KspControl.Contracts.AutopilotReasons.StoppedByRequest); } catch { /* the next frame's validation ends the job anyway */ }
+            }
         }
         private static string Describe(ControlStatusInfo status)
         {
@@ -121,6 +136,7 @@ namespace KspControl.Bridge
             server?.Dispose(); queue.Stop();
             try { flightGuard?.Release("destroyed"); } catch { /* teardown: the vessel may be gone */ }
             try { runner?.Abort(); } catch { /* teardown: the locks are released best effort */ }
+            try { autopilotRunner?.Abort(KspControl.Contracts.AutopilotReasons.StoppedByRequest); } catch { /* teardown: MechJeb is released best effort */ }
             editorEvents?.Dispose();
         }
     }

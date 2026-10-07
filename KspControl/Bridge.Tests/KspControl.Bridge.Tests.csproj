@@ -62,6 +62,12 @@
     <Compile Include="../Bridge/FlightStateService.cs" Link="FlightStateService.cs" />
     <Compile Include="../Bridge/FlightOperationService.cs" Link="FlightOperationService.cs" />
     <Compile Include="../Bridge/FlightTakeoverWatcher.cs" Link="FlightTakeoverWatcher.cs" />
+    <Compile Include="../Bridge/MechJebPorts.cs" Link="MechJebPorts.cs" />
+    <Compile Include="../Bridge/MechJebAdapter.cs" Link="MechJebAdapter.cs" />
+    <Compile Include="../Bridge/MechJebJob.cs" Link="MechJebJob.cs" />
+    <Compile Include="../Bridge/MechJebRunner.cs" Link="MechJebRunner.cs" />
+    <Compile Include="../Bridge/MechJebService.cs" Link="MechJebService.cs" />
+    <Compile Include="../Bridge/ManeuverMath.cs" Link="ManeuverMath.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
     <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />

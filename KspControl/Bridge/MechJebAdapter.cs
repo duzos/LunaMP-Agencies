@@ -132,7 +132,7 @@ namespace KspControl.Bridge
             new ModuleSpec { Name = "ascentMenu", TypeName = "MechJebModuleAscentMenu", Members = new string[0], ViaGeneric = true },
             new ModuleSpec { Name = "attitude", CoreMember = "Attitude", TypeName = "MechJebModuleAttitudeController", Members = new[] { "Enabled", "Users" }, Scanned = true },
             new ModuleSpec { Name = "rover", CoreMember = "Rover", TypeName = "MechJebModuleRoverController", Members = new[] { "Enabled", "Users" }, Scanned = true },
-            new ModuleSpec { Name = "thrust", CoreMember = "Thrust", TypeName = "MechJebModuleThrustController", Members = new[] { "Enabled", "Users", "ThrustOff" }, Scanned = true },
+            new ModuleSpec { Name = "thrust", CoreMember = "Thrust", TypeName = "MechJebModuleThrustController", Members = new[] { "Enabled", "Users", "ThrustOff" }, Scanned = false }, // MechJeb's own limiters keep a standing user on it (live 2026-10-07): not a competitor
             new ModuleSpec { Name = "warp", CoreMember = "Warp", TypeName = "MechJebModuleWarpController", Members = new[] { "Enabled" } }
         };
 

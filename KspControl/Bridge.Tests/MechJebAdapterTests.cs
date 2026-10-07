@@ -185,7 +185,7 @@ namespace KspControl.BridgeTests
         {
             core.Attitude.Users.Add(new object()); core.Rover.Users.Add(new object()); core.Thrust.Users.Add(new object());
             var adapter = Make();
-            CollectionAssert.AreEquivalent(new[] { "mechjeb.attitude", "mechjeb.rover", "mechjeb.thrust" }, adapter.FindCompetitors(null, new object(), true).ToArray(), "a foreign user of a support module is a competitor, in the running scan too");
+            CollectionAssert.AreEquivalent(new[] { "mechjeb.attitude", "mechjeb.rover" }, adapter.FindCompetitors(null, new object(), true).ToArray(), "a foreign user of a scanned support module is a competitor, in the running scan too; the thrust controller is never scanned (MechJeb's limiters hold it)");
         }
 
         [TestMethod] public void TheAscentHandingOverToTheNodeExecutorAndAttitudeControllerIsNotACompetitor()

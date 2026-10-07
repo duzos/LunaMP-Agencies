@@ -57,3 +57,13 @@ explicitly unavailable pending their implementations and acceptance gates.
 
 
 
+
+## Offline preview packaging
+
+`./KspControl/Build-Package.ps1` builds the bridge and publishes a self-contained
+Windows x64 host, then verifies a ZIP allowlist and SHA-256 manifest under a new
+`Artifacts/KspControl-preview-*` directory. It refuses tracked source changes or
+a source commit change during the build. It does not install, update, launch,
+publish or release anything. The GameData payload contains only bridge/contracts
+DLLs; it requires the matching LunaMP client facade and existing Newtonsoft.Json
+13.0.0.0 assembly. This preview is explicitly unvalidated in live KSP.

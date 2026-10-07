@@ -88,6 +88,25 @@ internal sealed class BotClient : IAsyncDisposable
 
     public async Task<AgencySyncSnapshot> ConnectAsync(int port, CancellationToken cancellationToken = default)
     {
+        await OpenConnectionAsync(port, cancellationToken);
+        var handshake = await HandshakeAsync(AgenciesBuild.Number, cancellationToken);
+        if (handshake.Response != HandshakeReply.HandshookSuccessfully)
+            throw new InvalidOperationException($"{Name} handshake rejected: {handshake.Response}: {handshake.Reason}");
+        var sync = await WaitForAsync<AgencySyncSnapshot>(_ => true, cancellationToken);
+        if (sync.MyAgencyId == Guid.Empty) throw new InvalidOperationException($"{Name} received empty agency membership");
+        return sync;
+    }
+
+    /// <summary>Handshakes with the given agencies build. The server is expected to refuse it and then close the connection, so that disconnect is armed as expected.</summary>
+    public async Task<HandshakeSnapshot> ConnectRejectedAsync(int port, int agenciesBuild, CancellationToken cancellationToken = default)
+    {
+        await OpenConnectionAsync(port, cancellationToken);
+        ArmExpectedDisconnect(reason => reason.Contains("Agencies build mismatch", StringComparison.Ordinal));
+        return await HandshakeAsync(agenciesBuild, cancellationToken);
+    }
+
+    private async Task OpenConnectionAsync(int port, CancellationToken cancellationToken)
+    {
         await StopPeerAsync();
         lock (_gate)
         {
@@ -113,18 +132,18 @@ internal sealed class BotClient : IAsyncDisposable
         hail.Write(string.Empty);
         peer.Connect(new IPEndPoint(IPAddress.Loopback, port), hail);
         await WaitForAsync<StatusSnapshot>(s => s.Status == NetConnectionStatus.Connected, cancellationToken);
+    }
+
+    private Task<HandshakeSnapshot> HandshakeAsync(int agenciesBuild, CancellationToken cancellationToken)
+    {
         Send<HandshakeCliMsg, HandshakeRequestMsgData>(d =>
         {
             d.PlayerName = Name;
             d.UniqueIdentifier = Identity;
             d.KspVersion = "1.12.5";
+            d.AgenciesBuild = agenciesBuild;
         });
-        var handshake = await WaitForAsync<HandshakeSnapshot>(_ => true, cancellationToken);
-        if (handshake.Response != HandshakeReply.HandshookSuccessfully)
-            throw new InvalidOperationException($"{Name} handshake rejected: {handshake.Response}: {handshake.Reason}");
-        var sync = await WaitForAsync<AgencySyncSnapshot>(_ => true, cancellationToken);
-        if (sync.MyAgencyId == Guid.Empty) throw new InvalidOperationException($"{Name} received empty agency membership");
-        return sync;
+        return WaitForAsync<HandshakeSnapshot>(_ => true, cancellationToken);
     }
 
     public void ArmExpectedDisconnect(Func<string, bool> reasonMatches)

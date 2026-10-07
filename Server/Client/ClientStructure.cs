@@ -24,6 +24,12 @@ namespace Server.Client
 
         public bool Authenticated { get; set; }
 
+        /// <summary>
+        /// Set when the handshake was refused for an agencies build mismatch. The connection stays open for a short while so the
+        /// reply can arrive, and until then everything this client sends is dropped.
+        /// </summary>
+        public volatile bool HandshakeRejected;
+
         public long BytesReceived { get; set; }
         public long BytesSent { get; set; }
         public NetConnection Connection { get; }

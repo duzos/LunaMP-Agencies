@@ -48,7 +48,7 @@ namespace Server.Server
 
         public void ReceiveCallback(ClientStructure client, NetIncomingMessage msg)
         {
-            if (client == null || msg.LengthBytes <= 1) return;
+            if (client == null || msg.LengthBytes <= 1 || client.HandshakeRejected) return;
 
             if (client.ConnectionStatus == ConnectionStatus.Connected)
                 client.LastReceiveTime = ServerContext.ServerClock.ElapsedMilliseconds;

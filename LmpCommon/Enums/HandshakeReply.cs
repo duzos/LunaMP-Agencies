@@ -6,5 +6,6 @@
         PlayerBanned = 1,
         ServerFull = 2,
         InvalidPlayername = 3,
+        AgenciesBuildMismatch = 4,
     }
 }

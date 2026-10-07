@@ -1,4 +1,5 @@
 using Server.Diagnostics;
+using LmpCommon.Agency;
 using LmpCommon.Enums;
 using LmpCommon.Message.Data.Handshake;
 using LmpCommon.Message.Server;
@@ -17,6 +18,7 @@ namespace Server.System
             var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<HandshakeReplyMsgData>();
             msgData.Response = enumResponse;
             msgData.Reason = reason;
+            msgData.ServerAgenciesBuild = AgenciesBuild.Number;
 
             if (enumResponse == HandshakeReply.HandshookSuccessfully)
             {

@@ -12,7 +12,8 @@ namespace LmpClient.Harmony
     public static class AgencyVisibility
     {
         public static bool Ready {get;private set;}
-        public static string DiagnosticReason {get;private set;}
+        private static string diagnosticReason;
+        public static string DiagnosticReason => diagnosticReason ?? AgencyCommNetVisibility.DiagnosticReason;
         private static FieldInfo markerVessel,markerCanvas,orbitTarget;
         private static MethodInfo rebuildList,updateCounts;
         private static bool restoringCounts;
@@ -44,9 +45,10 @@ namespace LmpClient.Harmony
                 foreach(var method in new[]{"FlyVessel","RecoverVessel"})Patch(harmony,typeof(KSCVesselMarkers),method,new[]{typeof(Vessel)},nameof(Select));
                 Patch(harmony,typeof(TrackingStationObjectButton),"ShowCount",new[]{typeof(bool)},nameof(Count));
                 Patch(harmony,typeof(MainSystem),"Update",Type.EmptyTypes,null,nameof(Tick));
+                if (!AgencyCommNetVisibility.TryAttach(harmony)) throw new InvalidOperationException(AgencyCommNetVisibility.DiagnosticReason);
                 Ready=true;
             }
-            catch(Exception e){Ready=false;DiagnosticReason=e.Message;LunaLog.LogError("[AgencyVisibility] Required presentation hooks unavailable: "+e);}
+            catch(Exception e){Ready=false;diagnosticReason=e.Message;LunaLog.LogError("[AgencyVisibility] Required presentation hooks unavailable: "+e);}
         }
         private static void Patch(HarmonyLib.Harmony harmony,Type type,string name,Type[] args,string prefix,string postfix=null)
         {
@@ -111,7 +113,7 @@ namespace LmpClient.Harmony
         private static void Tick()
         {
             try{VisibilityClient.Tick();}
-            catch(Exception e){DiagnosticReason=e.Message;Diagnostics.PlaytestDiagnostics.Write("client.visibility.adapter-error",()=>e.Message);}
+            catch(Exception e){diagnosticReason=e.Message;Diagnostics.PlaytestDiagnostics.Write("client.visibility.adapter-error",()=>e.Message);}
         }
     }
 }

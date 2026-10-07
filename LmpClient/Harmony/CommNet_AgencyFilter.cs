@@ -16,7 +16,7 @@ namespace LmpClient.Harmony
         public static bool Ready { get; private set; }
         public static string DiagnosticReason { get; private set; }
         private static MethodInfo disconnect;
-        private static readonly Dictionary<CommNode, Guid> vessels = new Dictionary<CommNode, Guid>(new NodeIdentityComparer());
+        private static readonly Dictionary<CommNode, Vessel> vessels = new Dictionary<CommNode, Vessel>(new NodeIdentityComparer());
         private static int refreshRequested = 1, resetUiRequested;
         private static bool lastEnabled, lastOptIn;
         private sealed class NodeIdentityComparer : IEqualityComparer<CommNode>
@@ -80,16 +80,16 @@ namespace LmpClient.Harmony
             BuildNodeMap();
             network.QueueRebuild();
         }
-        private static void BuildNodeMap()
+        internal static void BuildNodeMap()
         {
             vessels.Clear();
-            if (!Enabled || FlightGlobals.Vessels == null) return;
+            if ((!Enabled && !VisibilityClient.Enabled) || FlightGlobals.Vessels == null) return;
             // Unloaded vessels also expose connection.Comm. Never infer vessel identity from transforms.
             try
             {
                 foreach (var vessel in FlightGlobals.Vessels)
                     if (vessel && vessel.connection != null && vessel.connection.Comm != null)
-                        vessels[vessel.connection.Comm] = vessel.id;
+                        vessels[vessel.connection.Comm] = vessel;
             }
             catch (Exception e)
             {
@@ -97,21 +97,22 @@ namespace LmpClient.Harmony
                 Diagnostics.PlaytestDiagnostics.Write("client.commnet.node-map-error", () => e.GetType().Name, traffic: true);
             }
         }
+        internal static bool TryGetVessel(CommNode node, out Vessel vessel) => vessels.TryGetValue(node, out vessel);
         private static void Postfix(CommNetwork __instance, CommNode __0, CommNode __1, ref bool __result)
         {
             if (!Enabled || __0 == null || __1 == null || __0.isHome || __1.isHome || disconnect == null) return;
             var allowed = false;
             try
             {
-                if (vessels.TryGetValue(__0, out var a) && vessels.TryGetValue(__1, out var b))
+                if (vessels.TryGetValue(__0, out var a) && a && vessels.TryGetValue(__1, out var b) && b)
                 {
                     if (SettingsSystem.ServerSettings.AgencyCommNetOptIn)
-                        allowed = AgencySystem.Singleton.CanLinkCommNet(a, b);
+                        allowed = AgencySystem.Singleton.CanLinkCommNet(a.id, b.id);
                     else
                     {
                         var mine = AgencySystem.Singleton.MyAgencyId;
-                        var ownerA = AgencySystem.Singleton.GetVesselAgency(a);
-                        var ownerB = AgencySystem.Singleton.GetVesselAgency(b);
+                        var ownerA = AgencySystem.Singleton.GetVesselAgency(a.id);
+                        var ownerB = AgencySystem.Singleton.GetVesselAgency(b.id);
                         allowed = mine != Guid.Empty && ownerA != Guid.Empty && ownerB != Guid.Empty &&
                                   !((ownerA == mine && ownerB != mine) || (ownerB == mine && ownerA != mine));
                     }

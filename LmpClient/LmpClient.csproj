@@ -503,6 +503,7 @@
     <Compile Include="Systems\Agency\VisibilityClient.cs" />
     <Compile Include="Systems\Agency\VisibilitySensors.cs" />
     <Compile Include="Harmony\AgencyVisibility.cs" />
+    <Compile Include="Harmony\AgencyCommNetVisibility.cs" />
     <Compile Include="Windows\Agency\VisibilityDrawer.cs" />
     <Compile Include="Harmony\AgencyTradeResearch.cs" />
     <Compile Include="Windows\Agency\TradeDrawer.cs" />

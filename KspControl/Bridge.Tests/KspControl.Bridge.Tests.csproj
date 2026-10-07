@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bridge logic compiled twice: net472 is what KSP's Mono runs, net10.0 is the host test runtime. Linked sources stay C# 7.3. -->
+  <PropertyGroup><TargetFrameworks>net10.0;net472</TargetFrameworks><LangVersion>7.3</LangVersion><IsPackable>false</IsPackable></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.3.2" />
+    <PackageReference Include="MSTest.TestAdapter" Version="2.2.10" />
+    <PackageReference Include="MSTest.TestFramework" Version="2.2.10" />
+    <ProjectReference Include="../Contracts/KspControl.Contracts.csproj" />
+    <Compile Include="../Bridge/ObservationQueue.cs" Link="ObservationQueue.cs" />
+    <Compile Include="../Bridge/LoopbackServer.cs" Link="LoopbackServer.cs" />
+    <Compile Include="../Bridge/ExecutionAuthority.cs" Link="ExecutionAuthority.cs" />
+    <Compile Include="../Bridge/ControlDispatcher.cs" Link="ControlDispatcher.cs" />
+    <Compile Include="../Bridge/GrantWatcher.cs" Link="GrantWatcher.cs" />
+    <Compile Include="../Bridge/SuspensionStore.cs" Link="SuspensionStore.cs" />
+    <Compile Include="../Bridge/PartFilters.cs" Link="PartFilters.cs" />
+    <Compile Include="../Bridge/EditorPort.cs" Link="EditorPort.cs" />
+    <Compile Include="../Bridge/EditorIdle.cs" Link="EditorIdle.cs" />
+    <Compile Include="../Bridge/EditorReflection.cs" Link="EditorReflection.cs" />
+    <Compile Include="../Bridge/EditorRevisionTracker.cs" Link="EditorRevisionTracker.cs" />
+    <Compile Include="../Bridge/EditorObservationService.cs" Link="EditorObservationService.cs" />
+    <Compile Include="../EditorModel/AttachmentGeometry.cs" Link="EditorModel/AttachmentGeometry.cs" />
+    <Compile Include="../EditorModel/CraftGraph.cs" Link="EditorModel/CraftGraph.cs" />
+    <Compile Include="../EditorModel/ConfigText.cs" Link="EditorModel/ConfigText.cs" />
+    <Compile Include="../EditorModel/CraftModel.cs" Link="EditorModel/CraftModel.cs" />
+    <Compile Include="../EditorModel/CraftComparator.cs" Link="EditorModel/CraftComparator.cs" />
+    <Compile Include="../EditorModel/CraftFingerprint.cs" Link="EditorModel/CraftFingerprint.cs" />
+    <Compile Include="../EditorModel/RotationMath.cs" Link="EditorModel/RotationMath.cs" />
+    <Compile Include="../EditorModel/ValueRule.cs" Link="EditorModel/ValueRule.cs" />
+    <Compile Include="../EditorModel/RoundtripVolatileKeys.cs" Link="EditorModel/RoundtripVolatileKeys.cs" />
+    <Compile Include="../EditorModel/EditorRevisionToken.cs" Link="EditorModel/EditorRevisionToken.cs" />
+    <Compile Include="../EditorModel/ConstructionCatalog.cs" Link="EditorModel/ConstructionCatalog.cs" />
+    <Compile Include="../EditorModel/CraftPaths.cs" Link="EditorModel/CraftPaths.cs" />
+    <Compile Include="../EditorModel/CraftPlanner.cs" Link="EditorModel/CraftPlanner.cs" />
+    <Compile Include="../EditorModel/GraphDto.cs" Link="EditorModel/GraphDto.cs" />
+    <Compile Include="../EditorModel/PlanHasher.cs" Link="EditorModel/PlanHasher.cs" />
+    <Compile Include="../EditorModel/StackGeometryValidator.cs" Link="EditorModel/StackGeometryValidator.cs" />
+    <Compile Include="../EditorModel/StagingRules.cs" Link="EditorModel/StagingRules.cs" />
+    <Compile Include="../EditorModel/SurfaceCalibration.cs" Link="EditorModel/SurfaceCalibration.cs" />
+    <Compile Include="../EditorModel/StructuralCraft.cs" Link="EditorModel/StructuralCraft.cs" />
+    <Compile Include="../EditorModel/StructuralCraftValidator.cs" Link="EditorModel/StructuralCraftValidator.cs" />
+    <Compile Include="../Bridge/ConstructionCatalogMapper.cs" Link="ConstructionCatalogMapper.cs" />
+    <Compile Include="../Bridge/OperationFiles.cs" Link="OperationFiles.cs" />
+    <Compile Include="../Bridge/OperationJob.cs" Link="OperationJob.cs" />
+    <Compile Include="../Bridge/OperationJob.Save.cs" Link="OperationJob.Save.cs" />
+    <Compile Include="../Bridge/SnapshotStore.cs" Link="SnapshotStore.cs" />
+    <Compile Include="../Bridge/CraftLedger.cs" Link="CraftLedger.cs" />
+    <Compile Include="../Bridge/CraftListService.cs" Link="CraftListService.cs" />
+    <Compile Include="../Bridge/ThumbnailHousekeeper.cs" Link="ThumbnailHousekeeper.cs" />
+    <Compile Include="../Bridge/PlanVerifier.cs" Link="PlanVerifier.cs" />
+    <Compile Include="../Bridge/ApplyPlanner.cs" Link="ApplyPlanner.cs" />
+    <Compile Include="../Bridge/EditorOperationRunner.cs" Link="EditorOperationRunner.cs" />
+    <Compile Include="../Bridge/EditorOperationRunner.Save.cs" Link="EditorOperationRunner.Save.cs" />
+    <Compile Include="../Bridge/EditorOperationService.cs" Link="EditorOperationService.cs" />
+    <Compile Include="../Bridge/EditorOperationService.Save.cs" Link="EditorOperationService.Save.cs" />
+    <Compile Include="../Bridge/EditorOperationService.Load.cs" Link="EditorOperationService.Load.cs" />
+    <Compile Include="../Bridge/EditorOperationRunner.Load.cs" Link="EditorOperationRunner.Load.cs" />
+    <Compile Include="../Bridge/OperationJob.Load.cs" Link="OperationJob.Load.cs" />
+    <Compile Include="../Bridge/LoadValidator.cs" Link="LoadValidator.cs" />
+    <Compile Include="../Bridge/FlightPort.cs" Link="FlightPort.cs" />
+    <Compile Include="../Bridge/FlightEffectClassifier.cs" Link="FlightEffectClassifier.cs" />
+    <Compile Include="../Bridge/FlightControlGuard.cs" Link="FlightControlGuard.cs" />
+    <Compile Include="../Bridge/FlightStateService.cs" Link="FlightStateService.cs" />
+    <Compile Include="../Bridge/FlightOperationService.cs" Link="FlightOperationService.cs" />
+    <Compile Include="../Bridge/FlightTakeoverWatcher.cs" Link="FlightTakeoverWatcher.cs" />
+    <Compile Include="../Bridge/MechJebPorts.cs" Link="MechJebPorts.cs" />
+    <Compile Include="../Bridge/MechJebAdapter.cs" Link="MechJebAdapter.cs" />
+    <Compile Include="../Bridge/MechJebJob.cs" Link="MechJebJob.cs" />
+    <Compile Include="../Bridge/MechJebRunner.cs" Link="MechJebRunner.cs" />
+    <Compile Include="../Bridge/MechJebService.cs" Link="MechJebService.cs" />
+    <Compile Include="../Bridge/ManeuverMath.cs" Link="ManeuverMath.cs" />
+    <Compile Include="../Bridge/LaunchPort.cs" Link="LaunchPort.cs" />
+    <Compile Include="../Bridge/SpendCapStore.cs" Link="SpendCapStore.cs" />
+    <Compile Include="../Bridge/LaunchJob.cs" Link="LaunchJob.cs" />
+    <Compile Include="../Bridge/LaunchRunner.cs" Link="LaunchRunner.cs" />
+    <Compile Include="../Bridge/LaunchService.cs" Link="LaunchService.cs" />
+    <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
+    <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../Contracts/Fixtures/grant-fixture.key" Link="Fixtures/grant-fixture.key" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

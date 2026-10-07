@@ -295,13 +295,17 @@ namespace KspControl.Bridge
 
         public void Tick() { lock (gate) CheckExpiry(); }
 
-        /// <summary>Drops suspensions older than 30 days whose generation is below the highest known for the same grant id.</summary>
+        /// <summary>
+        /// Drops suspensions older than 30 days whose generation is below the highest known for the same grant id, and every
+        /// "seen" record older than 30 days (it only guards against an old file returning, and a watcher poll after a restart notes
+        /// the verified generation again). Stop and fault entries of the highest generation are kept.
+        /// </summary>
         public void PruneSuspensions()
         {
             lock (gate)
             {
                 var cutoff = utcNow() - SuspensionRetention;
-                var kept = suspensions.Where(s => !(Age(s) < cutoff && s.Generation < HighestOf(s.GrantId))).ToList();
+                var kept = suspensions.Where(s => !(Age(s) < cutoff && (s.Reason == SeenReason || s.Generation < HighestOf(s.GrantId)))).ToList();
                 if (kept.Count == suspensions.Count) return;
                 suspensions.Clear(); suspensions.AddRange(kept);
                 try { store.Save(suspensions); PersistFailed = false; } catch (Exception) { PersistFailed = true; }

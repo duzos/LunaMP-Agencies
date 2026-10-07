@@ -96,6 +96,9 @@ namespace KspControl.Bridge
         private readonly EditorRevisionTracker tracker;
         private readonly Func<string> worldEpoch;
 
+        /// <summary>Recent snapshots and the last operation, when the operation layer is wired. Null leaves both empty.</summary>
+        public IOperationSummary Operations { get; set; }
+
         public EditorObservationService(IEditorPort port, EditorRevisionTracker tracker, Func<string> worldEpoch)
         {
             this.port = port ?? throw new ArgumentNullException(nameof(port));
@@ -109,6 +112,9 @@ namespace KspControl.Bridge
             var observed = tracker.Observe(true);
             if (!observed.InEditor) return EditorResult.Fail(ControlReasons.EditorUnavailable);
             var idle = EditorIdle.Evaluate(port.FsmState, port.HasSelectedPart, port.ActiveLockIds);
+            // An operation that has been admitted but has not set its lock yet is already running.
+            var busy = idle.Busy.ToList();
+            if (Operations != null && Operations.OperationRunning && !busy.Contains("operation_running")) busy.Add("operation_running");
             var caps = port.Capabilities ?? EditorCapabilities.None();
             var unsaved = port.Unsaved;
             var lastSaved = port.LastSavedName;
@@ -124,9 +130,9 @@ namespace KspControl.Bridge
                 ["facility"] = Str(Text(port.Facility)),
                 ["shipName"] = observed.Ui == null ? JValue.CreateNull() : Str(Text(observed.Ui.Name)),
                 ["unsaved"] = unsaved.HasValue ? (JToken)new JValue(unsaved.Value) : new JValue("unknown"),
-                ["idle"] = idle.Idle,
+                ["idle"] = busy.Count == 0,
                 ["fsmState"] = idle.FsmState == null ? "unavailable" : idle.FsmState,
-                ["busy"] = new JArray(idle.Busy),
+                ["busy"] = new JArray(busy),
                 ["capabilities"] = new JObject
                 {
                     ["fsm"] = EditorCapabilities.Text(caps.Fsm), ["unsavedMarker"] = EditorCapabilities.Text(caps.UnsavedMarker),
@@ -138,8 +144,8 @@ namespace KspControl.Bridge
                     }
                 },
                 ["lastSavedName"] = lastSaved == null ? "unavailable" : (lastSaved == GuardSentinel ? SentinelLastSavedName : Text(lastSaved)),
-                ["recentSnapshots"] = new JArray(),
-                ["lastOperation"] = null,
+                ["recentSnapshots"] = Operations == null ? new JArray() : Operations.RecentSnapshots(),
+                ["lastOperation"] = Operations == null ? JValue.CreateNull() : Operations.LastOperation(),
                 ["operationWindow"] = tracker.Window.ToString().ToLowerInvariant()
             };
             return EditorResult.Ok(data);

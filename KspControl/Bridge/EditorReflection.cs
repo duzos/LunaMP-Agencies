@@ -111,5 +111,51 @@ namespace KspControl.Bridge
             try { name = (string)vesselName.GetValue(editor); return true; }
             catch (Exception) { return false; }
         }
+
+        /// <summary>All four overwrite-guard fields in one read. Null unless every one of them could be read.</summary>
+        public SaveFields TryReadSaveFields(object editor)
+        {
+            if (editor == null || !Capabilities.VesselNameAtLastSave || !Capabilities.VesselNameAtLastSaveSanitized || !Capabilities.UnsavedMarker) return null;
+            try
+            {
+                return new SaveFields((string)vesselName.GetValue(editor), (string)vesselNameSanitized.GetValue(editor),
+                    (int)undoLevel.GetValue(editor), (int)undoIndex.GetValue(editor));
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>
+        /// Writes vesselNameAtLastSave and its sanitised twin. The twin is set directly when its field is writable; otherwise the
+        /// private setter that derives it from the name is called. False when nothing could be written or the guard is unavailable.
+        /// </summary>
+        public bool TryWriteSavedName(object editor, string name, string sanitized)
+        {
+            if (editor == null || !Capabilities.SaveOverwriteGuard) return false;
+            try
+            {
+                vesselName.SetValue(editor, name);
+                if (vesselNameSanitized != null && !vesselNameSanitized.IsInitOnly) vesselNameSanitized.SetValue(editor, sanitized ?? name);
+                else if (setSanitized != null) setSanitized.Invoke(editor, null);
+                else return false;
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>undoIndexAtLastSave = <paramref name="value"/>. False when the undo counters are unavailable.</summary>
+        public bool TryWriteUndoIndex(object editor, int value)
+        {
+            if (editor == null || !Capabilities.UndoIndexAtLastSave) return false;
+            try { undoIndex.SetValue(editor, value); return true; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>undoIndexAtLastSave = undoLevel (KSP's saved state). False when either counter is unavailable.</summary>
+        public bool TryMarkSaved(object editor)
+        {
+            int level, saved;
+            if (!TryReadUndo(editor, out level, out saved)) return false;
+            return TryWriteUndoIndex(editor, level);
+        }
     }
 }

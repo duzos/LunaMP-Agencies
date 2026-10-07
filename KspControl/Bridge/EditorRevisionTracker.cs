@@ -65,6 +65,55 @@ namespace KspControl.Bridge
         public int GraceFingerprintChanges { get; set; }
         /// <summary>Monotonic millisecond stamp of the latest fingerprint change seen while in grace (or when grace began).</summary>
         public long LastGraceChangeAt { get; set; }
+        /// <summary>Which craft keys changed during grace, as "P2|part MODULE#3 key" labels (distinct, at most <see cref="MaxChangedKeys"/>).</summary>
+        public System.Collections.Generic.List<string> GraceChangedKeys { get; } = new System.Collections.Generic.List<string>();
+        public const int MaxChangedKeys = 16;
+    }
+
+    /// <summary>Names the keys that differ between two fingerprint projections, so an unstable settle can say what kept changing.</summary>
+    internal static class ProjectionDiff
+    {
+        public static void Collect(string before, string after, System.Collections.Generic.List<string> into, int max)
+        {
+            var a = Index(before); var b = Index(after);
+            foreach (var kv in b)
+            {
+                string old;
+                if (!a.TryGetValue(kv.Key, out old) || !string.Equals(old, kv.Value, StringComparison.Ordinal)) Add(into, kv.Key, max);
+            }
+            foreach (var kv in a) if (!b.ContainsKey(kv.Key)) Add(into, kv.Key, max);
+        }
+
+        private static void Add(System.Collections.Generic.List<string> into, string key, int max)
+        { if (into.Count < max && !into.Contains(key)) into.Add(key); }
+
+        /// <summary>Maps "part node-path key" to its value. Duplicate keys inside one node keep their order with a #n suffix.</summary>
+        private static System.Collections.Generic.Dictionary<string, string> Index(string projection)
+        {
+            var result = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal);
+            if (string.IsNullOrEmpty(projection)) return result;
+            var part = "header"; var node = ""; var nodeCounts = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var raw in projection.Split('\n'))
+            {
+                if (raw.Length == 0) continue;
+                if (raw.StartsWith("ui:", StringComparison.Ordinal)) { result["ui"] = raw; continue; }
+                if (raw[0] == 'P' && raw.IndexOf('|') > 0 && raw[1] >= '0' && raw[1] <= '9') { part = raw; node = ""; nodeCounts.Clear(); continue; }
+                var trimmed = raw.TrimStart(' ');
+                if (trimmed.Length > 2 && trimmed[0] == '[' && trimmed[trimmed.Length - 1] == ']')
+                {
+                    var name = trimmed.Substring(1, trimmed.Length - 2);
+                    int n; nodeCounts.TryGetValue(name, out n); nodeCounts[name] = ++n;
+                    node = name + "#" + n; continue;
+                }
+                var eq = trimmed.IndexOf('=');
+                if (eq <= 0) continue;
+                var key = part + " " + node + " " + trimmed.Substring(0, eq);
+                var unique = key; var dup = 1;
+                while (result.ContainsKey(unique)) unique = key + "#" + (++dup);
+                result[unique] = trimmed.Substring(eq + 1);
+            }
+            return result;
+        }
     }
 
     internal enum TokenCheck { Fresh, Invalid, Unavailable, Stale }
@@ -204,6 +253,15 @@ namespace KspControl.Bridge
             finally { capturing = was; }
         }
 
+        /// <summary>Runs a read that saves the craft natively (a header read, for example) under the same self-event guard. Default value on failure.</summary>
+        public T Guarded<T>(Func<T> read)
+        {
+            var was = capturing; capturing = true;
+            try { return read(); }
+            catch (Exception) { return default(T); }
+            finally { capturing = was; }
+        }
+
         /// <summary>The identity check only: cheap enough for any read path.</summary>
         public long RefreshGeneration()
         {
@@ -234,7 +292,7 @@ namespace KspControl.Bridge
         {
             window = OperationWindow.Locked;
             report.ObservedEvents = 0; report.HumanInputDuringOperation = false; report.TakeoverDuringGrace = false;
-            report.GraceFingerprintChanges = 0; report.LastGraceChangeAt = 0;
+            report.GraceFingerprintChanges = 0; report.LastGraceChangeAt = 0; report.GraceChangedKeys.Clear();
         }
 
         public void BeginDispatch() { window = OperationWindow.Dispatch; }
@@ -379,6 +437,7 @@ namespace KspControl.Bridge
             var wasBaseline = hasBaseline;
             var uiChanged = wasBaseline && !capture.Ui.Equals(ui);
             var bodyChanged = wasBaseline && !string.Equals(hash, bodyHash, StringComparison.Ordinal);
+            if (bodyChanged && window == OperationWindow.Grace) ProjectionDiff.Collect(bodyText, body, report.GraceChangedKeys, OperationReport.MaxChangedKeys);
             bodyText = body; bodyHash = hash; ui = capture.Ui; fingerprint = Fingerprint(ui); hasBaseline = true;
             if (uiChanged) Change(ChangeKind.Ui);
             if (bodyChanged) Change(ChangeKind.Fingerprint);

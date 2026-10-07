@@ -13,6 +13,15 @@
     <Compile Include="../EditorModel/ValueRule.cs" Link="EditorModel/ValueRule.cs" />
     <Compile Include="../EditorModel/RoundtripVolatileKeys.cs" Link="EditorModel/RoundtripVolatileKeys.cs" />
     <Compile Include="../EditorModel/EditorRevisionToken.cs" Link="EditorModel/EditorRevisionToken.cs" />
+    <Compile Include="../EditorModel/ConstructionCatalog.cs" Link="EditorModel/ConstructionCatalog.cs" />
+    <Compile Include="../EditorModel/CraftPaths.cs" Link="EditorModel/CraftPaths.cs" />
+    <Compile Include="../EditorModel/CraftPlanner.cs" Link="EditorModel/CraftPlanner.cs" />
+    <Compile Include="../EditorModel/GraphDto.cs" Link="EditorModel/GraphDto.cs" />
+    <Compile Include="../EditorModel/PlanHasher.cs" Link="EditorModel/PlanHasher.cs" />
+    <Compile Include="../EditorModel/StackGeometryValidator.cs" Link="EditorModel/StackGeometryValidator.cs" />
+    <Compile Include="../EditorModel/StagingRules.cs" Link="EditorModel/StagingRules.cs" />
+    <Compile Include="../EditorModel/StructuralCraft.cs" Link="EditorModel/StructuralCraft.cs" />
+    <Compile Include="../EditorModel/StructuralCraftValidator.cs" Link="EditorModel/StructuralCraftValidator.cs" />
     <Reference Include="Assembly-CSharp"><HintPath>../../External/KSPLibraries/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>../../External/KSPLibraries/UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>../../External/KSPLibraries/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>

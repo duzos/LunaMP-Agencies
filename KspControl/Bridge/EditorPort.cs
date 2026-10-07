@@ -142,5 +142,66 @@ namespace KspControl.Bridge
         /// <summary>vesselNameAtLastSave, or null when the guard fields are unavailable.</summary>
         string LastSavedName { get; }
         EngineeringData ReadEngineering(int offset, int limit, bool includeDeltaV);
+
+        // ---- operation members (plan R4-section 6.4). Main thread only; each is a thin pass-through to one KSP call. ----
+
+        /// <summary>The editor scene is loaded, the editor object exists and the editor is not restarting (the lease context's SceneReady).</summary>
+        bool SceneReady { get; }
+        /// <summary>EditorDriver.fetch.restartingEditor.</summary>
+        bool RestartingEditor { get; }
+        /// <summary>Every part of the editor craft has started (Part.started, or editorStarted as the alternative).</summary>
+        bool AllPartsStarted { get; }
+        /// <summary>The stock delta-V calculation for the editor craft has completed.</summary>
+        bool DeltaVReady { get; }
+        /// <summary>True while our own operation lock id is in InputLockManager's lock stack.</summary>
+        bool OperationLockHeld { get; }
+        /// <summary>Sets the InputLockManager control locks and the editor Lock, both under <see cref="EditorIdle.OperationLockId"/>. Idempotent.</summary>
+        void SetOperationLock();
+        /// <summary>Removes both locks. Idempotent and safe in any scene.</summary>
+        void ClearOperationLock();
+        /// <summary>The header facts of a live native save (version and _modVersions), or null when it cannot be read. Never throws.</summary>
+        EditorHeader ReadHeader();
+        /// <summary>FlightGlobals.GetUniquepersistentId().</summary>
+        uint NextPersistentId();
+        /// <summary>KSPUtil.SanitizeFilename.</summary>
+        string SanitizeFileName(string name);
+        /// <summary>ShipConstruction.AllPartsFound on the craft file at <paramref name="path"/>. <paramref name="missing"/> names the first problem.</summary>
+        bool AllPartsFound(string path, out string missing);
+        /// <summary>EditorLogic.LoadShipFromFile(path). Synchronous: the whole load happens inside this call. May throw.</summary>
+        void LoadCraftFile(string path);
+        /// <summary>Writes the ship name, description and flag UI fields.</summary>
+        void WriteUi(EditorUi ui);
+        /// <summary>vesselNameAtLastSave, its sanitised twin and the two undo counters, or null when any of them cannot be read.</summary>
+        SaveFields ReadSaveFields();
+        /// <summary>Sets vesselNameAtLastSave and its sanitised twin. False when the fields are unavailable or the write failed.</summary>
+        bool TryWriteSavedName(string name, string sanitized);
+        /// <summary>undoIndexAtLastSave = -1, so KSP treats the craft as unsaved. False when unavailable.</summary>
+        bool TryMarkUnsaved();
+        /// <summary>undoIndexAtLastSave = undoLevel, so KSP treats the craft as saved. False when unavailable.</summary>
+        bool TryMarkSaved();
+        /// <summary>The public EditorLogic.SetBackup(): the fallback that marks the craft modified. False when it could not be called.</summary>
+        bool TrySetBackup();
+        /// <summary>Crew seats as "craftId|seat|name", or null when the manifest cannot be read. Best effort.</summary>
+        IReadOnlyList<string> ReadCrew();
+    }
+
+    /// <summary>The facts of a live native-save header that the renderer copies.</summary>
+    internal sealed class EditorHeader
+    {
+        public string Version { get; }
+        /// <summary>The header _modVersions value, or null when the header has none.</summary>
+        public string ModVersions { get; }
+        public EditorHeader(string version, string modVersions) { Version = version; ModVersions = modVersions; }
+    }
+
+    /// <summary>The private save-bookkeeping fields behind KSP's overwrite prompt and unsaved-changes test.</summary>
+    internal sealed class SaveFields
+    {
+        public string Name { get; }
+        public string Sanitized { get; }
+        public int UndoLevel { get; }
+        public int UndoIndexAtLastSave { get; }
+        public SaveFields(string name, string sanitized, int undoLevel, int undoIndexAtLastSave)
+        { Name = name; Sanitized = sanitized; UndoLevel = undoLevel; UndoIndexAtLastSave = undoIndexAtLastSave; }
     }
 }

@@ -70,8 +70,95 @@ namespace KspControl.BridgeTests
             clock.CostMilliseconds += CaptureCost;
             DuringCapture?.Invoke();
             if (CaptureThrows) throw new InvalidOperationException("save_failed");
+            // Like the Unity adapter: an empty editor has nothing to save.
+            if (Parts == 0) return new EditorCraft(new Pure.ConfigNode(""), ReadUi());
             return new EditorCraft(Pure.ConfigText.Parse(Craft), ReadUi());
         }
+
+        // ---- operation members: scriptable, with every call recorded ----
+
+        public enum LoadMode { Normal, EmptyAfterLoad, Throws }
+        public bool SceneReadyValue = true, Restarting, PartsStarted = true, DeltaVDone = true;
+        public EditorHeader Header = new EditorHeader("1.12.5", "mods:probe-1");
+        public uint PersistentCounter = 5000;
+        public MemoryFiles Files;
+        public HashSet<string> KnownParts;
+        public Action<EditorEventKind> Raise;
+        public LoadMode Mode = LoadMode.Normal;
+        public Action<EditorFake, string> OnLoad;
+        public int LoadCalls, SetBackupCalls, LockSets, LockClears, UiWrites, GuardWrites;
+        public readonly List<string> LoadedPaths = new List<string>();
+        public SaveFields SaveState = new SaveFields("Probe", "Probe", 4, 4);
+        public bool GuardWritesFail, UnsavedMarkerFails;
+        public bool AllPartsFoundResult = true;
+        public List<string> CrewList = new List<string> { "100001|0|Jebediah Kerman" };
+        public string ReleaseLockOnLoad;
+
+        public bool SceneReady => SceneReadyValue && InEditorValue && !Restarting;
+        public bool RestartingEditor => Restarting;
+        public bool AllPartsStarted => PartsStarted;
+        public bool DeltaVReady => DeltaVDone;
+        public bool OperationLockHeld => Locks.Contains(EditorIdle.OperationLockId);
+        public void SetOperationLock() { LockSets++; if (!Locks.Contains(EditorIdle.OperationLockId)) Locks.Add(EditorIdle.OperationLockId); }
+        public void ClearOperationLock() { LockClears++; Locks.Remove(EditorIdle.OperationLockId); }
+        public EditorHeader ReadHeader() { return Header; }
+        public uint NextPersistentId() { return ++PersistentCounter; }
+        public string SanitizeFileName(string name)
+        {
+            var sb = new StringBuilder();
+            foreach (var c in name ?? "") sb.Append(char.IsLetterOrDigit(c) || c == ' ' || c == '.' || c == '_' || c == '-' ? c : '_');
+            return sb.ToString();
+        }
+        public bool AllPartsFound(string path, out string missing)
+        {
+            missing = null;
+            if (!AllPartsFoundResult) { missing = "forced_missing"; return false; }
+            if (KnownParts == null || Files == null) return true;
+            foreach (var part in Pure.ConfigText.Parse(Files.Text(path)).Children("PART"))
+            {
+                var value = part.First("part") ?? "";
+                var name = value.Substring(0, Math.Max(0, value.LastIndexOf('_')));
+                if (!KnownParts.Contains(name)) { missing = name; return false; }
+            }
+            return true;
+        }
+        public void LoadCraftFile(string path)
+        {
+            LoadCalls++; LoadedPaths.Add(path);
+            if (Mode == LoadMode.Throws) throw new InvalidOperationException("load_boom");
+            var text = Files.Text(path);
+            Raise?.Invoke(EditorEventKind.Restart);
+            Ship = new object();
+            if (Mode == LoadMode.EmptyAfterLoad) { Craft = ""; Parts = 0; Fsm = "st_podSelect"; Name = "Untitled Space Craft"; Description = ""; UnsavedValue = false; }
+            else
+            {
+                var node = Pure.ConfigText.Parse(text);
+                Craft = text; Parts = System.Linq.Enumerable.Count(node.Children("PART")); Fsm = "st_idle";
+                Name = node.First("ship") ?? ""; Description = node.First("description") ?? ""; Flag = node.First("missionFlag") ?? Flag;
+                UnsavedValue = false; LastSaved = Name; SaveState = new SaveFields(Name, Name, SaveState.UndoLevel + 1, SaveState.UndoLevel + 1);
+            }
+            Raise?.Invoke(EditorEventKind.SetBackup); Raise?.Invoke(EditorEventKind.ShipModified); Raise?.Invoke(EditorEventKind.Started); Raise?.Invoke(EditorEventKind.Load);
+            OnLoad?.Invoke(this, path);
+        }
+        public void WriteUi(EditorUi ui) { UiWrites++; Name = ui.Name; Description = ui.Description; Flag = ui.FlagUrl; }
+        public SaveFields ReadSaveFields() { return Caps.SaveOverwriteGuard && Caps.UnsavedMarker ? SaveState : null; }
+        public bool TryWriteSavedName(string name, string sanitized)
+        {
+            if (!Caps.SaveOverwriteGuard || GuardWritesFail) return false;
+            GuardWrites++; LastSaved = name; SaveState = new SaveFields(name, sanitized, SaveState.UndoLevel, SaveState.UndoIndexAtLastSave); return true;
+        }
+        public bool TryMarkUnsaved()
+        {
+            if (!Caps.UnsavedMarker || UnsavedMarkerFails) return false;
+            SaveState = new SaveFields(SaveState.Name, SaveState.Sanitized, SaveState.UndoLevel, -1); UnsavedValue = Parts > 0; return true;
+        }
+        public bool TryMarkSaved()
+        {
+            if (!Caps.UnsavedMarker || UnsavedMarkerFails) return false;
+            SaveState = new SaveFields(SaveState.Name, SaveState.Sanitized, SaveState.UndoLevel, SaveState.UndoLevel); UnsavedValue = false; return true;
+        }
+        public bool TrySetBackup() { SetBackupCalls++; UnsavedValue = Parts > 0; return true; }
+        public IReadOnlyList<string> ReadCrew() { return CrewList; }
 
         /// <summary>A three-part craft. Each argument changes exactly one thing the fingerprint must notice.</summary>
         public static string CraftText(string podStage = "-1", string tankStage = "1", string moduleValue = "10", string cryoTime = "100")

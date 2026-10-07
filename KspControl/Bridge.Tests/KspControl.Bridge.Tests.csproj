@@ -28,7 +28,24 @@
     <Compile Include="../EditorModel/ValueRule.cs" Link="EditorModel/ValueRule.cs" />
     <Compile Include="../EditorModel/RoundtripVolatileKeys.cs" Link="EditorModel/RoundtripVolatileKeys.cs" />
     <Compile Include="../EditorModel/EditorRevisionToken.cs" Link="EditorModel/EditorRevisionToken.cs" />
+    <Compile Include="../EditorModel/ConstructionCatalog.cs" Link="EditorModel/ConstructionCatalog.cs" />
+    <Compile Include="../EditorModel/CraftPaths.cs" Link="EditorModel/CraftPaths.cs" />
+    <Compile Include="../EditorModel/CraftPlanner.cs" Link="EditorModel/CraftPlanner.cs" />
+    <Compile Include="../EditorModel/GraphDto.cs" Link="EditorModel/GraphDto.cs" />
+    <Compile Include="../EditorModel/PlanHasher.cs" Link="EditorModel/PlanHasher.cs" />
+    <Compile Include="../EditorModel/StackGeometryValidator.cs" Link="EditorModel/StackGeometryValidator.cs" />
+    <Compile Include="../EditorModel/StagingRules.cs" Link="EditorModel/StagingRules.cs" />
+    <Compile Include="../EditorModel/StructuralCraft.cs" Link="EditorModel/StructuralCraft.cs" />
+    <Compile Include="../EditorModel/StructuralCraftValidator.cs" Link="EditorModel/StructuralCraftValidator.cs" />
     <Compile Include="../Bridge/ConstructionCatalogMapper.cs" Link="ConstructionCatalogMapper.cs" />
+    <Compile Include="../Bridge/OperationFiles.cs" Link="OperationFiles.cs" />
+    <Compile Include="../Bridge/OperationJob.cs" Link="OperationJob.cs" />
+    <Compile Include="../Bridge/SnapshotStore.cs" Link="SnapshotStore.cs" />
+    <Compile Include="../Bridge/ThumbnailHousekeeper.cs" Link="ThumbnailHousekeeper.cs" />
+    <Compile Include="../Bridge/PlanVerifier.cs" Link="PlanVerifier.cs" />
+    <Compile Include="../Bridge/ApplyPlanner.cs" Link="ApplyPlanner.cs" />
+    <Compile Include="../Bridge/EditorOperationRunner.cs" Link="EditorOperationRunner.cs" />
+    <Compile Include="../Bridge/EditorOperationService.cs" Link="EditorOperationService.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
     <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />

@@ -12,7 +12,7 @@ namespace KspControl.Bridge
     /// The thin Unity/KSP adapter behind <see cref="IEditorPort"/>. It only reads the game and shapes values; every decision
     /// lives in the pure editor-state classes. Main thread only. Not linked into the unit-test assembly.
     /// </summary>
-    internal sealed class UnityEditorPort : IEditorPort
+    internal sealed partial class UnityEditorPort : IEditorPort
     {
         private readonly EditorReflection reflection = new EditorReflection(typeof(EditorLogic));
         private const int MaxConfigEntries = 500000;

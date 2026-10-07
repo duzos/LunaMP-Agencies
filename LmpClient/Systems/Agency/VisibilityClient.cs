@@ -128,21 +128,26 @@ namespace LmpClient.Systems.Agency
                     foreach(var id in visibleUntil.Where(p=>p.Value<=now || !alive.Contains(p.Key)).Select(p=>p.Key).ToArray()){visibleUntil.Remove(id);refreshPresentation=true;}
                     foreach(var id in physicsUntil.Where(p=>p.Value<=now || !alive.Contains(p.Key)).Select(p=>p.Key).ToArray()){physicsUntil.Remove(id);refreshPresentation=true;}
                     foreach(var id in sensors.Keys.Where(id=>!alive.Contains(id)).ToArray())sensors.Remove(id);
-                    var samples=new List<VisibilitySensor>();
-                    foreach(var vessel in all)
-                    {
-                        if(!vessel || Owner(vessel.id)!=AgencySystem.Singleton.MyAgencyId || AgencySystem.Singleton.MyAgencyId==Guid.Empty)continue;
-                        var floor=PhysicsRadius(vessel);var power=sensors.TryGetValue(vessel.id,out var cache)&&cache.Expires>now?cache.Power:0;
-                        samples.Add(new VisibilitySensor{Position=Point(vessel),SensorRadius=Math.Max(power,floor),PhysicsRadius=floor});
-                    }
-                    index=new VisibilitySensorIndex(samples);
                 }
+                // Capture sensors, bodies and targets in one main-thread Tick: never mix floating origins.
+                var bodies=FlightGlobals.Bodies;
+                VisibilitySphere[] occluders=null;
+                if(bodies!=null && bodies.Count>0 && bodies.All(body=>body))
+                    occluders=bodies.Select(body=>{var p=body.position;return new VisibilitySphere(new VisibilityPoint(p.x,p.y,p.z),body.Radius);}).ToArray();
+                var samples=new List<VisibilitySensor>();
+                foreach(var vessel in all)
+                {
+                    if(!vessel || Owner(vessel.id)!=AgencySystem.Singleton.MyAgencyId || AgencySystem.Singleton.MyAgencyId==Guid.Empty)continue;
+                    var floor=PhysicsRadius(vessel);var power=sensors.TryGetValue(vessel.id,out var cache)&&cache.Expires>now?cache.Power:0;
+                    samples.Add(new VisibilitySensor{Position=Point(vessel),SensorRadius=VisibilityPolicy.DetectionRadius(power,SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier),PhysicsRadius=floor});
+                }
+                index=new VisibilitySensorIndex(samples);
                 for(var count=0;count<Math.Min(128,all.Count);count++)
                 {
                     if(targetCursor>=all.Count)targetCursor=0;
                     var vessel=all[targetCursor++];if(!vessel)continue;
                     var before=CanSee(vessel.id);var point=Point(vessel);
-                    var inRange=index.InSensorRange(point);
+                    var inRange=index.InSensorRange(point,(sensor,target)=>VisibilityLineOfSight.IsClear(sensor,target,occluders));
                     if(index.InPhysicsRange(point,PhysicsRadius(vessel)))physicsUntil[vessel.id]=now.AddSeconds(1);else physicsUntil.Remove(vessel.id);
                     if(inRange)visibleUntil[vessel.id]=now.AddSeconds(1);else visibleUntil.Remove(vessel.id);
                     var after=CanSee(vessel.id);

@@ -46,6 +46,7 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.AgencyTooling = msgData.AgencyTooling;
             SettingsSystem.ServerSettings.AgencyTrade = msgData.AgencyTrade;
             SettingsSystem.ServerSettings.AgencyHideCraft = msgData.AgencyHideCraft;
+            SettingsSystem.ServerSettings.AgencyDetectionRangeMultiplier = LmpCommon.Agency.VisibilityPolicy.NormalizeDetectionMultiplier(msgData.AgencyDetectionRangeMultiplier);
             SettingsSystem.ServerSettings.ToolingCostMultiplier = msgData.ToolingCostMultiplier;
             SettingsSystem.ServerSettings.TooledLaunchMultiplier = msgData.TooledLaunchMultiplier;
             SettingsSystem.ServerSettings.ToolingCombineMultiplier = msgData.ToolingCombineMultiplier;

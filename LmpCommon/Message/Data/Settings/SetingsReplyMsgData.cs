@@ -85,6 +85,7 @@ namespace LmpCommon.Message.Data.Settings
         public bool AgencyTooling;
         public bool AgencyTrade;
         public bool AgencyHideCraft;
+        public double AgencyDetectionRangeMultiplier = VisibilityPolicy.DefaultDetectionRangeMultiplier;
         public double ToolingCostMultiplier = ToolingDefaults.ToolingCost, TooledLaunchMultiplier = ToolingDefaults.TooledLaunch, ToolingCombineMultiplier = ToolingDefaults.Combine, UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch;
 
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
@@ -166,6 +167,7 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(AgencyTrade);
             lidgrenMsg.Write(AgencyHideCraft);
             lidgrenMsg.Write(UntooledLaunchMultiplier);
+            lidgrenMsg.Write(VisibilityPolicy.NormalizeDetectionMultiplier(AgencyDetectionRangeMultiplier));
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -259,6 +261,7 @@ namespace LmpCommon.Message.Data.Settings
             AgencyTooling = false;
             AgencyTrade = false;
             AgencyHideCraft = false;
+            AgencyDetectionRangeMultiplier = VisibilityPolicy.DefaultDetectionRangeMultiplier;
             ToolingCostMultiplier = ToolingDefaults.ToolingCost; TooledLaunchMultiplier = ToolingDefaults.TooledLaunch; ToolingCombineMultiplier = ToolingDefaults.Combine; UntooledLaunchMultiplier = ToolingDefaults.LegacyUntooledLaunch;
             if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 193)
             {
@@ -269,14 +272,19 @@ namespace LmpCommon.Message.Data.Settings
                 AgencyTrade = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
                 AgencyHideCraft = lidgrenMsg.Position < lidgrenMsg.LengthBits && lidgrenMsg.ReadBoolean();
                 // Appended last: Lidgren does not throw on an over-read in release builds, so only read what is really there.
-                if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 64) UntooledLaunchMultiplier = lidgrenMsg.ReadDouble();
+                if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 64)
+                {
+                    UntooledLaunchMultiplier = lidgrenMsg.ReadDouble();
+                    if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 64)
+                        AgencyDetectionRangeMultiplier = VisibilityPolicy.NormalizeDetectionMultiplier(lidgrenMsg.ReadDouble());
+                }
             }
         }
 
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 35 + sizeof(double) * 4 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 35 + sizeof(double) * 5 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

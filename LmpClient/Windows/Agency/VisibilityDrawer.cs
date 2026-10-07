@@ -27,7 +27,7 @@ namespace LmpClient.Windows.Agency
             if (visibilityAgency != AgencySystem.Singleton.MyAgencyId) { visibilityAgency = AgencySystem.Singleton.MyAgencyId; visibilityCraft = Guid.Empty; }
             if (!VisibilityClient.Ready) { GUILayout.Label("Waiting for craft visibility and ownership data...", visibilityText); return; }
             GUILayout.Label("Choose who can see your agency's craft", visibilityHeading);
-            GUILayout.Label("Private craft still appear inside another agency's sensor or physics range. Sharing reveals them at any distance.", visibilityText);
+            GUILayout.Label("Private craft appear within antenna detection range with a clear planet/moon sight line, or at close physics range. Detection updates as craft move; sharing reveals them at any distance.", visibilityText);
             if (!string.IsNullOrEmpty(VisibilityClient.LatestStatus)) GUILayout.Label(VisibilityClient.LatestStatus, visibilityText);
             visibilityMode = GUILayout.Toolbar(visibilityMode, new[] { "All agency craft", "Individual craft" });
             var owner = AgencySystem.Singleton.AmIOwnerOfMine();

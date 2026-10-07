@@ -8,6 +8,11 @@ namespace LmpCommon.Agency
     public static class VisibilityPolicy
     {
         public const double PhysicsFloor = 2500;
+        public const double DefaultDetectionRangeMultiplier = .01;
+        public static double NormalizeDetectionMultiplier(double value) =>
+            VisibilityPoint.Finite(value) && value > 0 && value <= 1 ? value : DefaultDetectionRangeMultiplier;
+        public static double DetectionRadius(double antennaRange, double multiplier) =>
+            VisibilityPoint.Finite(antennaRange) && antennaRange > 0 ? antennaRange * NormalizeDetectionMultiplier(multiplier) : 0;
         public static bool CanSee(Guid viewer, Guid owner, bool ready, bool agencyShared,
             VisibilityOverride rule, bool inPhysics, bool inSensor)
         {
@@ -30,6 +35,35 @@ namespace LmpCommon.Agency
     {
         public VisibilityPoint Position;
         public double SensorRadius, PhysicsRadius;
+    }
+
+    public struct VisibilitySphere
+    {
+        public readonly VisibilityPoint Center;
+        public readonly double Radius;
+        public VisibilitySphere(VisibilityPoint center, double radius) { Center = center; Radius = radius; }
+    }
+
+    public static class VisibilityLineOfSight
+    {
+        /// <summary>Solid body spheres only; tangency and an outward ray from the surface are clear.</summary>
+        public static bool IsClear(VisibilityPoint start, VisibilityPoint end, IEnumerable<VisibilitySphere> bodies)
+        {
+            if (!start.Valid || !end.Valid || bodies == null) return false;
+            var dx = end.X - start.X; var dy = end.Y - start.Y; var dz = end.Z - start.Z;
+            var lengthSquared = dx * dx + dy * dy + dz * dz;
+            foreach (var body in bodies)
+            {
+                if (!body.Center.Valid || !VisibilityPoint.Finite(body.Radius) || body.Radius <= 0) return false;
+                var x = start.X - body.Center.X; var y = start.Y - body.Center.Y; var z = start.Z - body.Center.Z;
+                var t = lengthSquared == 0 ? 0 : Math.Max(0, Math.Min(1, -(x * dx + y * dy + z * dz) / lengthSquared));
+                x += t * dx; y += t * dy; z += t * dz;
+                // Coordinates are bounded at 1e100, so these products cannot overflow.
+                // A tiny relative tolerance avoids roundoff hiding a surface detector looking outward.
+                if (x * x + y * y + z * z < body.Radius * body.Radius * (1 - 1e-12)) return false;
+            }
+            return true;
+        }
     }
 
     /// <summary>Immutable balanced spatial tree; renderer hooks use cached decisions, not this index directly.</summary>
@@ -70,11 +104,12 @@ namespace LmpCommon.Agency
             node.MinZ = Math.Min(node.MinZ, child.MinZ); node.MaxZ = Math.Max(node.MaxZ, child.MaxZ);
             node.MaxSensor = Math.Max(node.MaxSensor, child.MaxSensor); node.MaxPhysics = Math.Max(node.MaxPhysics, child.MaxPhysics);
         }
-        public bool InSensorRange(VisibilityPoint target) => target.Valid && Query(root, target, false, 0);
+        public bool InSensorRange(VisibilityPoint target, Func<VisibilityPoint, VisibilityPoint, bool> lineOfSight = null) =>
+            target.Valid && Query(root, target, false, 0, lineOfSight);
         public bool InPhysicsRange(VisibilityPoint target, double targetPhysicsRadius = VisibilityPolicy.PhysicsFloor) =>
-            target.Valid && Query(root, target, true, Math.Max(VisibilityPolicy.PhysicsFloor, Radius(targetPhysicsRadius)));
+            target.Valid && Query(root, target, true, Math.Max(VisibilityPolicy.PhysicsFloor, Radius(targetPhysicsRadius)), null);
         private static double Outside(double value, double min, double max) => value < min ? min - value : value > max ? value - max : 0;
-        private static bool Query(Node node, VisibilityPoint target, bool physics, double floor)
+        private static bool Query(Node node, VisibilityPoint target, bool physics, double floor, Func<VisibilityPoint, VisibilityPoint, bool> lineOfSight)
         {
             if (node == null) return false;
             var radius = physics ? Math.Max(node.MaxPhysics, floor) : node.MaxSensor;
@@ -84,8 +119,9 @@ namespace LmpCommon.Agency
             var position = node.Sensor.Position;
             radius = physics ? Math.Max(node.Sensor.PhysicsRadius, floor) : node.Sensor.SensorRadius;
             dx = target.X - position.X; dy = target.Y - position.Y; dz = target.Z - position.Z;
-            if (radius > 0 && dx * dx + dy * dy + dz * dz <= radius * radius) return true;
-            return Query(node.Left, target, physics, floor) || Query(node.Right, target, physics, floor);
+            if (radius > 0 && dx * dx + dy * dy + dz * dz <= radius * radius &&
+                (lineOfSight == null || lineOfSight(position, target))) return true;
+            return Query(node.Left, target, physics, floor, lineOfSight) || Query(node.Right, target, physics, floor, lineOfSight);
         }
     }
 }

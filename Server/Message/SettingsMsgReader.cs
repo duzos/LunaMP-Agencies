@@ -51,6 +51,7 @@ namespace Server.Message
             msgData.AgencyTooling = GeneralSettings.SettingsStore.AgencyTooling;
             msgData.AgencyTrade = GeneralSettings.SettingsStore.AgencyTrade;
             msgData.AgencyHideCraft = GeneralSettings.SettingsStore.AgencyHideCraft;
+            msgData.AgencyDetectionRangeMultiplier = LmpCommon.Agency.VisibilityPolicy.NormalizeDetectionMultiplier(GeneralSettings.SettingsStore.AgencyDetectionRangeMultiplier);
             msgData.ToolingCostMultiplier = GeneralSettings.SettingsStore.ToolingCostMultiplier;
             msgData.TooledLaunchMultiplier = GeneralSettings.SettingsStore.TooledLaunchMultiplier;
             msgData.ToolingCombineMultiplier = GeneralSettings.SettingsStore.ToolingCombineMultiplier;

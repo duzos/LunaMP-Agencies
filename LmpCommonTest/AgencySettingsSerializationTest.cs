@@ -9,6 +9,45 @@ namespace LmpCommonTest
     [TestClass]
     public class AgencySettingsSerializationTest
     {
+        [DataTestMethod]
+        [DataRow(0)]
+        [DataRow(1)]
+        [DataRow(64)]
+        public void DetectionMultiplierRoundTripsOrResetsForOldAndPartialTails(int missingBits)
+        {
+            var factory = new ServerMessageFactory();
+            var peer = new NetClient(new NetPeerConfiguration("DetectionSettings"));
+            var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            source.AgencyDetectionRangeMultiplier = .2;
+            source.UntooledLaunchMultiplier = 4;
+            var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
+            var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
+            incoming.LengthBits = outgoing.LengthBits - missingBits;
+            var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            parsed.AgencyDetectionRangeMultiplier = .9;
+            parsed.Deserialize(incoming);
+            Assert.AreEqual(4d, parsed.UntooledLaunchMultiplier);
+            Assert.AreEqual(missingBits == 0 ? .2 : .01, parsed.AgencyDetectionRangeMultiplier);
+        }
+
+        [DataTestMethod]
+        [DataRow(0d)]
+        [DataRow(-1d)]
+        [DataRow(2d)]
+        [DataRow(double.NaN)]
+        [DataRow(double.PositiveInfinity)]
+        public void InvalidDetectionMultiplierIsNormalizedOnWire(double value)
+        {
+            var factory = new ServerMessageFactory();
+            var peer = new NetClient(new NetPeerConfiguration("InvalidDetectionSettings"));
+            var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            source.AgencyDetectionRangeMultiplier = value;
+            var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
+            var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
+            incoming.LengthBits = outgoing.LengthBits;
+            var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>(); parsed.Deserialize(incoming);
+            Assert.AreEqual(.01, parsed.AgencyDetectionRangeMultiplier);
+        }
         // Locate the first agency flag by changing only that bit. This keeps historical
         // fixtures stable when more independent flags are appended in later features.
         private static int AgencyTailStart(NetClient peer, SettingsReplyMsgData settings, NetOutgoingMessage original)
@@ -204,7 +243,7 @@ namespace LmpCommonTest
             var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
             // A server without the setting stops after the hide-craft flag; a double that is not fully there must not be half read either.
-            incoming.LengthBits = outgoing.LengthBits - missingTrailingBits;
+            incoming.LengthBits = outgoing.LengthBits - 64 - missingTrailingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>(); parsed.UntooledLaunchMultiplier = 9;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyTooling); Assert.IsTrue(parsed.AgencyTrade); Assert.IsTrue(parsed.AgencyHideCraft);
@@ -216,6 +255,7 @@ namespace LmpCommonTest
         public void NewMessagesDefaultToTheShippedRates()
         {
             var settings = new ServerMessageFactory().CreateNewMessageData<SettingsReplyMsgData>();
+            Assert.AreEqual(.01, settings.AgencyDetectionRangeMultiplier);
             Assert.AreEqual(ToolingDefaults.ToolingCost, settings.ToolingCostMultiplier); Assert.AreEqual(ToolingDefaults.TooledLaunch, settings.TooledLaunchMultiplier);
             Assert.AreEqual(ToolingDefaults.UntooledLaunch, settings.UntooledLaunchMultiplier); Assert.AreEqual(ToolingDefaults.Combine, settings.ToolingCombineMultiplier);
         }

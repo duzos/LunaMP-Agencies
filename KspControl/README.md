@@ -218,8 +218,9 @@ DLLs; it requires the matching LunaMP client facade and existing Newtonsoft.Json
 ## MechJeb autopilot (P3b)
 
 Tools: `mechjeb_status` (read-only, no lease), `mechjeb_ascent`, `mechjeb_execute_node`, `mechjeb_plan_circularize`, `mechjeb_plan_hohmann_to_target`.
-Every mutation needs a lease taken in the flight scene and a grant that lists `flight.autopilot` (a family granted per scene: the grant's entities gain
-`scene:FLIGHT`, the effect recipient is `flight:vessel`). It is not in the CLI's default operations: `grant issue --ops editor.replace_craft,flight.autopilot`.
+Every mutation needs a lease taken in the flight scene and a grant that lists `flight.autopilot` with the `FLIGHT` facility: the facility maps to the entity
+`vessel:*`, the lease entity is `vessel:<guid>` of the active vessel (a vessel switch revokes it), and admission also checks that the lease vessel is the active one.
+The host journal entity is `flight:vessel`. The family is not in the CLI's default operations: `grant issue --ops flight.autopilot --facilities FLIGHT`.
 `GrantCli.OperationFamilies` lists the operations a grant may name; an unknown name is rejected. Jobs go through the same host journal as the editor
 mutations and are followed with `job_status` (the host polls `flight.autopilot_status` for them).
 
@@ -237,6 +238,12 @@ MechJeb to end its own circularization (up to 2 minutes) and completes with `asc
 
 **Safety.** Admission refuses with `competing_controller` if any other MechJeb autopilot or support module has a user or AtmosphereAutopilot has an active
 module (an unreadable AtmosphereAutopilot fails closed). Each frame the runner revalidates the authority, the vessel id and the controls before it reads MechJeb:
+Every MechJeb, AtmosphereAutopilot and throttle call names the vessel the job was admitted on (never whichever is active now); the throttle of the live input state is only
+touched while that vessel is still active. A user counts as ours if it is the bridge user, the ascent window module the ascent is engaged through (so MechJeb's own
+Disengage button stops it; switching it off before orbit is a takeover), or a MechJeb module whose user set contains ours, which is how the ascent hands over to the node
+executor and attitude controller. Attitude, thrust and rover are scanned for foreign users on every pass. The node executor is aborted only when nobody else holds it, and
+its Autowarp is restored on release. An orbit needs periapsis above the higher of the atmosphere top and the body's safe altitude (`minOrbitalDistance - radius`), and a target at
+or below that safe altitude is refused; when MechJeb has ended, the orbit is judged at once.
 Stop (button, hotkey, same call) and any loss of authority remove the user, abort the executor and cut the throttle at once; a switch of vessel or scene ends the job;
 two consecutive frames of flight-control input (keys or axes), another user entering the module, or another controller engaging is a human takeover
 (`human_input_during_operation`, `ExecutionAuthority.HumanTakeover`, lease revoked, 30 s cooldown, throttle cut).

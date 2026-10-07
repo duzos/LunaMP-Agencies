@@ -46,7 +46,7 @@ public sealed class JournalAccess : IDisposable
    var grantInfo=status?["grant"] as JObject;
    var operations=(grantInfo?["operations"] as JArray)?.Select(t=>(string)t!).ToArray() ?? Array.Empty<string>();
    var entities=(grantInfo?["facilities"] as JArray)?.Select(t=>(string)t! is FlightEffects.Facility ? FlightEffects.JournalEntity : "editor:"+(string)t!).ToArray() ?? Array.Empty<string>();
-   DateTimeOffset expires=DateTimeOffset.TryParse((string?)grantInfo?["expiresUtc"],out var parsed) ? parsed : DateTimeOffset.UtcNow.AddMinutes(5);
+   DateTimeOffset expires=ReadUtc(grantInfo?["expiresUtc"]) ?? DateTimeOffset.UtcNow.AddMinutes(5);
    // The cap is the human's: the bridge verified the signed grant and reports its spendLimitFunds. Absent means no spend is authorised.
    // The live cap is the smaller of the signed limit and the bridge's standing cap (min(100000, 25% of the balance at the first acquire)); a grant that
    // lists launch but has no standing cap yet (balance unknown) authorises nothing.
@@ -59,6 +59,13 @@ public sealed class JournalAccess : IDisposable
    j.Revoke();
    j.Acquire(leaseId,(string?)data["purpose"]??"unspecified",epoch,DateTimeOffset.UtcNow,TimeSpan.FromSeconds(Math.Clamp(seconds,1,300)));
   } catch(Exception) { /* audit mirror only */ }
+ }
+ /// <summary>JObject.Parse turns ISO timestamps into Date tokens; read those directly and parse strings invariantly, never through the current culture.</summary>
+ private static DateTimeOffset? ReadUtc(JToken? token)
+ {
+  if(token==null) return null;
+  if(token.Type==JTokenType.Date) return token.Value<DateTime>() is var d ? new DateTimeOffset(d.Kind==DateTimeKind.Unspecified ? DateTime.SpecifyKind(d,DateTimeKind.Utc) : d.ToUniversalTime()) : null;
+  return DateTimeOffset.TryParse((string?)token,System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.AssumeUniversal|System.Globalization.DateTimeStyles.AdjustToUniversal,out var parsed) ? parsed : null;
  }
  public void MirrorRenew(string leaseId,int seconds)
  { try { TryGet()?.Renew(leaseId,DateTimeOffset.UtcNow,TimeSpan.FromSeconds(Math.Clamp(seconds,1,300))); } catch(Exception) { } }

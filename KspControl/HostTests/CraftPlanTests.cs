@@ -12,18 +12,58 @@ internal sealed class FakeCatalog : ICatalogFetcher
 {
  public readonly Dictionary<string,JObject> Parts=new(StringComparer.Ordinal);
  public readonly List<string[]> Calls=new();
+ public readonly List<string?> Epochs=new();
  public bool ResearchAbsent;
+ public bool Sandbox=true;
+ /// <summary>Simulates a world change after the first chunk: later calls that carry the first epoch get stale_world.</summary>
+ public bool WorldChangesAfterFirstCall;
+ /// <summary>Simulates the research state flipping after the first chunk.</summary>
+ public bool ResearchFlipsAfterFirstCall;
+ /// <summary>Drops this name from every reply, or repeats it when <see cref="RepeatName"/> is set.</summary>
+ public string? DropName; public string? RepeatName;
  public Func<BridgeResponse?>? Override;
- public Task<string> FetchAsync(IReadOnlyList<string> partNames,CancellationToken cancellationToken)
+ public Task<string> FetchAsync(IReadOnlyList<string> partNames,string? expectedWorldEpoch,CancellationToken cancellationToken)
  {
-  Calls.Add(partNames.ToArray());
+  Calls.Add(partNames.ToArray()); Epochs.Add(expectedWorldEpoch);
   if(Override?.Invoke() is { } forced) return Task.FromResult(JsonConvert.SerializeObject(forced));
-  var parts=new JArray(partNames.Select(n => Parts.TryGetValue(n,out var p) ? (JToken)p.DeepClone() : new JObject { ["name"]=n,["found"]=false }));
+  string epoch=WorldChangesAfterFirstCall && Calls.Count>1 ? "epoch-2" : "epoch-1";
+  if(expectedWorldEpoch!=null && expectedWorldEpoch!=epoch) return Task.FromResult(JsonConvert.SerializeObject(new BridgeResponse { Status="failed",ReasonCode="stale_world",WorldEpoch=epoch }));
+  var items=partNames.Where(n => n!=DropName).Select(n => Parts.TryGetValue(n,out var p) ? (JToken)p.DeepClone() : new JObject { ["name"]=n,["found"]=false }).ToList();
+  if(RepeatName!=null && partNames.Contains(RepeatName)) items.Add(items.First(t => (string?)t["name"]==RepeatName).DeepClone());
+  var research=ResearchAbsent ? (Sandbox ? "absent_sandbox_allowed" : "unreadable") : (ResearchFlipsAfterFirstCall && Calls.Count>1 ? "absent_sandbox_allowed" : "available");
   return Task.FromResult(JsonConvert.SerializeObject(new BridgeResponse
   {
-   Status="completed",WorldEpoch="epoch-1",Revision=1,
-   Data=new JObject { ["requested"]=partNames.Count,["researchAndDevelopment"]=ResearchAbsent ? "absent_sandbox_allowed" : "available",["parts"]=parts }
+   Status="completed",WorldEpoch=epoch,Revision=1,
+   Data=new JObject { ["requested"]=partNames.Count,["researchAndDevelopment"]=research,["parts"]=new JArray(items) }
   }));
+ }
+}
+
+/// <summary>Serves catalog replies produced by the REAL bridge mapper (linked into this test project) with the default verified-support policy.</summary>
+internal sealed class MapperBackedCatalog(FakeCatalog source) : ICatalogFetcher
+{
+ private sealed class Reader(FakeCatalog source) : KspControl.Bridge.ICatalogPartReader
+ {
+  public bool ResearchAvailable => true; public bool SandboxMode => false;
+  public KspControl.Bridge.CatalogPartSource? Read(string name)
+  {
+   if(!source.Parts.TryGetValue(name,out var p)) return null;
+   var cat=(string)p["category"]!;
+   var part=new KspControl.Bridge.CatalogPartSource { Name=name,KspCategory="Propulsion",Buildable=true,TechAvailable=true,ModelPurchased=true,
+    ModuleNames=cat switch { "command" => new[] { "ModuleCommand" },"engine" => new[] { "ModuleEnginesFX" },"decoupler" => new[] { "ModuleDecouple" },_ => new string[0] },
+    ResourceNames=cat=="tank" ? new[] { "LiquidFuel" } : new string[0] };
+   foreach(var n in (JArray)p["stackNodes"]!)
+    part.StackNodes.Add(new KspControl.Bridge.CatalogNodeSource { Id=(string)n["id"]!,Position=new double[] { 0,(double)n["position"]![1]!,0 },Orientation=new double[] { 0,(double)n["orientation"]![1]!,0 },Size=1 });
+   var rules=(JObject)p["attachRules"]!;
+   part.AttachRules=new KspControl.Bridge.CatalogAttachRulesSource { Stack=(bool)rules["stack"]!,Srf=(bool)rules["srf"]!,AllowStack=(bool)rules["allowStack"]!,AllowSrf=(bool)rules["allowSrf"]! };
+   if(p["surfaceNode"] is JObject) part.SurfaceNode=new KspControl.Bridge.CatalogNodeSource { Id="srfAttach",Position=new double[] { 0,0,0 },Orientation=new double[] { 1,0,0 } };
+   return part;
+  }
+ }
+ public Task<string> FetchAsync(IReadOnlyList<string> partNames,string? expectedWorldEpoch,CancellationToken cancellationToken)
+ {
+  var data=KspControl.Bridge.ConstructionCatalogMapper.Build(partNames.ToList(),new Reader(source),KspControl.Bridge.ConstructionSupportPolicy.Default);
+  return Task.FromResult(JsonConvert.SerializeObject(new BridgeResponse { Status="completed",WorldEpoch="mapped-epoch",Data=data }));
  }
 }
 
@@ -37,11 +77,16 @@ internal static class CatalogFx
   ["surfaceNode"]=srf ? new JObject { ["position"]=new JArray(0,0,0),["orientation"]=new JArray(1,0,0) } : JValue.CreateNull(),
   ["attachRules"]=new JObject { ["stack"]=true,["srf"]=srf,["allowStack"]=true,["allowSrf"]=true,["allowCollision"]=false,["allowDock"]=false }
  };
- /// <summary>Stock node values from the S0 twin and PlannerTests. radialDecoupler, solidBooster.sm.v2 and pointyNoseConeB are fixtures: their cfgs were not readable here.</summary>
+ /// <summary>Parts whose node values are invented placeholders (their cfgs were not readable). They carry "fixtureValues": true and the real bridge policy never verifies them.</summary>
+ public static readonly string[] PlaceholderParts={ "radialDecoupler","solidBooster.sm.v2","pointyNoseConeB" };
+ /// <summary>
+ /// Stock node values from the S0 twin and PlannerTests. radialDecoupler, solidBooster.sm.v2 and pointyNoseConeB are PLACEHOLDER fixtures.
+ /// This catalog marks every part <paramref name="support"/> so planner behaviour can be tested; see ConstructionSupportPolicy.Default tests for what the bridge really reports.
+ /// </summary>
  public static FakeCatalog Stock(string support="verified")
  {
   var c=new FakeCatalog();
-  void Add(JObject p) => c.Parts[(string)p["name"]!]=p;
+  void Add(JObject p) { if(PlaceholderParts.Contains((string)p["name"]!)) p["fixtureValues"]=true; c.Parts[(string)p["name"]!]=p; }
   Add(Part("mk1pod.v2","command",support:support,nodes:new[] { ("bottom",-0.4050379,-1.0),("top",0.6423756,1.0) }));
   Add(Part("probeCoreOcto.v2","command",support:support,nodes:new[] { ("bottom",-0.1870818,-1.0),("top",0.1870818,1.0) }));
   Add(Part("fuelTankSmall","tank",support:support,nodes:new[] { ("top",0.55525,1.0),("bottom",-0.55525,-1.0) }));
@@ -69,7 +114,7 @@ internal static class CatalogFx
 
 [TestClass] public class CraftPlanTests
 {
- private static async Task<JObject> Plan(GraphDto g,FakeCatalog c) => JObject.Parse(await CraftPlanService.PlanAsync(CatalogFx.Json(g),c,CancellationToken.None));
+ private static async Task<JObject> Plan(GraphDto g,ICatalogFetcher c) => JObject.Parse(await CraftPlanService.PlanAsync(CatalogFx.Json(g),c,CancellationToken.None));
  private static JObject Data(JObject reply) { Assert.AreEqual("completed",(string?)reply["Status"]); return (JObject)reply["Data"]!; }
  private static string[] Codes(JObject data) => ((JArray)data["issues"]!).Select(i => (string)i["code"]!).ToArray();
 
@@ -92,7 +137,7 @@ internal static class CatalogFx
  [TestMethod] public async Task HostPlanEqualsThePurePlannerOnTheSameCatalog()
  {
   var fake=CatalogFx.Stock(); var data=Data(await Plan(CatalogFx.Pod(),fake));
-  var fetch=new CatalogFetch(); Assert.IsTrue(CatalogWire.TryParse(JObject.Parse(await fake.FetchAsync(new[] { "mk1pod.v2","fuelTankSmall","liquidEngine.v2" },default))["Data"] as JObject,new[] { "mk1pod.v2","fuelTankSmall","liquidEngine.v2" },fetch,out var err),err);
+  var fetch=new CatalogFetch(); Assert.IsTrue(CatalogWire.TryParse(JObject.Parse(await fake.FetchAsync(new[] { "mk1pod.v2","fuelTankSmall","liquidEngine.v2" },null,default))["Data"] as JObject,new[] { "mk1pod.v2","fuelTankSmall","liquidEngine.v2" },fetch,out var err),err);
   var catalog=new ConstructionCatalog(); foreach(var e in fetch.Found.Values) catalog.Add(e.Part);
   var direct=CraftPlanner.Plan(CatalogFx.Pod(),catalog); Assert.IsTrue(direct.Ok);
   Assert.AreEqual(catalog.Hash(),(string?)data["catalogHash"]); Assert.AreEqual(PlanHasher.Hash(CatalogFx.Pod(),direct,catalog.Hash()),(string?)data["planHash"]);
@@ -300,6 +345,102 @@ internal static class CatalogFx
   Assert.AreEqual("other",(string?)((JArray)data["parts"]!).First(p => (string?)p["part"]=="pointyNoseConeB")["category"]);
  }
 
+ [TestMethod] public async Task LaterChunksCarryTheFirstChunksWorldEpoch()
+ {
+  var fake=CatalogFx.Stock(); var g=new GraphDto { Name="Long",Facility="VAB",Root="p0" };
+  g.Parts.Add(new() { Id="p0",Part="mk1pod.v2" }); string prev="p0";
+  for(int i=1;i<=40;i++) { fake.Parts["tank"+i]=CatalogFx.Part("tank"+i,"tank",nodes:new[] { ("top",0.5,1.0),("bottom",-0.5,-1.0) }); g.Parts.Add(new() { Id="p"+i,Part="tank"+i,Parent=prev,ParentNode="bottom",Node="top" }); prev="p"+i; }
+  var data=Data(await Plan(g,fake));
+  CollectionAssert.AreEqual(new string?[] { null,"epoch-1" },fake.Epochs.ToArray());
+  Assert.AreEqual("epoch-1",(string?)data["catalog"]!["worldEpoch"]);
+ }
+
+ [TestMethod] public async Task WorldChangeBetweenChunksIsStaleWorld()
+ {
+  var fake=CatalogFx.Stock(); fake.WorldChangesAfterFirstCall=true; var g=new GraphDto { Name="Long",Facility="VAB",Root="p0" };
+  g.Parts.Add(new() { Id="p0",Part="mk1pod.v2" }); string prev="p0";
+  for(int i=1;i<=40;i++) { fake.Parts["tank"+i]=CatalogFx.Part("tank"+i,"tank",nodes:new[] { ("top",0.5,1.0),("bottom",-0.5,-1.0) }); g.Parts.Add(new() { Id="p"+i,Part="tank"+i,Parent=prev,ParentNode="bottom",Node="top" }); prev="p"+i; }
+  var reply=JObject.Parse(await CraftPlanService.PlanAsync(CatalogFx.Json(g),fake,default));
+  Assert.AreEqual("failed",(string?)reply["Status"]); Assert.AreEqual("stale_world",(string?)reply["ReasonCode"]);
+ }
+
+ [TestMethod] public async Task ResearchStateChangingBetweenChunksIsProtocolInvalid()
+ {
+  var fake=CatalogFx.Stock(); fake.ResearchFlipsAfterFirstCall=true; var g=new GraphDto { Name="Long",Facility="VAB",Root="p0" };
+  g.Parts.Add(new() { Id="p0",Part="mk1pod.v2" }); string prev="p0";
+  for(int i=1;i<=40;i++) { fake.Parts["tank"+i]=CatalogFx.Part("tank"+i,"tank",nodes:new[] { ("top",0.5,1.0),("bottom",-0.5,-1.0) }); g.Parts.Add(new() { Id="p"+i,Part="tank"+i,Parent=prev,ParentNode="bottom",Node="top" }); prev="p"+i; }
+  var reply=JObject.Parse(await CraftPlanService.PlanAsync(CatalogFx.Json(g),fake,default));
+  Assert.AreEqual("protocol_invalid",(string?)reply["ReasonCode"]); StringAssert.Contains((string?)reply["Data"]!["detail"],"research");
+ }
+
+ [TestMethod] public async Task RequestedNameAbsentFromTheReplyIsMissing()
+ {
+  var fake=CatalogFx.Stock(); fake.DropName="fuelTankSmall";
+  var data=Data(await Plan(CatalogFx.Pod(),fake));
+  CollectionAssert.Contains(Codes(data),"unknown_part");
+  CollectionAssert.AreEqual(new[] { "fuelTankSmall" },((JArray)data["catalog"]!["missing"]!).Select(t => (string)t!).ToArray());
+ }
+
+ [TestMethod] public async Task DuplicateReplyEntriesAreProtocolInvalid()
+ {
+  var fake=CatalogFx.Stock(); fake.RepeatName="mk1pod.v2";
+  var reply=JObject.Parse(await CraftPlanService.PlanAsync(CatalogFx.Json(CatalogFx.Pod()),fake,default));
+  Assert.AreEqual("protocol_invalid",(string?)reply["ReasonCode"]);
+ }
+
+ [TestMethod] public async Task UnreadableResearchStateBlocksPartsAsNotAllowed()
+ {
+  var fake=CatalogFx.Stock(); fake.ResearchAbsent=true; fake.Sandbox=false;
+  foreach(var p in fake.Parts.Values) { p["partsStockAllowed"]=false; p["stockAllowedBasis"]="research_state_unreadable"; }
+  var data=Data(await Plan(CatalogFx.Pod(),fake));
+  Assert.IsFalse((bool)data["ok"]!); Assert.AreEqual(3,Codes(data).Count(c => c=="part_locked")); Assert.AreEqual("unreadable",(string?)data["catalog"]!["researchAndDevelopment"]);
+ }
+
+ [TestMethod] public async Task T3WithTheRealDefaultSupportPolicyIsRefusedAsUnverified()
+ {
+  var data=Data(await Plan(CatalogFx.T3(2),new MapperBackedCatalog(CatalogFx.Stock())));
+  Assert.IsFalse((bool)data["ok"]!);
+  var unverified=((JArray)data["issues"]!).Where(i => (string?)i["code"]=="part_construction_unverified").Select(i => (string)i["partId"]!).OrderBy(x => x).ToArray();
+  CollectionAssert.AreEqual(new[] { "cone","rd","srb" },unverified);
+  CollectionAssert.AreEquivalent(new[] { "radialDecoupler","solidBooster.sm.v2","pointyNoseConeB" },((JArray)data["catalog"]!["unverified"]!).Select(t => (string)t!).ToArray());
+ }
+
+ [TestMethod] public async Task T1AndT2WithTheRealDefaultSupportPolicyAreAccepted()
+ {
+  foreach(var g in new[] { CatalogFx.T1(),CatalogFx.Pod(),CatalogFx.T2() })
+  {
+   var data=Data(await Plan(g,new MapperBackedCatalog(CatalogFx.Stock())));
+   Assert.IsTrue((bool)data["ok"]!,g.Name+": "+string.Join(",",Codes(data)));
+  }
+ }
+
+ [DataTestMethod]
+ [DataRow("{\"name\":\"x\",\"Name\":\"y\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\"}]}","unknown member")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"Part\":\"p\"}]}","unknown member")]
+ [DataRow("{/*c*/\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\"}]}","comments")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\"}]} // tail","comments")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"symmetry\":\"2\"}]}","symmetry must be an integer")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"symmetry\":2.0}]}","symmetry must be an integer")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"stage\":true}]}","stage must be an integer")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"surface\":{\"heightOffset\":\"1\"}}]}","heightOffset must be a number")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"surface\":{\"angle\":1}}]}","unknown member")]
+ [DataRow("{\"name\":5,\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\"}]}","name must be a string")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":{}}","parts must be an array")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"configuration\":\"x\"}]}","configuration must be an array")]
+ [DataRow("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\"}]} {}","valid graph JSON")]
+ public async Task StrictGraphParsingRejectsCoercionCommentsAndCaseVariants(string json,string detail)
+ {
+  var fake=CatalogFx.Stock();
+  var reply=JObject.Parse(await CraftPlanService.PlanAsync(json,fake,default));
+  Assert.AreEqual("invalid_argument",(string?)reply["ReasonCode"]); StringAssert.Contains((string?)reply["Data"]!["detail"],detail); Assert.AreEqual(0,fake.Calls.Count);
+ }
+
+ [TestMethod] public void StrictParsingStillAcceptsWellFormedGraphsWithIntegralAndFractionalNumbers()
+ {
+  var g=CraftPlanService.ParseGraph("{\"name\":\"x\",\"facility\":\"VAB\",\"root\":\"a\",\"parts\":[{\"id\":\"a\",\"part\":\"p\",\"symmetry\":2,\"stage\":1,\"surface\":{\"heightOffset\":1,\"angleDegrees\":90.5},\"configuration\":[]}]}",out var error);
+  Assert.IsNotNull(g,error); Assert.AreEqual(1.0,g!.Parts[0].Surface!.HeightOffset); Assert.AreEqual(90.5,g.Parts[0].Surface!.AngleDegrees); Assert.AreEqual(2,g.Parts[0].Symmetry);
+ }
+
  [TestMethod] public void ConstructionCatalogIsAReadOperationAndNotAControlOperation()
  {
   Assert.IsTrue(BridgeClient.ReadOperations.Contains(ConstructionOperations.Catalog));
@@ -314,13 +455,21 @@ internal static class CatalogFx
   {
    Assert.AreEqual(ConstructionOperations.Catalog,r.Operation);
    var names=((JArray)r.Arguments["partNames"]!).Select(t => (string)t!).ToArray();
-   return FakeBridge.Ok(new JObject { ["researchAndDevelopment"]="available",["parts"]=new JArray(names.Select(n => (JToken)stock.Parts[n])) });
+   var reply=FakeBridge.Ok(new JObject { ["researchAndDevelopment"]="available",["parts"]=new JArray(names.Select(n => (JToken)stock.Parts[n])) }); reply.WorldEpoch="loop-epoch"; return reply;
   });
   var tools=new CraftPlanTools(new BridgeCatalogFetcher(new BridgeClient()));
   var data=Data(JObject.Parse(await tools.CraftPlan(CatalogFx.Json(CatalogFx.Pod()))));
   Assert.IsTrue((bool)data["ok"]!,string.Join(",",Codes(data)));
   Assert.AreEqual(1,bridge.Requests.Count);
   CollectionAssert.AreEquivalent(new[] { "mk1pod.v2","fuelTankSmall","liquidEngine.v2" },((JArray)bridge.Requests[0].Arguments["partNames"]!).Select(t => (string)t!).ToArray());
+ }
+
+ [TestMethod] [DoNotParallelize] public async Task ReadAsyncSendsTheExpectedWorldEpoch()
+ {
+  using var bridge=new FakeBridge(r => FakeBridge.Ok(new JObject()));
+  await new BridgeClient().ReadAsync(ConstructionOperations.Catalog,new JObject { ["partNames"]=new JArray("a") },default,"epoch-x");
+  await new BridgeClient().ReadAsync(ConstructionOperations.Catalog,new JObject { ["partNames"]=new JArray("a") },default);
+  Assert.AreEqual("epoch-x",bridge.Requests[0].ExpectedWorldEpoch); Assert.IsNull(bridge.Requests[1].ExpectedWorldEpoch);
  }
 
  [TestMethod] [DoNotParallelize] public async Task LoopbackBridgeRefusalReachesTheCaller()

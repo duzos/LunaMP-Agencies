@@ -17,10 +17,10 @@ public sealed class BridgeClient
  public static readonly IReadOnlySet<string> MutationOperations = new HashSet<string>(StringComparer.Ordinal);
  private static readonly TimeSpan DefaultTimeout=TimeSpan.FromSeconds(10);
 
- public async Task<string> ReadAsync(string operation, JObject? arguments, CancellationToken cancellationToken)
+ public async Task<string> ReadAsync(string operation, JObject? arguments, CancellationToken cancellationToken, string? expectedWorldEpoch = null)
  {
   if (!ReadOperations.Contains(operation)) throw new ArgumentException("unsupported_operation");
-  return await Call(operation,null,arguments,DefaultTimeout,cancellationToken);
+  return await Call(operation,null,arguments,DefaultTimeout,cancellationToken,expectedWorldEpoch);
  }
  /// <summary>Runs an inline control operation. <paramref name="timeout"/> bounds connect, write and read together.</summary>
  public async Task<string> ControlAsync(string operation, string? leaseId, JObject? arguments, TimeSpan timeout, CancellationToken cancellationToken)
@@ -28,9 +28,9 @@ public sealed class BridgeClient
   if (!ControlOperationSet.Contains(operation)) throw new ArgumentException("unsupported_operation");
   return await Call(operation,leaseId,arguments,timeout,cancellationToken);
  }
- private async Task<string> Call(string operation,string? leaseId,JObject? arguments,TimeSpan timeout,CancellationToken cancellationToken)
+ private async Task<string> Call(string operation,string? leaseId,JObject? arguments,TimeSpan timeout,CancellationToken cancellationToken,string? expectedWorldEpoch=null)
  {
-  try { return await Roundtrip(operation,leaseId,arguments,timeout,cancellationToken); }
+  try { return await Roundtrip(operation,leaseId,arguments,timeout,cancellationToken,expectedWorldEpoch); }
   catch(OperationCanceledException) when(!cancellationToken.IsCancellationRequested) { return Failure("bridge_timeout"); }
   catch(SocketException) { return Failure("bridge_unreachable"); }
   catch(ObjectDisposedException) { return Failure("bridge_timeout"); }
@@ -39,7 +39,7 @@ public sealed class BridgeClient
   catch(IOException) { return Failure("bridge_io_failure"); }
  }
  internal static string Failure(string reason) => JsonConvert.SerializeObject(new BridgeResponse { Status="failed",ReasonCode=reason });
- private static async Task<string> Roundtrip(string operation,string? leaseId,JObject? arguments,TimeSpan timeout,CancellationToken cancellationToken)
+ private static async Task<string> Roundtrip(string operation,string? leaseId,JObject? arguments,TimeSpan timeout,CancellationToken cancellationToken,string? expectedWorldEpoch=null)
  {
   string? tokenPath = Environment.GetEnvironmentVariable("KSP_CONTROL_TOKEN_FILE");
   if(string.IsNullOrWhiteSpace(tokenPath)) return Failure("credential_not_configured");
@@ -56,7 +56,7 @@ public sealed class BridgeClient
   using var client = new TcpClient();
   using var close = linked.Token.Register(() => client.Dispose());
   await client.ConnectAsync(IPAddress.Loopback,port,linked.Token);
-  var request = new BridgeRequest { RequestId=Guid.NewGuid().ToString("N"),Token=token,Operation=operation,LeaseId=leaseId,Arguments=arguments ?? new JObject() };
+  var request = new BridgeRequest { RequestId=Guid.NewGuid().ToString("N"),Token=token,Operation=operation,LeaseId=leaseId,ExpectedWorldEpoch=expectedWorldEpoch,Arguments=arguments ?? new JObject() };
   // Blocking framing runs off the MCP dispatch thread. Cancellation disposes the socket.
   return await Task.Run(() => {
    var stream=client.GetStream(); BridgeFrames.Write(stream,request);

@@ -195,13 +195,14 @@ namespace KspControl.EditorModel
             if (dto.Surface != null)
             {
                 part.Kind = AttachKind.Surface;
-                var alpha = dto.Surface.AngleDegrees + 360.0 * k / count;
+                // Only a part with its own symmetry fans out; a child of a symmetric parent already sits in its parent's rotated frame.
+                var alpha = dto.Surface.AngleDegrees + (dto.Symmetry.HasValue ? 360.0 * k / count : 0.0);
                 var a = alpha * Math.PI / 180.0;
                 var outward = new Vector(Math.Sin(a), 0, Math.Cos(a));
                 var local = new Vector(options.SurfaceRadius * outward.X, dto.Surface.HeightOffset, options.SurfaceRadius * outward.Z);
                 var worldOutward = RotationMath.Rotate(outward, parent.Rotation);
                 var srf = part.Definition.SurfaceNode;
-                rot = RotationMath.FromTo(srf.Orientation, RotationMath.Neg(worldOutward));
+                rot = RotationMath.FromTo(srf.Orientation, RotationMath.Neg(worldOutward), RotationMath.Rotate(new Vector(0, 1, 0), parent.Rotation));
                 pos = RotationMath.Sub(RotationMath.Add(parent.Position, RotationMath.Rotate(local, parent.Rotation)), RotationMath.Rotate(srf.Position, rot));
             }
             else
@@ -211,7 +212,7 @@ namespace KspControl.EditorModel
                 var desired = RotationMath.Neg(RotationMath.Rotate(pn.Orientation, parent.Rotation));
                 rot = parent.Rotation;
                 var current = RotationMath.Rotate(cn.Orientation, rot);
-                var residual = RotationMath.FromTo(current, desired);
+                var residual = RotationMath.FromTo(current, desired, RotationMath.Rotate(new Vector(0, 1, 0), parent.Rotation));
                 if (residual.W < 1 - 1e-12) rot = RotationMath.Multiply(residual, rot);
                 pos = AttachmentGeometry.StackPosition(parent.Position, parent.Rotation, pn.Position, rot, cn.Position);
             }

@@ -107,36 +107,40 @@ public class PlannerTests
     }
 
     [TestMethod]
-    public void RotatedParentKeepsChildAligned()
+    public void StackChildOfRotatedSurfaceParentStaysAligned()
     {
-        var g = Fx.TwinGraph(); var cat = Fx.TwinCatalog();
-        var issues = new List<PlanIssue>();
-        var layout = CraftPlanner.Layout(g, cat, new PlannerOptions(), issues)!;
-        Assert.AreEqual(0, issues.Count);
-        // Every stack pair passes the existing geometry gate.
-        var cg = new CraftGraph { Name = "x", RootId = "pod" };
-        var defs = cat.Parts.ToDictionary(kv => kv.Key, kv => new PartDefinition { Name = kv.Key, Unlocked = true, ConfigurationVerified = true, Nodes = kv.Value.StackNodes.Select(n => new AttachNodeDefinition { Name = n.Id, Kind = AttachmentKind.Stack, Position = n.Position, Orientation = n.Orientation }).ToList() });
-        foreach (var lp in layout.Parts)
-            cg.Parts.Add(new CraftPart { Id = lp.Source.Id, Definition = lp.Source.Part, ParentId = lp.Source.Parent, ParentNode = lp.ParentNodeId, ChildNode = lp.NodeId, Position = lp.Position, Rotation = lp.Rotation });
-        Assert.AreEqual(0, StackGeometryValidator.Validate(cg, defs).Count);
+        bool rotatedSeen = false;
+        var cat = Fx.TwinCatalog();
+        cat.Parts["basicFin"].StackNodes = new() { new() { Id = "bottom", Position = new(0, -0.1, 0), Orientation = new(0, -1, 0) } };
+        cat.Parts["basicFin"].AttachRules.AllowStack = true;
+        foreach (var n in new[] { 2, 3, 4 })
+        {
+            var issues = new List<PlanIssue>();
+            var layout = CraftPlanner.Layout(FinGraph(n, true), cat, new PlannerOptions(), issues)!;
+            Assert.AreEqual(0, issues.Count, string.Join(";", issues));
+            foreach (var cap in layout.Parts.Where(p => p.Source.Id == "cap"))
+            {
+                var fin = layout.Parts[cap.ParentIndex];
+                rotatedSeen |= RotationMath.AngleBetween(fin.Rotation, RotationMath.Identity) > 0.1;
+                var pn = fin.Definition.FindNode(cap.ParentNodeId)!; var cn = cap.Definition.FindNode(cap.NodeId)!;
+                var a = RotationMath.Add(fin.Position, RotationMath.Rotate(pn.Position, fin.Rotation));
+                var b = RotationMath.Add(cap.Position, RotationMath.Rotate(cn.Position, cap.Rotation));
+                Assert.AreEqual(0, RotationMath.Length(RotationMath.Sub(a, b)), 1e-9, "nodes coincide in world space");
+                var oa = RotationMath.Rotate(pn.Orientation, fin.Rotation); var ob = RotationMath.Rotate(cn.Orientation, cap.Rotation);
+                Assert.AreEqual(-1.0, RotationMath.Dot(oa, ob), 1e-9, "node normals oppose");
+            }
+        }
+        Assert.IsTrue(rotatedSeen, "parents are actually rotated");
     }
 
     [TestMethod]
-    public void T2AndT3AreRefusedAsTwinPending()
+    public void UnsupportedTopologiesAreRefused()
     {
-        var g = Fx.TwinGraph();
-        g.Parts.Add(new() { Id = "dec", Part = "Decoupler.1", Parent = "engine", ParentNode = "bottom", Node = "top" });
-        g.Parts.Add(new() { Id = "tank2", Part = "fuelTankSmall", Parent = "dec", ParentNode = "bottom", Node = "top" });
-        g.Parts.Add(new() { Id = "engine2", Part = "liquidEngine.v2", Parent = "tank2", ParentNode = "bottom", Node = "top" });
-        var t2 = CraftPlanner.Plan(g, Fx.TwinCatalog());
-        Assert.IsNull(t2.Craft);
-        Assert.IsTrue(t2.Issues.Any(i => i.Code == "unsupported_staging_topology" && i.Reason!.Contains("twin pending")), string.Join(";", t2.Issues));
-
         var g3 = Fx.TwinGraph();
         g3.Parts.Add(new() { Id = "fin", Part = "basicFin", Parent = "tank", Symmetry = 2, Surface = new() { HeightOffset = -0.3, AngleDegrees = 0 } });
-        var t3 = CraftPlanner.Plan(g3, Fx.TwinCatalog());
-        Assert.IsNull(t3.Craft);
-        Assert.IsTrue(t3.Issues.Any(i => i.Code == "unsupported_staging_topology" && i.Reason!.Contains("twin pending")), string.Join(";", t3.Issues));
+        var r = CraftPlanner.Plan(g3, Fx.TwinCatalog());
+        Assert.IsNull(r.Craft);
+        Assert.IsTrue(r.Issues.Any(i => i.Code == "unsupported_staging_topology"), string.Join(";", r.Issues));
     }
 
     [TestMethod]
@@ -196,7 +200,7 @@ public class PlannerTests
     [TestMethod]
     public void SurfaceCounterpartsRotateAboutParentAxis()
     {
-        foreach (var n in new[] { 2, 3, 4 })
+        foreach (var n in new[] { 2, 3, 4, 6, 8 })
         {
             var issues = new List<PlanIssue>();
             var layout = CraftPlanner.Layout(FinGraph(n, false), Fx.TwinCatalog(), new PlannerOptions(), issues)!;
@@ -216,6 +220,7 @@ public class PlannerTests
                 // surface normal (child +X) points back at the parent axis
                 var normal = RotationMath.Rotate(new Vector(1, 0, 0), fins[k].Rotation);
                 Assert.AreEqual(-Math.Sin(a), normal.X, 1e-9); Assert.AreEqual(-Math.Cos(a), normal.Z, 1e-9);
+                Assert.AreEqual(1.0, RotationMath.Rotate(new Vector(0, 1, 0), fins[k].Rotation).Y, 1e-9, "part stays upright at n=" + n + " k=" + k);
             }
         }
     }

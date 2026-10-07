@@ -41,17 +41,25 @@ namespace KspControl.EditorModel
         }
         public static Vector Rotate(Vector v, Rotation q) { return AttachmentGeometry.Rotate(v, Normalize(q)); }
         public static Vector InverseRotate(Vector v, Rotation q) { return AttachmentGeometry.Rotate(v, Conjugate(Normalize(q))); }
-        /// <summary>Shortest-arc rotation taking direction <paramref name="from"/> onto <paramref name="to"/>.</summary>
-        public static Rotation FromTo(Vector from, Vector to)
+        /// <summary>
+        /// Shortest-arc rotation taking direction <paramref name="from"/> onto <paramref name="to"/>. For exactly opposite directions the
+        /// half-turn is about <paramref name="preferredAxis"/> when both directions are perpendicular to it (so "up" stays up), otherwise about a perpendicular axis.
+        /// </summary>
+        public static Rotation FromTo(Vector from, Vector to, Vector? preferredAxis = null)
         {
             var a = Normalize(from); var b = Normalize(to);
             var d = Dot(a, b);
             if (d > 1 - 1e-12) return Identity;
             if (d < -1 + 1e-12)
             {
-                var axis = Cross(a, new Vector(0, 1, 0));
-                if (axis.LengthSquared < 1e-12) axis = Cross(a, new Vector(0, 0, 1));
-                axis = Normalize(axis);
+                Vector axis;
+                if (preferredAxis.HasValue && Math.Abs(Dot(a, Normalize(preferredAxis.Value))) < 1e-9) axis = Normalize(preferredAxis.Value);
+                else
+                {
+                    axis = Cross(a, new Vector(0, 1, 0));
+                    if (axis.LengthSquared < 1e-12) axis = Cross(a, new Vector(0, 0, 1));
+                    axis = Normalize(axis);
+                }
                 return new Rotation(axis.X, axis.Y, axis.Z, 0);
             }
             var c = Cross(a, b);
@@ -65,12 +73,21 @@ namespace KspControl.EditorModel
             if (dot > 1) dot = 1;
             return 2 * Math.Acos(dot);
         }
-        // KSP writes single-precision values in round-trip form.
+        /// <summary>
+        /// Shortest single-precision text that round-trips, using only invariant "G1".."G9" formatting so the result is identical on
+        /// .NET Framework, Mono and modern .NET. Negative zero prints as 0.
+        /// </summary>
         public static string Number(double value)
         {
             var f = (float)value;
-            if (f == 0) f = 0; // normalise -0
-            return f.ToString("R", CultureInfo.InvariantCulture);
+            if (f == 0) return "0";
+            for (int p = 1; p <= 9; p++)
+            {
+                var s = f.ToString("G" + p.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+                float back;
+                if (float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out back) && back == f) return s;
+            }
+            return f.ToString("G9", CultureInfo.InvariantCulture);
         }
         public static string Format(Vector v) { return Number(v.X) + "," + Number(v.Y) + "," + Number(v.Z); }
         public static string FormatPipe(Vector v) { return Number(v.X) + "|" + Number(v.Y) + "|" + Number(v.Z); }

@@ -71,6 +71,18 @@ public sealed class ObservationTools(BridgeClient bridge)
   [Description("Part table page size, 1..50.")] [Range(1,ObservationLimits.MaxPage)] int limit=ObservationLimits.DefaultPage,
   [Description("Include per-stage delta-V from the stock editor calculation. Default true.")] bool includeDeltaV=true,
   CancellationToken cancellationToken=default) => Page(offset,limit,ObservationLimits.MaxPage,EditorOperations.Engineering,new JObject { ["includeDeltaV"]=includeDeltaV },cancellationToken);
+ [McpServerTool, Description("List the ship files (.craft) of the current save's Ships folder for one facility, name-ordered. Each item has fileName, sizeBytes, modifiedUtc, sha256 and kspControlOwned (true only for a file KspControl saved that is unchanged since; only those can be replaced by editor_save_craft). Names the save and load tools cannot address, and linked files, are counted in skippedUnaddressableNames and skippedLinkedFiles, not listed. limit 1..50, offset 0..100000, filter up to 128 chars (case-insensitive name substring). Invalid arguments return reasonCode invalid_argument. Read-only.")]
+ public Task<string> CraftList(
+  [Description("Facility folder: VAB or SPH.")] string facility,
+  [Description("Position in the filtered list, 0..100000.")] [Range(0,ObservationLimits.MaxOffset)] int offset=0,
+  [Description("Page size, 1..50.")] [Range(1,ObservationLimits.MaxPage)] int limit=ObservationLimits.DefaultPage,
+  [Description("Case-insensitive file name substring, up to 128 chars.")] [StringLength(ObservationLimits.MaxFilter)] string filter="",
+  CancellationToken cancellationToken=default)
+ {
+  var bad=facility is not ("VAB" or "SPH") ? "facility must be \"VAB\" or \"SPH\"" : CheckPage(offset,limit,ObservationLimits.MaxPage) ?? (filter==null||filter.Length>ObservationLimits.MaxFilter ? $"filter must be at most {ObservationLimits.MaxFilter} characters" : null);
+  if(bad!=null) return Invalid(bad);
+  return bridge.ReadAsync(CraftOperations.List,new JObject { ["facility"]=facility,["offset"]=offset,["limit"]=limit,["filter"]=filter },cancellationToken);
+ }
  private Task<string> Page(int offset,int limit,int maxLimit,string operation,JObject? extra,CancellationToken cancellationToken)
  {
   var bad=CheckPage(offset,limit,maxLimit);

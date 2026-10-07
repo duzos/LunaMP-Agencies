@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using KspControl.Contracts;
+using KspControl.EditorModel;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 namespace KspControl.Host;
@@ -49,6 +50,25 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
   if(bad!=null) return Task.FromResult(CraftPlanService.Invalid(bad));
   var args=new JObject { ["requestId"]=requestId,["snapshotId"]=snapshotId,["expectedRevision"]=expectedRevision };
   return RunAsync(OperationEffects.RestoreSnapshot,EditorOperations.RestoreSnapshot,requestId,leaseId.ToLowerInvariant(),args,OperationLimits.WaitSecondsMax,cancellationToken);
+ }
+
+ /// <summary>The ship name is a bare name (".craft" implied), the same rule the bridge applies to a save target.</summary>
+ public static string? FileName(string? fileName)
+ {
+  if(fileName==null || !CraftPaths.IsName(fileName) || fileName.EndsWith(CraftPaths.CraftExtension,StringComparison.OrdinalIgnoreCase))
+   return "fileName must be 1..64 characters of A-Z a-z 0-9 space . _ -, without a leading dot, '..' or a .craft suffix";
+  return null;
+ }
+
+ public Task<string> SaveAsync(string requestId,string leaseId,string expectedRevision,string fileName,string? replaceExpectedSha256,CancellationToken cancellationToken)
+ {
+  var bad=MutationArguments.Common(requestId,leaseId,expectedRevision) ?? FileName(fileName);
+  var replace=string.IsNullOrEmpty(replaceExpectedSha256) ? null : replaceExpectedSha256;
+  if(bad==null && replace!=null && !OperationLimits.IsSha256(replace)) bad=$"replaceExpectedSha256 must be {OperationLimits.Sha256Length} lower-case hex characters (the sha256 craft_list reports)";
+  if(bad!=null) return Task.FromResult(CraftPlanService.Invalid(bad));
+  var args=new JObject { ["requestId"]=requestId,["fileName"]=fileName,["expectedRevision"]=expectedRevision };
+  if(replace!=null) args["replaceExpectedSha256"]=replace;
+  return RunAsync(OperationEffects.WriteCraft,EditorOperations.SaveCraft,requestId,leaseId.ToLowerInvariant(),args,OperationLimits.WaitSecondsMax,cancellationToken);
  }
 
  private async Task<string> RunAsync(string effect,string bridgeOperation,string requestId,string leaseId,JObject args,int waitSeconds,CancellationToken cancellationToken)
@@ -151,7 +171,7 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
  private string Indeterminate(ControlJournal j,Job job,string reason,string detail)
  {
   Safely(()=>j.Finish(job.RequestId,"indeterminate",reason,""));
-  var data=new JObject { ["operation"]=job.Operation=="editor.restore_snapshot" ? "restore_snapshot" : "apply_craft",["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
+  var data=new JObject { ["operation"]=job.Operation switch { "editor.restore_snapshot" => "restore_snapshot", OperationEffects.WriteCraft => "save_craft", _ => "apply_craft" },["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
   return JsonConvert.SerializeObject(new BridgeResponse { Status="indeterminate",ReasonCode=reason,Data=data });
  }
 

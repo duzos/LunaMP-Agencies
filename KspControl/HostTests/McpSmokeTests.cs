@@ -28,11 +28,14 @@ namespace KspControl.HostTests;
    var list=await Request(new { jsonrpc="2.0",id=2,method="tools/list",@params=new {} },2);
    var names=list.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t=>t.GetProperty("name").GetString()).ToArray();
    CollectionAssert.Contains(names,"context");
-   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease","editor_state","editor_engineering","craft_plan","editor_apply_craft","editor_restore_snapshot","job_status"}) CollectionAssert.Contains(names,expected);
+   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease","editor_state","editor_engineering","craft_plan","editor_apply_craft","editor_restore_snapshot","editor_save_craft","craft_list","job_status"}) CollectionAssert.Contains(names,expected);
    // The mutation tools: exactly the documented arguments, bounded, and none that could carry grant content.
    JsonElement Schema(string tool)=>list.GetProperty("result").GetProperty("tools").EnumerateArray().Single(t=>t.GetProperty("name").GetString()==tool).GetProperty("inputSchema");
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","graph","expectedPlanHash"},Schema("editor_apply_craft").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","snapshotId"},Schema("editor_restore_snapshot").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","fileName","replaceExpectedSha256"},Schema("editor_save_craft").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"facility","offset","limit","filter"},Schema("craft_list").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","fileName"},Schema("editor_save_craft").GetProperty("required").EnumerateArray().Select(p=>p.GetString()!).ToArray());
    CollectionAssert.AreEquivalent(new[]{"requestId","waitSeconds"},Schema("job_status").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
    var applyProperties=Schema("editor_apply_craft").GetProperty("properties");
    Assert.AreEqual(262144,applyProperties.GetProperty("graph").GetProperty("maxLength").GetInt32()); Assert.AreEqual(64,applyProperties.GetProperty("expectedPlanHash").GetProperty("minLength").GetInt32()); Assert.AreEqual(64,applyProperties.GetProperty("expectedPlanHash").GetProperty("maxLength").GetInt32());

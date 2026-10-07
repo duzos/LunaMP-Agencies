@@ -58,7 +58,7 @@ namespace KspControl.Bridge
                 observations.Operations = operations;
                 observations.CraftList = new CraftListService(paths, files);
                 var launchPort = new UnityLaunchPort();
-                authority.ConfigureSpendCap(new FileSpendCapStore(Path.Combine(KSPUtil.ApplicationRootPath, "KspControlData", "control", "spendcaps.json")), () => launchPort.Funds);
+                authority.ConfigureSpendCap(new FileSpendCapStore(Path.Combine(KSPUtil.ApplicationRootPath, "KspControlData", "control", "spendcaps.json")), () => HighLogic.CurrentGame != null && HighLogic.CurrentGame.Mode != Game.Modes.CAREER ? double.PositiveInfinity : launchPort.Funds);
                 launchRunner = new LaunchRunner(launchPort, editorPort, tracker, authority, source, () => MonotonicClock.Milliseconds, () => observations.WorldEpoch);
                 observations.Launches = new LaunchService(launchPort, editorPort, launchRunner, new LaunchJobs(), operations, () => observations.WorldEpoch);
                 operations.ExtraBusy = () => launchRunner.Busy;

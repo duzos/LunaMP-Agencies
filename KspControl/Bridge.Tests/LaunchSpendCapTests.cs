@@ -46,6 +46,14 @@ namespace KspControl.BridgeTests
             Assert.AreEqual(50000L, Cap(authority));
         }
 
+        [TestMethod] public void AGameWithoutFundsCapsAtTheGrantLimitAndTheStandingMaximum()
+        {
+            funds = double.PositiveInfinity; // the provider's signal for a mode with no economy (sandbox): launches cost nothing
+            authority.ProvisionGrant(Grant(1, 30000));
+            authority.AcquireLease(300000, "launch");
+            Assert.AreEqual(30000L, Cap(authority));
+        }
+
         [TestMethod] public void TheCapNeverExceedsOneHundredThousand()
         {
             funds = 5000000;

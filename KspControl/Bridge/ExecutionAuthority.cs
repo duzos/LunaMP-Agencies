@@ -245,8 +245,9 @@ namespace KspControl.Bridge
             if (stored.ContainsKey(key)) return;
             double? funds = null;
             try { funds = confirmedFunds == null ? null : confirmedFunds(); } catch (Exception) { funds = null; }
-            if (!funds.HasValue || double.IsNaN(funds.Value) || double.IsInfinity(funds.Value)) return; // unknown balance: no cap yet, so no launch spend
-            var share = (long)Math.Floor(Math.Max(0, funds.Value) * 0.25);
+            if (!funds.HasValue || double.IsNaN(funds.Value) || double.IsNegativeInfinity(funds.Value)) return; // unknown balance: no cap yet, so no launch spend
+            // PositiveInfinity means the game has no economy (sandbox): launches cost nothing, so only the grant and standing limits apply.
+            var share = double.IsPositiveInfinity(funds.Value) ? StandingCapFunds : (long)Math.Floor(Math.Min(Math.Max(0, funds.Value) * 0.25, StandingCapFunds));
             stored[key] = Math.Min(Math.Min(grant.SpendLimitFunds, StandingCapFunds), share);
             try { capStore.Save(stored); } catch (Exception) { /* the value holds for this session */ }
         }

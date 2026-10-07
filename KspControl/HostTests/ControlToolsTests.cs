@@ -103,9 +103,9 @@ namespace KspControl.HostTests;
 }
 [TestClass] public class BridgeClientAllowlistTests
 {
- [TestMethod] public void ReadControlAndMutationAllowlistsAreDisjointAndMutationsAreExactlyApplyAndRestore()
+ [TestMethod] public void ReadControlAndMutationAllowlistsAreDisjointAndMutationsAreExactlyTheEditorAndFlightOperations()
  {
-  CollectionAssert.AreEquivalent(new[]{ "editor.apply_craft","editor.restore_snapshot" },BridgeClient.MutationOperations.ToArray());
+  CollectionAssert.AreEquivalent(new[]{ "editor.apply_craft","editor.restore_snapshot","flight.set_controls","flight.stage","flight.action_group","flight.abort","flight.warp" },BridgeClient.MutationOperations.ToArray());
   Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ReadOperations)); Assert.IsFalse(BridgeClient.MutationOperations.Overlaps(BridgeClient.ControlOperationSet));
   Assert.IsFalse(BridgeClient.ReadOperations.Overlaps(BridgeClient.ControlOperationSet)); Assert.IsFalse(BridgeClient.ReadOperations.Any(ControlOperations.IsControl));
   CollectionAssert.AreEquivalent(ControlOperations.All,BridgeClient.ControlOperationSet.ToArray());
@@ -134,7 +134,7 @@ namespace KspControl.HostTests;
   foreach(var tool in Tools()) foreach(var parameter in tool.GetParameters())
   {
    if(parameter.ParameterType!=typeof(CancellationToken)) foreach(var word in Forbidden) Assert.IsFalse(parameter.Name!.Contains(word,StringComparison.OrdinalIgnoreCase),$"{tool.Name}({parameter.Name}) looks like grant input"); // the SDK injects CancellationToken; it is not model-facing
-   Assert.IsTrue(parameter.ParameterType==typeof(string)||parameter.ParameterType==typeof(int)||parameter.ParameterType==typeof(bool)||parameter.ParameterType==typeof(CancellationToken),$"{tool.Name}({parameter.Name}) has an unexpected type {parameter.ParameterType}");
+   Assert.IsTrue(parameter.ParameterType==typeof(string)||parameter.ParameterType==typeof(int)||parameter.ParameterType==typeof(bool)||parameter.ParameterType==typeof(bool?)||parameter.ParameterType==typeof(double?)||parameter.ParameterType==typeof(CancellationToken),$"{tool.Name}({parameter.Name}) has an unexpected type {parameter.ParameterType}");
   }
   foreach(var tool in Tools()) Assert.AreEqual(typeof(Task<string>),tool.ReturnType,tool.Name+" returns a JSON string only");
  }

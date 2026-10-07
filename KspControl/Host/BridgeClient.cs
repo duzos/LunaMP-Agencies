@@ -11,10 +11,10 @@ namespace KspControl.Host;
 /// </summary>
 public sealed class BridgeClient
 {
- public static readonly IReadOnlySet<string> ReadOperations = new HashSet<string>(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot",EditorOperations.State,EditorOperations.Engineering,ConstructionOperations.Catalog,EditorOperations.OperationStatus };
+ public static readonly IReadOnlySet<string> ReadOperations = new HashSet<string>(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot",EditorOperations.State,EditorOperations.Engineering,ConstructionOperations.Catalog,EditorOperations.OperationStatus,FlightOperations.State };
  public static readonly IReadOnlySet<string> ControlOperationSet = new HashSet<string>(ControlOperations.All,StringComparer.Ordinal);
  /// <summary>Mutations reach the bridge only through <see cref="MutateAsync"/>, which the journaled mutation service calls.</summary>
- public static readonly IReadOnlySet<string> MutationOperations = new HashSet<string>(EditorOperations.Mutations,StringComparer.Ordinal);
+ public static readonly IReadOnlySet<string> MutationOperations = new HashSet<string>(EditorOperations.Mutations.Concat(FlightOperations.Mutations),StringComparer.Ordinal);
  private static readonly TimeSpan DefaultTimeout=TimeSpan.FromSeconds(10);
 
  public async Task<string> ReadAsync(string operation, JObject? arguments, CancellationToken cancellationToken, string? expectedWorldEpoch = null)

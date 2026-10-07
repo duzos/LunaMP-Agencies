@@ -193,6 +193,8 @@ namespace KspControl.BridgeTests
         public void FlightControlIsInTheAuthoritysEffectMap()
         {
             CollectionAssert.Contains(GrantMapping.KnownEffects, FlightEffects.Family);
+            // The host grant CLI's allowed families (GrantCli.AllowedOperations) must all be known here, or a grant could list an op no effect maps to.
+            foreach (var family in new[] { "editor.replace_craft", "editor.restore_snapshot", "craft.write", "flight.control" }) CollectionAssert.Contains(GrantMapping.KnownEffects, family);
         }
 
         [TestMethod]

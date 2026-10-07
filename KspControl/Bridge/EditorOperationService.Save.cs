@@ -58,7 +58,16 @@ namespace KspControl.Bridge
             try
             {
                 exists = files.Exists(target.FullPath);
-                if (exists) currentHash = OperationHash.Sha256Hex(files.ReadAllBytes(target.FullPath));
+                if (exists)
+                {
+                    var length = files.FileLength(target.FullPath);
+                    if (length > EditorOperationRunner.MaxSaveBytes)
+                    {
+                        // Hashing runs on the main thread: an oversize file is never read. Without a replace token it is simply "there".
+                        if (replace != null) return Refuse(request, OperationReasons.CraftTooLarge, "the existing file is " + length + " bytes");
+                    }
+                    else currentHash = OperationHash.Sha256Hex(files.ReadAllBytes(target.FullPath));
+                }
             }
             catch (System.IO.IOException) { exists = true; }
             var decision = SavePolicy.Decide(exists, currentHash, replace, ledger.Find(port.Facility, fileName + Pure.CraftPaths.CraftExtension), ledger.State);

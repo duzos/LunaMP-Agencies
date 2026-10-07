@@ -11,13 +11,15 @@ namespace KspControl.Bridge
 {
     /// <summary>
     /// craft.list (plan R1-section 4): the ship files of the current save's Ships folder for one facility, name-ordered, paged, with size,
-    /// write time, SHA-256 and whether the ledger says KspControl wrote the file. Read-only; hashes are computed only for the returned page.
+    /// write time, SHA-256 and whether the ledger says KspControl wrote the file. Read-only; hashes are computed only for the returned page, only for files up to <see cref="MaxHashedBytes"/> and within a per-page budget.
     /// Names that cannot be addressed by the save and load tools, and linked files, are counted, not listed.
     /// </summary>
     internal sealed class CraftListService
     {
-        /// <summary>Files larger than this are listed without a hash (real modded craft are a few hundred KB).</summary>
-        public const long MaxHashedBytes = 8L * 1024 * 1024;
+        /// <summary>Files larger than this are listed without a hash (real modded craft are a few hundred KB; a save refuses anything above 2 MiB).</summary>
+        public const long MaxHashedBytes = EditorOperationRunner.MaxSaveBytes;
+        /// <summary>Hashing is main-thread work: once a page has hashed this much, the remaining files of the page are listed unhashed.</summary>
+        public const long MaxHashedBytesPerPage = 32L * 1024 * 1024;
         private readonly Func<Pure.CraftPaths> pathsFactory;
         private readonly IOperationFiles files;
 
@@ -50,11 +52,14 @@ namespace KspControl.Bridge
             usable = usable.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ThenBy(e => e.Name, StringComparer.Ordinal).ToList();
             var page = usable.Skip(offset).Take(limit).ToList();
             var items = new JArray();
+            long hashedThisPage = 0;
             foreach (var entry in page)
             {
                 string sha = null;
-                if (entry.Length <= MaxHashedBytes)
+                var skipped = entry.Length > MaxHashedBytes || hashedThisPage + entry.Length > MaxHashedBytesPerPage;
+                if (!skipped)
                 {
+                    hashedThisPage += entry.Length;
                     try { sha = OperationHash.Sha256Hex(files.ReadAllBytes(entry.Path)); } catch (IOException) { sha = null; }
                 }
                 var owned = ledger != null && ledger.Usable && ledger.Find(facility, entry.Name) is LedgerEntry record && sha != null && string.Equals(record.Sha256, sha, StringComparison.Ordinal);
@@ -62,7 +67,7 @@ namespace KspControl.Bridge
                 {
                     ["fileName"] = entry.Name, ["sizeBytes"] = entry.Length,
                     ["modifiedUtc"] = new DateTime(entry.WriteTicks, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture),
-                    ["sha256"] = sha == null ? JValue.CreateNull() : (JToken)sha,
+                    ["sha256"] = sha == null ? JValue.CreateNull() : (JToken)sha, ["hashSkipped"] = skipped,
                     ["kspControlOwned"] = owned
                 });
             }

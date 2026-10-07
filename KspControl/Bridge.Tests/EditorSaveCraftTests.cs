@@ -382,6 +382,77 @@ namespace KspControl.BridgeTests
             Assert.IsFalse(rig.Files.Exists(rig.Paths.LedgerFile));
         }
 
+        [TestMethod] public void AFailedCreateWhoseTargetNowExistsIsFileExistsNotWriteFailed()
+        {
+            var target = rig.ShipFile("Probe Saved");
+            rig.Files.FailWrite = p => { if (p != target) return false; rig.Files.Put(p, "ship = Human\r\n"); return true; };
+            var job = SaveAndRun();
+            Assert.AreEqual("file_exists", job.ReasonCode); Assert.IsFalse(job.Dispatched);
+            Assert.AreEqual("ship = Human\r\n", rig.Files.Text(target));
+        }
+
+        [TestMethod] public void APartialReplaceIsIndeterminateAndDispatchedNotWriteFailed()
+        {
+            var first = SaveAndRun(); var target = rig.ShipFile("Probe Saved"); var before = rig.Files.Text(target);
+            Mutate(() => rig.Port.Name = "Changed");
+            rig.Files.PartialReplace = p => p == target;
+            rig.Save(requestId: "save-00002", replace: first.SavedSha256);
+            var job = rig.RunToEnd();
+            Assert.AreEqual("indeterminate", job.Status); Assert.AreNotEqual("write_failed", job.ReasonCode);
+            StringAssert.Contains(job.Detail, "replace_partial");
+            Assert.IsTrue(job.Dispatched); Assert.IsFalse((bool)job.ToEnvelope()["notDispatched"]);
+            Assert.AreEqual(before, rig.Files.Text(target));
+            Assert.AreEqual(first.SavedSha256, CraftLedger.Load(rig.Files, rig.Paths.LedgerFile).Find("VAB", "Probe Saved.craft").Sha256, "ownership still describes the file on disk");
+            Assert.IsFalse(rig.Port.Locks.Contains(EditorIdle.OperationLockId));
+        }
+
+        [TestMethod] public void ARevertedReplaceDeclaresTheTargetOnceAndNotAsASidecar()
+        {
+            var first = SaveAndRun(); var target = rig.ShipFile("Probe Saved");
+            Mutate(() => rig.Port.Name = "Changed");
+            var writes = 0;
+            rig.Files.CorruptWrite = p => p == target && writes++ == 0;
+            rig.Save(requestId: "save-00002", replace: first.SavedSha256);
+            var job = rig.RunToEnd();
+            Assert.AreEqual("save_verify_failed", job.ReasonCode);
+            var mine = job.ToEnvelope()["declaredOutputs"].Where(d => (string)d["path"] == target && (string)d["class"] == "ships").ToList();
+            Assert.IsFalse(mine.Any(d => ((string)d["detail"]).EndsWith("_beside_save")), "the target is not its own sidecar");
+        }
+
+        [TestMethod] public void ReplacingAnOversizeTargetIsRefusedWithoutReadingIt()
+        {
+            var path = rig.ShipFile("Probe Saved");
+            rig.Files.Put(path, new byte[EditorOperationRunner.MaxSaveBytes + 1]);
+            rig.Files.Reads.Clear();
+            Refused2(rig.Save(replace: new string('a', 64)), "craft_too_large");
+            Assert.IsFalse(rig.Files.Reads.Contains(path), "an oversize file is never hashed on the main thread");
+        }
+
+        [TestMethod] public void AnOversizeExistingFileWithoutAReplaceTokenIsStillFileExistsAndUnread()
+        {
+            var path = rig.ShipFile("Probe Saved");
+            rig.Files.Put(path, new byte[EditorOperationRunner.MaxSaveBytes + 1]);
+            rig.Files.Reads.Clear();
+            Refused2(rig.Save(), "file_exists");
+            Assert.IsFalse(rig.Files.Reads.Contains(path));
+        }
+
+        [TestMethod] public void ASaveSweepsStaleTemporaryFilesAndOnlyThose()
+        {
+            var dir = rig.Paths.ShipsDirectory("VAB");
+            string P(string n) { return System.IO.Path.Combine(dir, n); }
+            var guid = new string('a', 32);
+            rig.Files.Put(P("kc-" + guid + ".tmp"), "x");
+            rig.Files.Put(P("Old.craft.kspcontrol." + guid + ".tmp"), "x");
+            rig.Files.Put(P("kc-" + new string('b', 32) + ".tmp"), "x"); rig.Files.Ticks[P("kc-" + new string('b', 32) + ".tmp")] = DateTime.UtcNow.Ticks;
+            rig.Files.Put(P("kc-notes.tmp"), "x"); rig.Files.Put(P("Human.craft"), "x"); rig.Files.Put(P("kc-" + guid + ".bak"), "x");
+            SaveAndRun();
+            Assert.IsFalse(rig.Files.Exists(P("kc-" + guid + ".tmp"))); Assert.IsFalse(rig.Files.Exists(P("Old.craft.kspcontrol." + guid + ".tmp")));
+            Assert.IsTrue(rig.Files.Exists(P("kc-" + new string('b', 32) + ".tmp")), "younger than five minutes");
+            Assert.IsTrue(rig.Files.Exists(P("kc-notes.tmp"))); Assert.IsTrue(rig.Files.Exists(P("Human.craft")));
+            Assert.IsTrue(rig.Files.Exists(P("kc-" + guid + ".bak")), "a backup with no known target is left alone");
+        }
+
         [TestMethod] public void AFileThatAppearsBetweenAdmissionAndTheWriteIsNeverOverwritten()
         {
             rig.Save();

@@ -127,6 +127,7 @@ namespace KspControl.BridgeTests
             public void WriteAtomic(string path, byte[] bytes) { }
             public void CreateNew(string path, byte[] bytes) { }
             public void ReplaceExisting(string path, byte[] bytes) { }
+            public long FileLength(string path) { return 10; }
             public void Delete(string path) { }
             public void Copy(string from, string to, bool overwrite) { }
             public IReadOnlyList<FileEntry> List(string directory, string suffix) { return new FileEntry[0]; }

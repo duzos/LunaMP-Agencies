@@ -18,6 +18,9 @@ namespace KspControl.BridgeTests
         public readonly HashSet<string> Reparse = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public readonly List<string> Writes = new List<string>(), Deletes = new List<string>(), Copies = new List<string>();
         public Func<string, bool> FailWrite = p => false, CorruptWrite = p => false, FailDelete = p => false;
+        /// <summary>A replace of such a path throws <see cref="FileStateChangedException"/> after leaving the file with its previous bytes, like a ReplaceFileW partial failure.</summary>
+        public Func<string, bool> PartialReplace = p => false;
+        public readonly List<string> Reads = new List<string>();
         /// <summary>Runs after every successful write, so a test can make a sidecar appear the way another mod would.</summary>
         public Action<string> OnWrite;
         private long now = 100;
@@ -33,6 +36,7 @@ namespace KspControl.BridgeTests
         {
             byte[] bytes;
             if (!Data.TryGetValue(path, out bytes)) throw new FileNotFoundException(path);
+            Reads.Add(path);
             return (byte[])bytes.Clone();
         }
         public void WriteAtomic(string path, byte[] bytes)
@@ -53,8 +57,10 @@ namespace KspControl.BridgeTests
         public void ReplaceExisting(string path, byte[] bytes)
         {
             if (!Data.ContainsKey(path)) throw new FileNotFoundException(path);
+            if (PartialReplace(path)) throw new FileStateChangedException("restored_previous", new IOException("1176"));
             WriteAtomic(path, bytes);
         }
+        public long FileLength(string path) { byte[] bytes; return Data.TryGetValue(path, out bytes) ? bytes.Length : -1; }
         public void Delete(string path)
         {
             if (FailDelete(path)) throw new IOException("delete_failed");

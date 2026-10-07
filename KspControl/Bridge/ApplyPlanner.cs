@@ -178,7 +178,7 @@ namespace KspControl.Bridge
         {
             switch (c)
             {
-                case Pure.PartCategories.Command: case Pure.PartCategories.Tank: case Pure.PartCategories.Engine: case Pure.PartCategories.Decoupler: return c;
+                case Pure.PartCategories.Command: case Pure.PartCategories.Tank: case Pure.PartCategories.Engine: case Pure.PartCategories.Decoupler: case Pure.PartCategories.Parachute: return c;
                 default: return Pure.PartCategories.Other;
             }
         }
@@ -199,6 +199,8 @@ namespace KspControl.Bridge
         public Pure.GraphDto Graph { get; set; }
         public Pure.PlanResult Plan { get; set; }
         public Pure.ConstructionCatalog Catalog { get; set; }
+        /// <summary>The options the plan was made with; pass 2 of a surface placement re-plans with the same ids and header values.</summary>
+        public Pure.PlannerOptions Options { get; set; }
         public string PlanHash { get; set; }
         public string CatalogHash { get; set; }
         public string CraftText { get; set; }
@@ -255,6 +257,7 @@ namespace KspControl.Bridge
                 Version = string.IsNullOrEmpty(header.Version) ? new Pure.PlannerOptions().Version : header.Version,
                 MissionFlag = ui == null || string.IsNullOrEmpty(ui.FlagUrl) ? new Pure.PlannerOptions().MissionFlag : ui.FlagUrl
             };
+            result.Options = options;
             var plan = Pure.CraftPlanner.Plan(graph, catalog, options);
             result.Plan = plan;
             var issues = new List<Pure.PlanIssue>(plan.Issues);

@@ -55,7 +55,7 @@ namespace KspControl.BridgeTests
             Assert.AreEqual("decoupler", ConstructionCatalogMapper.MapCategory(new[] { "ModuleAnchoredDecoupler" }, new string[0]));
             Assert.AreEqual("command", ConstructionCatalogMapper.MapCategory(new[] { "ModuleCommand", "ModuleEngines" }, new[] { "LiquidFuel" }));
             Assert.AreEqual("other", ConstructionCatalogMapper.MapCategory(new[] { "ModuleRCSFX" }, new[] { "MonoPropellant" }));
-            Assert.AreEqual("other", ConstructionCatalogMapper.MapCategory(new[] { "ModuleParachute" }, new string[0]));
+            Assert.AreEqual("parachute", ConstructionCatalogMapper.MapCategory(new[] { "ModuleParachute" }, new string[0]));
             Assert.AreEqual("other", ConstructionCatalogMapper.MapCategory(null, null));
         }
 

@@ -339,10 +339,17 @@ internal static class CatalogFx
 
  [TestMethod] public async Task UnknownBridgeCategoryBecomesOther()
  {
-  var c=CatalogFx.Stock(); c.Parts["pointyNoseConeB"]["category"]="parachute";
+  var c=CatalogFx.Stock(); c.Parts["pointyNoseConeB"]["category"]="fairing";
   var data=Data(await Plan(CatalogFx.T3(2),c));
   Assert.IsTrue((bool)data["ok"]!,string.Join(",",Codes(data)));
   Assert.AreEqual("other",(string?)((JArray)data["parts"]!).First(p => (string?)p["part"]=="pointyNoseConeB")["category"]);
+ }
+
+ [TestMethod] public async Task TheParachuteBridgeCategoryIsKept()
+ {
+  var c=CatalogFx.Stock(); c.Parts["pointyNoseConeB"]["category"]="parachute";
+  var data=Data(await Plan(CatalogFx.T3(2),c));
+  Assert.AreEqual("parachute",(string?)((JArray)data["parts"]!).First(p => (string?)p["part"]=="pointyNoseConeB")["category"]);
  }
 
  [TestMethod] public async Task LaterChunksCarryTheFirstChunksWorldEpoch()

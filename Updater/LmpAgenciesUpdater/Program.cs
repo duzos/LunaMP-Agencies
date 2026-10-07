@@ -63,7 +63,7 @@ namespace LmpAgenciesUpdater
                 }
             }
 
-            Console.WriteLine(result.Message);
+            Say(result.Message);
 
             // A server must come back whatever happened (it is unattended); a client only relaunches after an install.
             // Never after a wait timeout: the old process is still running and a second copy would fight it.
@@ -113,8 +113,14 @@ namespace LmpAgenciesUpdater
             }
             catch (Exception e)
             {
-                Console.Error.WriteLine("LmpAgenciesUpdater: could not relaunch " + options.Relaunch + ": " + e.Message);
+                Say("LmpAgenciesUpdater: could not relaunch " + options.Relaunch + ": " + e.Message);
             }
+        }
+
+        // Console output must never decide whether a server is relaunched.
+        private static void Say(string line)
+        {
+            try { Console.WriteLine(line); } catch { }
         }
     }
 }

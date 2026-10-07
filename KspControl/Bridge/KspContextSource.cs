@@ -13,7 +13,8 @@ namespace KspControl.Bridge
         public LeaseContext CurrentContext()
         {
             var editor = HighLogic.LoadedSceneIsEditor;
-            var entity = editor ? "editor:" + (EditorDriver.editorFacility == EditorFacility.SPH ? "SPH" : "VAB") : "scene:" + HighLogic.LoadedScene;
+            var entity = editor ? "editor:" + (EditorDriver.editorFacility == EditorFacility.SPH ? "SPH" : "VAB")
+                : HighLogic.LoadedSceneIsFlight && FlightGlobals.ActiveVessel != null ? "vessel:" + FlightGlobals.ActiveVessel.id.ToString("D") : "scene:" + HighLogic.LoadedScene;
             // Scene readiness is deliberately independent of the editor state machine; idle checks belong to admission.
             var ready = editor && EditorLogic.fetch != null && EditorDriver.fetch != null && !EditorDriver.fetch.restartingEditor;
             // The tracker is updated earlier in the same frame, so the published revision includes this frame's edits. It never decreases.

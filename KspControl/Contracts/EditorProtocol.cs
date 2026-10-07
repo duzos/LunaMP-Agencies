@@ -11,7 +11,8 @@ namespace KspControl.Contracts
         public const string ApplyCraft = "editor.apply_craft";
         public const string RestoreSnapshot = "editor.restore_snapshot";
         public const string OperationStatus = "editor.operation_status";
+        public const string Launch = "editor.launch";
         /// <summary>Operations that change the editor. They are reachable only through the host journal.</summary>
-        public static readonly string[] Mutations = { ApplyCraft, RestoreSnapshot };
+        public static readonly string[] Mutations = { ApplyCraft, RestoreSnapshot, Launch };
     }
 }

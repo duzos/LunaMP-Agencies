@@ -17,7 +17,7 @@ namespace KspControl.Bridge
     internal static class GrantMapping
     {
         /// <summary>Effects the bridge knows how to classify. Mutations stay unavailable in this slice.</summary>
-        internal static readonly string[] KnownEffects = { "editor.replace_craft", "editor.restore_snapshot", "craft.write" };
+        internal static readonly string[] KnownEffects = { "editor.replace_craft", "editor.restore_snapshot", "editor.launch", "craft.write" };
 
         internal static TrustedExecutionGrant ToGrant(GrantPayload payload)
         {
@@ -100,7 +100,7 @@ namespace KspControl.Bridge
             return new GrantStatusInfo
             {
                 Present = true, State = state, Detail = code, Id = valid.Id, Generation = valid.Generation, Operations = valid.Operations,
-                Facilities = valid.Facilities, UnsavedCraftPolicy = valid.UnsavedCraftPolicy, ExpiresUtc = valid.ExpiresUtc
+                Facilities = valid.Facilities, UnsavedCraftPolicy = valid.UnsavedCraftPolicy, ExpiresUtc = valid.ExpiresUtc, SpendLimitFunds = valid.SpendLimitFunds
             };
         }
 

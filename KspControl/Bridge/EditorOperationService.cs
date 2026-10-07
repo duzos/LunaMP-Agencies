@@ -182,10 +182,10 @@ namespace KspControl.Bridge
         }
 
         /// <summary>Authority, token, busy and context checks common to both mutations. Returns a refusal, or null with the ticket.</summary>
-        private BridgeResponse AdmitCommon(BridgeRequest request, string effectName, string leaseId, string revisionText, out ExecutionTicket ticket, out ClassifiedEffect[] effects)
+        internal BridgeResponse AdmitCommon(BridgeRequest request, string effectName, string leaseId, string revisionText, out ExecutionTicket ticket, out ClassifiedEffect[] effects)
         {
             ticket = null; effects = null;
-            if (runner.Busy) return Refuse(request, OperationReasons.EditorBusy, "another operation is running", new JObject { ["busy"] = new JArray("operation_running") });
+            if (runner.Busy || (ExtraBusy != null && ExtraBusy())) return Refuse(request, OperationReasons.EditorBusy, "another operation is running", new JObject { ["busy"] = new JArray("operation_running") });
             if (!port.InEditor) return Refuse(request, ControlReasons.EditorUnavailable, null);
             Pure.EditorRevisionToken token;
             if (!Pure.EditorRevisionToken.TryParse(revisionText, out token)) return Refuse(request, ControlReasons.InvalidArgument, "expectedRevision is not a token from editor_state");
@@ -288,7 +288,10 @@ namespace KspControl.Bridge
 
         // ---------------------------------------------------------------- editor.state extras
 
-        public bool OperationRunning { get { return runner.Busy; } }
+        public bool OperationRunning { get { return runner.Busy || (ExtraBusy != null && ExtraBusy()); } }
+
+        /// <summary>Another operation family (a launch) that also owns the editor. Admission refuses while it reports busy.</summary>
+        internal Func<bool> ExtraBusy { get; set; }
 
         public JArray RecentSnapshots()
         {

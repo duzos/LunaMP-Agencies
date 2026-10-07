@@ -246,7 +246,7 @@ namespace KspControl.Contracts
             var status = new GrantStatusInfo
             {
                 Present = true, Id = p.GrantId, Generation = p.Generation, Operations = (string[])p.Operations.Clone(), Facilities = (string[])p.Facilities.Clone(),
-                UnsavedCraftPolicy = p.UnsavedCraftPolicy, ExpiresUtc = p.ExpiresUtc
+                UnsavedCraftPolicy = p.UnsavedCraftPolicy, ExpiresUtc = p.ExpiresUtc, SpendLimitFunds = p.SpendLimitFunds
             };
             if (p.Revoked) { status.State = GrantStates.Revoked; return status; }
             if (p.Generation < highestSeenGeneration) { status.State = GrantStates.Revoked; status.Detail = "generation_regressed"; return status; }

@@ -94,6 +94,8 @@ namespace KspControl.Bridge
         }
         internal bool Allows(ClassifiedEffect effect) => permissions.Any(p => p.Operation == effect.Operation && p.Recipient == effect.Recipient);
         internal bool AllowsEntity(string entity) => entities.Contains(entity, StringComparer.Ordinal);
+        /// <summary>True when the grant lists any flight operation, so a lease may follow a launched vessel into the flight scene.</summary>
+        internal bool AllowsFlight => permissions.Any(p => p.Operation.StartsWith("flight.", StringComparison.Ordinal));
     }
 
     internal sealed class ExecutionTicket
@@ -153,6 +155,8 @@ namespace KspControl.Bridge
         private long grantDeadline;
         private string leaseId, leasePurpose, leaseEpoch, leaseEntity, lastEndedLeaseId, lastEndedReason, operationId;
         private long leaseDeadline, heartbeatDeadline, generation, lastClock, cooldownUntil;
+        // A launch moves the lease from the editor entity to the scene it loads. While it runs, a context change carries the lease along instead of revoking it.
+        private string transitionLease, transitionFrom;
 
         public ExecutionAuthority(Func<long> monotonicMilliseconds, IEnumerable<string> knownEffects, long watchdogMilliseconds = ControlLimits.WatchdogMilliseconds,
             ISuspensionStore store = null, Func<DateTime> utcNow = null)
@@ -195,8 +199,8 @@ namespace KspControl.Bridge
                 context = observed; contextPublishedAt = now;
                 if (previous != null && observed.SameIdentity(previous) && observed.Revision < previous.Revision)
                 { RevokeLease("revision_regressed"); throw new InvalidOperationException("revision_regressed"); }
-                if (previous != null && !observed.SameIdentity(previous)) RevokeLease("context_changed");
-                else if (leaseId != null && (leaseEpoch != observed.Epoch || leaseEntity != observed.Entity)) RevokeLease("context_changed");
+                if (previous != null && !observed.SameIdentity(previous)) { if (!CarryLease(observed)) RevokeLease("context_changed"); }
+                else if (leaseId != null && (leaseEpoch != observed.Epoch || leaseEntity != observed.Entity)) { if (!CarryLease(observed)) RevokeLease("context_changed"); }
             }
         }
 
@@ -357,6 +361,68 @@ namespace KspControl.Bridge
         public void EndOperation(string id)
         { lock (gate) { if (operationId == id) operationId = null; } }
 
+        /// <summary>
+        /// Declares that this ticket's operation is about to change the scene (a launch). Until <see cref="FinishTransition"/> the lease follows
+        /// the observed context instead of being revoked. Only valid inside the operation's lock.
+        /// </summary>
+        public void BeginTransition(ExecutionTicket ticket)
+        {
+            if (ticket == null) throw new ArgumentNullException(nameof(ticket));
+            lock (gate)
+            {
+                CheckExpiry(); RequireAuthority(ticket.LeaseId); RequireTicketCurrent(ticket);
+                if (operationId == null) throw new InvalidOperationException("transition_outside_operation");
+                transitionLease = ticket.LeaseId; transitionFrom = leaseEntity;
+            }
+        }
+
+        /// <summary>True while the ticket's lease and grant are still the ones that admitted it. Unlike dispatch validation it ignores the scene, which is expected to change.</summary>
+        public bool TicketCurrent(ExecutionTicket ticket)
+        {
+            if (ticket == null) return false;
+            lock (gate)
+            {
+                try { CheckExpiry(); } catch (InvalidOperationException) { return false; }
+                return leaseId != null && leaseId == ticket.LeaseId && grant != null && ticket.AuthorityGeneration == generation && ticket.GrantId == grant.Id && ticket.GrantGeneration == grant.Generation;
+            }
+        }
+
+        /// <summary>
+        /// Ends a transition. With <paramref name="successEntity"/> (for example "vessel:&lt;guid&gt;") the lease continues on that entity only if the grant
+        /// lists flight operations, otherwise it is released; true means it continues. With null (the scene did not change) the lease stays if it never
+        /// moved and is released if it did. A lease that is already gone returns false.
+        /// </summary>
+        public bool FinishTransition(ExecutionTicket ticket, string successEntity)
+        {
+            if (ticket == null) throw new ArgumentNullException(nameof(ticket));
+            lock (gate)
+            {
+                var from = transitionFrom; var armed = transitionLease == ticket.LeaseId;
+                transitionLease = null; transitionFrom = null;
+                if (!armed) return false;
+                try { CheckExpiry(); } catch (InvalidOperationException) { return false; }
+                if (leaseId == null || leaseId != ticket.LeaseId || grant == null || ticket.AuthorityGeneration != generation) return false;
+                if (successEntity == null)
+                {
+                    if (leaseEntity != from) { RevokeLease("launch_aborted"); return false; }
+                    return true;
+                }
+                if (grant.AllowsFlight) { leaseEntity = Identifiers.Required(successEntity); return true; }
+                RevokeLease("launch_complete");
+                return false;
+            }
+        }
+
+        private bool CarryLease(LeaseContext observed)
+        {
+            if (leaseId == null) return false;
+            // A lease that was deliberately moved to this very identity (a finished launch) stays when the published context catches up with it.
+            if (leaseEpoch == observed.Epoch && leaseEntity == observed.Entity) return true;
+            if (transitionLease != leaseId || operationId == null) return false;
+            leaseEpoch = observed.Epoch; leaseEntity = observed.Entity;
+            return true;
+        }
+
         /// <summary>Replaces the ticket's revision after the operation's own edit. Only valid during that operation's lock or grace.</summary>
         public void RebaseUnderOperation(ExecutionTicket ticket, string id, long newRevision)
         {
@@ -428,7 +494,7 @@ namespace KspControl.Bridge
                 var shown = new GrantStatusInfo
                 {
                     Present = info.Present, State = info.State, Detail = info.Detail, Id = info.Id, Generation = info.Generation, Operations = info.Operations,
-                    Facilities = info.Facilities, UnsavedCraftPolicy = info.UnsavedCraftPolicy, ExpiresUtc = info.ExpiresUtc
+                    Facilities = info.Facilities, UnsavedCraftPolicy = info.UnsavedCraftPolicy, ExpiresUtc = info.ExpiresUtc, SpendLimitFunds = info.SpendLimitFunds
                 };
                 if (shown.State == GrantStates.Valid && shown.Id != null && shown.Generation.HasValue && IsBurnedLocked(shown.Id, shown.Generation.Value))
                 { shown.State = GrantStates.Suspended; shown.Detail = suspensionsUnreadable ? "suspensions_unreadable" : null; }
@@ -496,7 +562,7 @@ namespace KspControl.Bridge
         {
             generation = checked(generation + 1);
             if (leaseId != null) { lastEndedLeaseId = leaseId; lastEndedReason = reason; }
-            leaseId = null; leasePurpose = null; leaseEpoch = null; leaseEntity = null; operationId = null;
+            leaseId = null; leasePurpose = null; leaseEpoch = null; leaseEntity = null; operationId = null; transitionLease = null; transitionFrom = null;
         }
 
         private string EndedReason(string id)

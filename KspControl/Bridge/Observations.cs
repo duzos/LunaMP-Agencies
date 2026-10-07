@@ -19,7 +19,7 @@ namespace KspControl.Bridge
         private readonly Type facade = Type.GetType("LmpClient.Systems.Agency.ControlObservation, LmpClient", false);
         private bool FacadeCompatible
         {
-            get { try { return (int?)facade?.GetField("ApiVersion", BindingFlags.Public | BindingFlags.Static)?.GetRawConstantValue() == 1; } catch { return false; } }
+            get { try { var version = (int?)facade?.GetField("ApiVersion", BindingFlags.Public | BindingFlags.Static)?.GetRawConstantValue(); return version.HasValue && version.Value >= 1; } catch { return false; } }
         }
         internal const string BridgeVersion = "0.2.0";
         internal string WorldEpoch => epoch;
@@ -30,6 +30,8 @@ namespace KspControl.Bridge
         internal EditorRevisionTracker EditorTracker { get; set; }
         /// <summary>Admission and status for the mutation operations. Null leaves them unavailable.</summary>
         internal EditorOperationService Operations { get; set; }
+        /// <summary>Admission and status for editor.launch. Null leaves it unavailable.</summary>
+        internal LaunchService Launches { get; set; }
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -79,9 +81,14 @@ namespace KspControl.Bridge
                 case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.OperationStatus:
                     // Mutations answer with their own envelope: not an observation, so no readOnly marker and no size cap.
                     if (Operations == null) return Fail(request, "operation_unavailable");
-                    var operation = Operations.Handle(request);
+                    var operation = request.Operation == EditorOperations.OperationStatus && Launches != null && Launches.Owns(request) ? Launches.Status(request) : Operations.Handle(request);
                     operation.WorldEpoch = epoch; operation.Revision = ++revision;
                     return operation;
+                case EditorOperations.Launch:
+                    if (Launches == null) return Fail(request, "operation_unavailable");
+                    var launch = Launches.Handle(request);
+                    launch.WorldEpoch = epoch; launch.Revision = ++revision;
+                    return launch;
                 case "editor.snapshot":
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) return Fail(request, "editor_unavailable");
                     data = EditorSnapshot(EditorLogic.fetch.ship, request.Arguments); break;

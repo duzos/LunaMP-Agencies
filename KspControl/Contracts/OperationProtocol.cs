@@ -8,6 +8,10 @@ namespace KspControl.Contracts
     {
         public const string ReplaceCraft = "editor.replace_craft";
         public const string RestoreSnapshot = "editor.restore_snapshot";
+        /// <summary>Launch the editor craft through the normal editor launch path. A grant lists it as the "launch" family.</summary>
+        public const string Launch = "editor.launch";
+        /// <summary>The short family name a human gives the grant CLI (--ops launch).</summary>
+        public const string LaunchFamily = "launch";
     }
 
     /// <summary>Job envelope status values (plan R1-section 4.3).</summary>
@@ -31,11 +35,21 @@ namespace KspControl.Contracts
         public const int ExpectedRevisionMax = 128;
         public const int WaitSecondsMax = 20;
         public const int PlanHashLength = 64;
+        /// <summary>The largest per-launch spend ceiling a request may name (funds). The grant's own limit is the real cap.</summary>
+        public const long MaxSpendFunds = 1000000000L;
+        public const int LaunchSiteMax = 128;
         public const int SnapshotIdMin = 8;
         public const int SnapshotIdMax = 128;
         private static readonly Regex RequestId = new Regex("^[A-Za-z0-9_-]{8,128}$", RegexOptions.CultureInvariant);
         public static bool IsRequestId(string value) { return value != null && RequestId.IsMatch(value); }
         public static bool IsSnapshotId(string value) { return IsRequestId(value); }
+        /// <summary>A launch site name as KSP and Kerbal Konstructs spell them: printable text, no control characters, at most 128 characters.</summary>
+        public static bool IsLaunchSite(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length > LaunchSiteMax) return false;
+            foreach (var c in value) if (char.IsControl(c)) return false;
+            return true;
+        }
         public static bool IsPlanHash(string value)
         {
             if (value == null || value.Length != PlanHashLength) return false;
@@ -81,5 +95,20 @@ namespace KspControl.Contracts
         public const string OperationError = "operation_error";
         public const string StagingFailed = "staging_failed";
         public const string CraftPartsMissing = "craft_parts_missing";
+        public const string SpendCapExceeded = "spend_cap_exceeded";
+        public const string SpendExceedsMax = "spend_exceeds_max";
+        public const string InsufficientFunds = "insufficient_funds";
+        public const string EconomyNotReady = "economy_not_ready";
+        public const string QuoteUnavailable = "quote_unavailable";
+        public const string LaunchNotAllowed = "launch_not_allowed";
+        public const string LaunchPending = "launch_pending";
+        public const string LaunchSiteInvalid = "launch_site_invalid";
+        public const string LaunchRefused = "launch_refused";
+        public const string LaunchNotStarted = "launch_not_started";
+        public const string LaunchRejected = "launch_rejected";
+        public const string LaunchTimeout = "launch_timeout";
+        public const string FacadeUnavailable = "facade_unavailable";
+        public const string Disconnected = "disconnected";
+        public const string RefundUnconfirmed = "refund_unconfirmed";
     }
 }

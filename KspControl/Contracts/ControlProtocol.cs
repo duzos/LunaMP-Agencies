@@ -94,6 +94,8 @@ namespace KspControl.Contracts
         [JsonProperty("facilities", NullValueHandling = NullValueHandling.Ignore)] public string[] Facilities { get; set; }
         [JsonProperty("unsavedCraftPolicy", NullValueHandling = NullValueHandling.Ignore)] public string UnsavedCraftPolicy { get; set; }
         [JsonProperty("expiresUtc", NullValueHandling = NullValueHandling.Ignore)] public string ExpiresUtc { get; set; }
+        /// <summary>The gross funds this grant may spend across all jobs and retries, fixed when the human issued it.</summary>
+        [JsonProperty("spendLimitFunds", NullValueHandling = NullValueHandling.Ignore)] public long? SpendLimitFunds { get; set; }
 
         public static GrantStatusInfo Missing(string detail = null) => new GrantStatusInfo { State = GrantStates.Missing, Detail = detail };
     }

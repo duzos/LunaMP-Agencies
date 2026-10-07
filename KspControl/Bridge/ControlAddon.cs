@@ -18,6 +18,7 @@ namespace KspControl.Bridge
         private EditorRevisionTracker tracker;
         private EditorEvents editorEvents;
         private EditorOperationRunner runner;
+        private LaunchRunner launchRunner;
         private KeyCode stopKey = KeyCode.None;
         private string panelLine = "";
         private float panelRefreshed = -1f;
@@ -52,6 +53,10 @@ namespace KspControl.Bridge
                 runner = new EditorOperationRunner(editorPort, tracker, authority, source, files, paths, jobs, () => MonotonicClock.Milliseconds, () => observations.WorldEpoch);
                 var operations = new EditorOperationService(editorPort, tracker, authority, runner, jobs, () => new UnityConstructionCatalogReader(), paths, files, () => observations.WorldEpoch);
                 observations.Operations = operations;
+                var launchPort = new UnityLaunchPort();
+                launchRunner = new LaunchRunner(launchPort, editorPort, tracker, authority, source, () => MonotonicClock.Milliseconds, () => observations.WorldEpoch);
+                observations.Launches = new LaunchService(launchPort, editorPort, launchRunner, new LaunchJobs(), operations, () => observations.WorldEpoch);
+                operations.ExtraBusy = () => launchRunner.Busy;
                 observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");
@@ -80,6 +85,7 @@ namespace KspControl.Bridge
             catch { return; } // Scene teardown can invalidate game objects; pending requests expire without disclosure.
             try { pump.Update(); } catch { /* the trust layer must never break the frame */ }
             try { runner.Update(); } catch { /* the runner reports its own failures in the job; it must never break the frame */ }
+            try { launchRunner?.Update(); } catch { /* likewise for the launch runner */ }
             queue.Drain(observations.Execute);
         }
         public void OnGUI()

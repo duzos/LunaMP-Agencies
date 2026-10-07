@@ -46,6 +46,10 @@
     <Compile Include="../Bridge/ApplyPlanner.cs" Link="ApplyPlanner.cs" />
     <Compile Include="../Bridge/EditorOperationRunner.cs" Link="EditorOperationRunner.cs" />
     <Compile Include="../Bridge/EditorOperationService.cs" Link="EditorOperationService.cs" />
+    <Compile Include="../Bridge/LaunchPort.cs" Link="LaunchPort.cs" />
+    <Compile Include="../Bridge/LaunchJob.cs" Link="LaunchJob.cs" />
+    <Compile Include="../Bridge/LaunchRunner.cs" Link="LaunchRunner.cs" />
+    <Compile Include="../Bridge/LaunchService.cs" Link="LaunchService.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
     <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />

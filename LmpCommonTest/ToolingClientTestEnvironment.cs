@@ -97,6 +97,7 @@ namespace LmpClient.Systems.Agency
         internal static void Receive(EconomySnapshot state) { }
         internal static void HandleResult(EconomyResult result) { }
         internal static void Tick() { }
+        internal static TradeEntitlement SelectVoucher(ToolingQuote quote) => null;
     }
     internal static class ToolingManifestBuilder
     {

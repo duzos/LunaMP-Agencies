@@ -23,6 +23,10 @@ namespace LmpClient.Systems.Agency
         public string DeliveryStatus { get; internal set; }
         public string LocalPath { get; internal set; }
         public bool Delivered { get; internal set; }
+        public TradeEntitlementKind Kind { get; internal set; }
+        public bool Redeemed { get; internal set; }
+        public bool Reserved { get; internal set; }
+        public double PrepaidFunds { get; internal set; }
     }
     public static class TradeClient
     {
@@ -41,6 +45,37 @@ namespace LmpClient.Systems.Agency
         public static bool Ready => Enabled && ToolingClient.BalanceReady && agency == AgencySystem.Singleton.MyAgencyId;
         public static string LatestStatus { get; private set; }
         public static string EditorAllowanceStatus { get; private set; }
+        private static bool useVoucher = true;
+        /// <summary>The "Use free launch voucher" choice. On by default; a matching unspent voucher is applied automatically.</summary>
+        public static bool UseVoucher
+        {
+            get => useVoucher;
+            set { if (useVoucher == value) return; useVoucher = value; ToolingClient.RequestQuoteRefresh(); }
+        }
+        private static bool UsesFunds => SettingsSystem.ServerSettings.GameMode == GameMode.Career;
+        /// <summary>The voucher a launch of this quoted design would use, or null. Only applies with tooling on and the toggle on.</summary>
+        internal static TradeEntitlement SelectVoucher(ToolingQuote quote)
+        {
+            if (!Ready || !ToolingClient.Enabled || !useVoucher) return null;
+            lock (gate) return TradePolicy.SelectVoucher(entitlements, quote, UsesFunds);
+        }
+        /// <summary>True when the buyer holds an unspent, unreserved free launch of this exact part list, whatever the toggle says.</summary>
+        public static bool HasUnusedVoucher(string fingerprint)
+        {
+            lock (gate) return entitlements.Any(e => e.Kind == TradeEntitlementKind.SingleLaunch && !e.Redeemed && e.LaunchId == Guid.Empty && e.Fingerprint == fingerprint);
+        }
+        public static TradeEntitlement VoucherById(Guid id)
+        {
+            lock (gate) return entitlements.FirstOrDefault(e => e.EntitlementId == id);
+        }
+        /// <summary>What a single-launch sale of this design would cost the seller's agency now, at the seller's own tooled or untooled rate.</summary>
+        public static double EstimatePrepay(ToolingManifest manifest, out double rate, out bool tooled)
+        {
+            var quote = ToolingClient.StandardQuote(manifest);
+            tooled = quote.AlreadyTooled;
+            rate = tooled ? ToolingClient.Rates().TooledLaunch : ToolingClient.Rates().UntooledLaunch;
+            return !quote.Success || !UsesFunds ? 0 : TradePolicy.PrepaidLaunchCost(quote, rate);
+        }
         internal static void Receive(EconomySnapshot snapshot)
         {
             if (snapshot == null) return;
@@ -70,31 +105,54 @@ namespace LmpClient.Systems.Agency
             lock (gate) return offers.Select(o => new TradeOffer { OfferId=o.OfferId, SellerAgencyId=o.SellerAgencyId, BuyerAgencyId=o.BuyerAgencyId,
                 VesselId=o.VesselId, Revision=o.Revision, ExpiresUtcTicks=o.ExpiresUtcTicks, Status=o.Status, SellerFunds=o.SellerFunds,
                 SellerScience=o.SellerScience, BuyerFunds=o.BuyerFunds, BuyerScience=o.BuyerScience, DesignFingerprint=o.DesignFingerprint,
-                BlueprintName=o.BlueprintName, Editor=o.Editor, VesselName=o.VesselName }).ToArray();
+                BlueprintName=o.BlueprintName, Editor=o.Editor, VesselName=o.VesselName, DesignMode=o.DesignMode, PrepaidLaunchFunds=o.PrepaidLaunchFunds,
+                LaunchMultiplier=o.LaunchMultiplier }).ToArray();
         }
         public static IReadOnlyList<ReceivedTradeDesign> GetReceivedDesignsSnapshot()
         {
-            lock (gate) return deliveries.Values.Select(d => new ReceivedTradeDesign {Id=d.Id,SellerAgencyId=d.SellerAgencyId,VesselId=d.VesselId,
-                Name=d.Name,Editor=d.Editor,Fingerprint=d.Fingerprint,DeliveryStatus=d.DeliveryStatus,LocalPath=d.LocalPath,Delivered=d.Delivered}).ToArray();
+            // Voucher state changes without a new delivery, so it is read from the live entitlement, not the cached delivery view.
+            lock (gate) return deliveries.Values.Select(d =>
+            {
+                var live = entitlements.FirstOrDefault(e => e.EntitlementId == d.Id);
+                return new ReceivedTradeDesign {Id=d.Id,SellerAgencyId=d.SellerAgencyId,VesselId=d.VesselId,
+                    Name=d.Name,Editor=d.Editor,Fingerprint=d.Fingerprint,DeliveryStatus=d.DeliveryStatus,LocalPath=d.LocalPath,Delivered=d.Delivered,
+                    Kind=live?.Kind??d.Kind,Redeemed=live?.Redeemed??d.Redeemed,Reserved=live!=null && live.LaunchId!=Guid.Empty,PrepaidFunds=live?.PrepaidFunds??d.PrepaidFunds};
+            }).ToArray();
         }
+        /// <summary>
+        /// Whether purchased rights unlock this exact part list. Permanent allowances always count. A free-launch voucher counts only
+        /// when it will really be applied: tooling on, toggle on, and either selected for the launch in progress or the one the next launch would use.
+        /// </summary>
         internal static bool HasEntitlement(ToolingManifest manifest)
         {
             if (!Ready) return false;
-            lock (gate) return TradePolicy.CanUseEntitlement(manifest, entitlements.Select(e => e.Fingerprint));
+            string fingerprint;
+            try { fingerprint = ToolingPolicy.Fingerprint(manifest); }
+            catch (ArgumentException) { return false; }
+            var pendingVoucher = ToolingClient.PendingVoucher;
+            lock (gate)
+            {
+                if (entitlements.Any(e => e.Kind == TradeEntitlementKind.Permanent && e.Fingerprint == fingerprint)) return true;
+                if (!ToolingClient.Enabled || !useVoucher) return false;
+                if (ToolingClient.LaunchPending) return pendingVoucher != Guid.Empty && entitlements.Any(e => e.EntitlementId == pendingVoucher && e.Kind == TradeEntitlementKind.SingleLaunch && e.Fingerprint == fingerprint);
+                if (!entitlements.Any(e => e.Kind == TradeEntitlementKind.SingleLaunch && !e.Redeemed && e.LaunchId == Guid.Empty && e.Fingerprint == fingerprint)) return false;
+            }
+            // Pricing is only worth computing once a matching unspent voucher exists.
+            return SelectVoucher(ToolingClient.StandardQuote(manifest)) != null;
         }
-        public static TradeCommand CaptureCurrentDesign()
+        public static TradeCommand CaptureCurrentDesign(out ToolingManifest manifest)
         {
             if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) throw new InvalidOperationException("Open a craft in the editor first.");
             var node = EditorLogic.fetch.ship.SaveShip();
-            return CaptureNode(node, node.Serialize());
+            return CaptureNode(node, node.Serialize(), out manifest);
         }
-        public static TradeCommand CaptureBlueprint(string absolutePath)
+        public static TradeCommand CaptureBlueprint(string absolutePath, out ToolingManifest manifest)
         {
             absolutePath = ValidateBlueprintPath(absolutePath);
             var info = new FileInfo(absolutePath);
             if (!info.Exists || info.Length <= 0 || info.Length > TradeLimits.MaxBlueprintBytes) throw new InvalidOperationException("Blueprint is missing or too large.");
             var bytes = File.ReadAllBytes(absolutePath);
-            return CaptureNode(ConfigNode.Parse(Encoding.UTF8.GetString(bytes)), bytes);
+            return CaptureNode(ConfigNode.Parse(Encoding.UTF8.GetString(bytes)), bytes, out manifest);
         }
         private static string ValidateBlueprintPath(string path)
         {
@@ -112,31 +170,39 @@ namespace LmpClient.Systems.Agency
                 if (current.Exists && (current.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Linked craft directories are unsupported.");
             return full;
         }
-        private static TradeCommand CaptureNode(ConfigNode node, byte[] bytes)
+        private static TradeCommand CaptureNode(ConfigNode node, byte[] bytes, out ToolingManifest manifest)
         {
             if (bytes == null || bytes.Length == 0 || bytes.Length > TradeLimits.MaxBlueprintBytes) throw new InvalidOperationException("Blueprint is missing or too large.");
             if (node == null || (node.GetValue("type") != "VAB" && node.GetValue("type") != "SPH")) throw new InvalidOperationException("Choose a valid VAB or SPH craft.");
-            var manifest = ToolingManifestBuilder.FromConfig(node, null);
+            manifest = ToolingManifestBuilder.FromConfig(node, null);
             return new TradeCommand { BlueprintData=bytes, BlueprintName=node.GetValue("ship") ?? "Purchased craft",
                 Editor=node.GetValue("type"), DesignFingerprint=ToolingPolicy.Fingerprint(manifest) };
         }
-        public static Guid CreateOffer(TradeCommand draft)
+        public static Guid CreateOffer(TradeCommand draft, ToolingManifest manifest = null)
         {
             if (draft == null) throw new ArgumentNullException(nameof(draft));
             if (draft.OfferId == Guid.Empty) draft.OfferId = Guid.NewGuid();
-            return Send(EconomyOperation.TradeCreate, draft);
+            if (draft.DesignMode == TradeDesignMode.SingleLaunch)
+            {
+                // Consistent with the other client-side research checks: the seller must be able to launch the design themselves.
+                if (!ToolingClient.Enabled) { LatestStatus = "Single-launch offers need agency tooling."; return Guid.Empty; }
+                if (manifest == null) { LatestStatus = "Choose a design to sell one launch of."; return Guid.Empty; }
+                if (!AgencyTradeResearch.Validate(manifest, out var reason)) { LatestStatus = "You can only sell a launch you could make yourself. " + reason; return Guid.Empty; }
+            }
+            return Send(EconomyOperation.TradeCreate, draft, draft.DesignMode == TradeDesignMode.SingleLaunch ? manifest : null);
         }
         public static Guid RespondOffer(Guid id, long expectedRevision, bool accept) => Send(accept ? EconomyOperation.TradeAccept : EconomyOperation.TradeDecline,
             new TradeCommand {OfferId=id, ExpectedRevision=expectedRevision});
         public static Guid CancelOffer(Guid id, long expectedRevision) => Send(EconomyOperation.TradeCancel, new TradeCommand {OfferId=id,ExpectedRevision=expectedRevision});
-        private static Guid Send(EconomyOperation operation, TradeCommand command)
+        private static Guid Send(EconomyOperation operation, TradeCommand command, ToolingManifest manifest = null)
         {
             if (!Ready) {LatestStatus="Waiting for agency trade data."; return Guid.Empty;}
             var copy=new TradeCommand {OfferId=command.OfferId,BuyerAgencyId=command.BuyerAgencyId,VesselId=command.VesselId,EntitlementId=command.EntitlementId,
                 ExpectedRevision=command.ExpectedRevision,SellerFunds=command.SellerFunds,SellerScience=command.SellerScience,BuyerFunds=command.BuyerFunds,
                 BuyerScience=command.BuyerScience,DesignFingerprint=command.DesignFingerprint,BlueprintName=command.BlueprintName,Editor=command.Editor,
+                DesignMode=command.DesignMode,
                 BlueprintData=command.BlueprintData==null?Array.Empty<byte>():(byte[])command.BlueprintData.Clone()};
-            return ToolingClient.Send(new EconomyCommand {Operation=operation,Trade=copy});
+            return ToolingClient.Send(new EconomyCommand {Operation=operation,Trade=copy,Manifest=manifest,ManifestHash=manifest==null?null:ToolingPolicy.ManifestHash(manifest)});
         }
         internal static void HandleResult(EconomyResult result)
         {
@@ -165,7 +231,8 @@ namespace LmpClient.Systems.Agency
             lock(gate)
                 if(deliveries.TryGetValue(item.EntitlementId,out var saved) && saved.Delivered && (item.Delivered || acknowledged.Contains(item.EntitlementId))) return;
             var view = new ReceivedTradeDesign {Id=item.EntitlementId,SellerAgencyId=item.SellerAgencyId,VesselId=item.VesselId,Name=item.BlueprintName,
-                Editor=item.Editor,Fingerprint=item.Fingerprint,DeliveryStatus="Purchased vessel allowance"};
+                Editor=item.Editor,Fingerprint=item.Fingerprint,DeliveryStatus=item.Kind==TradeEntitlementKind.SingleLaunch?"Free launch voucher":"Purchased vessel allowance",
+                Kind=item.Kind,Redeemed=item.Redeemed,PrepaidFunds=item.PrepaidFunds};
             try
             {
                 if (item.BlueprintData == null || item.BlueprintData.Length == 0) {lock(gate) deliveries[item.EntitlementId]=view; return;}
@@ -221,7 +288,14 @@ namespace LmpClient.Systems.Agency
         internal static Guid PrepareLaunch(ToolingManifest manifest)
         {
             var fingerprint=ToolingPolicy.Fingerprint(manifest);
-            lock(gate) {launchEntitlement=entitlements.FirstOrDefault(e=>e.Fingerprint==fingerprint)?.EntitlementId??Guid.Empty;return launchEntitlement;}
+            // A permanent allowance is always valid. Otherwise claim the voucher this launch reserved, which the server accepts for this launch only.
+            var voucher=ToolingClient.PendingVoucher;
+            lock(gate)
+            {
+                launchEntitlement=entitlements.FirstOrDefault(e=>e.Kind==TradeEntitlementKind.Permanent && e.Fingerprint==fingerprint)?.EntitlementId
+                    ??(voucher==Guid.Empty?Guid.Empty:entitlements.FirstOrDefault(e=>e.EntitlementId==voucher && e.Kind==TradeEntitlementKind.SingleLaunch && e.Fingerprint==fingerprint)?.EntitlementId)??Guid.Empty;
+                return launchEntitlement;
+            }
         }
         internal static void BindLaunch(Vessel vessel, ShipConstruct ship)
         {

@@ -36,7 +36,7 @@ namespace LmpClient.Windows.Agency
                 button = new GUIStyle(GUI.skin.button) { wordWrap = true };
             }
             WindowRect.width = Mathf.Min(340, Screen.width - 16);
-            WindowRect.height = Mathf.Min(compact ? 112 : 380, Screen.height - 32);
+            WindowRect.height = Mathf.Min(compact ? (ToolingClient.EditorVoucher != null ? 150 : 112) : 420, Screen.height - 32);
             WindowRect = FixWindowPos(GUILayout.Window(6812 + MainSystem.WindowOffset, WindowRect, DrawContent, "Agency design",
                 GUILayout.Width(WindowRect.width), GUILayout.Height(WindowRect.height)));
         }
@@ -59,12 +59,20 @@ namespace LmpClient.Windows.Agency
             }
             if (!quote.Success) { GUILayout.Label(quote.Reason, text); return; }
             GUILayout.Label("Launch  " + Money(quote.LaunchCost), heading);
+            var voucher = ToolingClient.EditorVoucher;
+            if (voucher != null)
+                GUILayout.Label("One free launch from " + SellerName(voucher.SellerAgencyId) + " applies: you pay " + Money(quote.LaunchCost) + " (inventory/extra only).", text);
             if (compact)
             {
                 if (GUILayout.Button("Show tooling details", button)) compact = false;
                 return;
             }
             scroll = GUILayout.BeginScrollView(scroll);
+            if (TradeClient.Ready && TradeClient.HasUnusedVoucher(quote.Fingerprint))
+            {
+                TradeClient.UseVoucher = GUILayout.Toggle(TradeClient.UseVoucher, "Use free launch voucher", button);
+                if (!TradeClient.UseVoucher) GUILayout.Label("The voucher stays unspent. This launch is charged the normal price.", text);
+            }
             GUILayout.Label(quote.AlreadyTooled ? "This exact design is tooled for your agency." : "This design is not tooled. Launching it as is costs " + Multiplier(ToolingClient.Rates().UntooledLaunch) + " its part price (science parts and inventory stay 1x), or you can purchase tooling once.", text);
             CostRow("Science parts · full price", quote.ScienceCost);
             CostRow("Inventory · full price", quote.CargoCost);
@@ -96,6 +104,7 @@ namespace LmpClient.Windows.Agency
             GUILayout.EndScrollView();
             if (GUILayout.Button("Collapse", button)) compact = true;
         }
+        private static string SellerName(Guid id) => AgencySystem.Singleton.KnownAgencies.TryGetValue(id, out var agency) ? agency.Name : id.ToString("N").Substring(0, 8);
         private static string Money(double value) => value.ToString("N1") + " funds";
         private static string Multiplier(double value) => value.ToString("0.##", CultureInfo.InvariantCulture) + "x";
         private void CostRow(string label, double amount)

@@ -8,7 +8,7 @@ public sealed record ControlLease(string Id,string Owner,string WorldEpoch,DateT
 public sealed record Job(string RequestId,string Fingerprint,string GrantId,string LeaseId,string WorldEpoch,string Operation,string EntityId,decimal ReservedCost,string Status,string Reason);
 public sealed class ControlJournal : IDisposable
 {
- private sealed class State { public Dictionary<string,Job> Jobs {get;set;}=new(); public decimal Charged {get;set;} }
+ private sealed class State { public Dictionary<string,Job> Jobs {get;set;}=new(); public decimal Charged {get;set;} public HashSet<string> GrantIds {get;set;}=new(StringComparer.Ordinal); }
  private bool faulted; private readonly object gate=new(); private readonly string path; private readonly FileStream exclusive; private State state;
  private readonly Dictionary<string,MissionGrant> grants=new(StringComparer.Ordinal); private ControlLease? lease;
  public ControlJournal(string directory)
@@ -25,7 +25,7 @@ public sealed class ControlJournal : IDisposable
  public void ProvisionGrant(MissionGrant grant)
  {
   if(string.IsNullOrWhiteSpace(grant.Id)||string.IsNullOrWhiteSpace(grant.WorldEpoch)||grant.SpendingLimit<0||grant.Operations==null||grant.Entities==null) throw new ArgumentException("invalid_grant");
-  lock(gate) { if(grants.ContainsKey(grant.Id)) throw new InvalidOperationException("grant_already_provisioned"); grants.Add(grant.Id,grant with { Operations=grant.Operations.ToArray(),Entities=grant.Entities.ToArray() }); }
+  lock(gate) { if(state.GrantIds.Contains(grant.Id)) throw new InvalidOperationException("grant_already_provisioned"); state.GrantIds.Add(grant.Id); Save(); grants.Add(grant.Id,grant with { Operations=grant.Operations.ToArray(),Entities=grant.Entities.ToArray() }); }
  }
  public ControlLease Acquire(string owner,string world,DateTimeOffset now,TimeSpan duration)
  {
@@ -80,4 +80,5 @@ public sealed class ControlJournal : IDisposable
  }
  public void Dispose() => exclusive.Dispose();
 }
+
 

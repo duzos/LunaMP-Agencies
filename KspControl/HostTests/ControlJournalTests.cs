@@ -18,6 +18,8 @@ namespace KspControl.HostTests;
  { var(j,l)=Setup(); using(j){ Admit(j,l); j.Revoke(); Assert.ThrowsException<InvalidOperationException>(()=>j.Begin("req",now)); Assert.AreEqual("accepted",j.Get("req").Status); } }
  [TestMethod] public void GrantRevocationDeniesDispatch()
  { var(j,l)=Setup(); using(j){ Admit(j,l); j.RevokeGrant("grant"); Assert.ThrowsException<InvalidOperationException>(()=>j.Begin("req",now)); } }
+ [TestMethod] public void RevokedGrantIdCannotBeReissued()
+ { var(j,l)=Setup(); using(j){ Admit(j,l); j.RevokeGrant("grant"); Assert.ThrowsException<InvalidOperationException>(()=>j.ProvisionGrant(new("grant","world",now.AddHours(1),100,new[]{"launch"},new[]{"test-craft"}))); Assert.ThrowsException<InvalidOperationException>(()=>j.Begin("req",now)); } using var restarted=new ControlJournal(directory); Assert.ThrowsException<InvalidOperationException>(()=>restarted.ProvisionGrant(new("grant","world",now.AddHours(1),100,new[]{"launch"},new[]{"test-craft"}))); }
  [TestMethod] public void RestartNeverReplaysAndRetainsReservation()
  { var(j,l)=Setup(); using(j){ Admit(j,l); j.Begin("req",now); } using var restarted=new ControlJournal(directory); Assert.AreEqual("indeterminate",restarted.Get("req").Status); Assert.ThrowsException<InvalidOperationException>(()=>restarted.Begin("req",now)); }
  [TestMethod] public void CompletedSpendPersistsAndCannotBeRefundedByCancellation()
@@ -31,3 +33,4 @@ namespace KspControl.HostTests;
  [TestMethod] public void CancellationReleasesOnlyUndispatchedReservation()
  { var(j,l)=Setup(); using(j){ Admit(j,l); j.CancelBeforeDispatch("req"); Admit(j,l,"second",100); j.Begin("second",now); j.MarkIndeterminate("second","socket_lost"); Assert.ThrowsException<InvalidOperationException>(()=>Admit(j,l,"third",1)); } }
 }
+

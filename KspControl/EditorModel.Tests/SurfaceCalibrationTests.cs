@@ -33,27 +33,53 @@ public class SurfaceCalibrationTests
     static SurfaceMeasurements Measure(StructuralLayout layout, Func<LayoutPart, double> radiusOf)
     {
         var m = new SurfaceMeasurements();
-        foreach (var site in SurfaceCalibration.MeasurementSites(layout)) m.SetRadius(site.ParentCid, site.Height, radiusOf(layout.Parts.Single(p => p.Cid == site.ParentCid)));
+        foreach (var site in SurfaceCalibration.MeasurementSites(layout)) m.SetRadius(site.ParentCid, site.Height, site.AngleDegrees, radiusOf(layout.Parts.Single(p => p.Cid == site.ParentCid)));
         return m;
     }
 
+    static IEnumerable<Vector> Ring(double r, double y, int n = 72) => Enumerable.Range(0, n).Select(k => new Vector(r * Math.Sin(2 * Math.PI * k / n), y, r * Math.Cos(2 * Math.PI * k / n)));
+
     [TestMethod]
-    public void RadiusAtHeightUsesOnlyBoxesThatSpanTheHeight()
+    public void ACylinderHasTheSameSupportInEveryDirection()
     {
-        Vector[] Box(double r, double y0, double y1) => new[]
-        {
-            new Vector(-r, y0, -r), new Vector(r, y0, -r), new Vector(-r, y1, -r), new Vector(r, y1, -r),
-            new Vector(-r, y0, r), new Vector(r, y0, r), new Vector(-r, y1, r), new Vector(r, y1, r),
-        };
-        var boxes = new[] { Box(1.25, -3.7, 3.7), Box(0.4, 3.7, 4.2), Box(2.0, -9, -8) };
-        Assert.AreEqual(1.25, SurfaceCalibration.RadiusAtHeight(boxes, 0)!.Value, 1e-12);
-        Assert.AreEqual(1.25, SurfaceCalibration.RadiusAtHeight(boxes, 3.7005)!.Value, 1e-12, "boundary slack");
-        Assert.AreEqual(0.4, SurfaceCalibration.RadiusAtHeight(boxes, 4.0)!.Value, 1e-12);
-        Assert.IsNull(SurfaceCalibration.RadiusAtHeight(boxes, 20));
-        Assert.IsNull(SurfaceCalibration.RadiusAtHeight(new[] { new[] { new Vector(double.NaN, 0, 0) } }, 0));
-        Assert.IsNull(SurfaceCalibration.RadiusAtHeight(null, 0));
-        // overlapping boxes at one height: the widest wins
-        Assert.AreEqual(2.0, SurfaceCalibration.RadiusAtHeight(new[] { Box(1.25, -1, 1), Box(2.0, -1, 1) }, 0)!.Value, 1e-12);
+        var verts = Ring(1.25, -1).Concat(Ring(1.25, 0)).Concat(Ring(1.25, 1)).ToList();
+        foreach (var angle in new[] { 0.0, 45.0, 90.0, 135.0, 270.0 })
+            Assert.AreEqual(1.25, SurfaceCalibration.SupportAlong(verts, 0, angle)!.Value, 1e-9, "angle " + angle);
+        // 45 degrees: a bounding box of this cylinder would read r * sqrt(2); the support does not.
+        Assert.IsTrue(SurfaceCalibration.SupportAlong(verts, 0, 45)!.Value < 1.26);
+    }
+
+    [TestMethod]
+    public void AnOffsetPlateHasItsRealExtentAlongEachDirection()
+    {
+        var plate = new[] { new Vector(0.5, 0, -0.1), new Vector(0.7, 0, -0.1), new Vector(0.5, 0, 0.1), new Vector(0.7, 0, 0.1) };
+        Assert.AreEqual(0.7, SurfaceCalibration.SupportAlong(plate, 0, 90)!.Value, 1e-9);
+        Assert.AreEqual(0.1, SurfaceCalibration.SupportAlong(plate, 0, 0)!.Value, 1e-9);
+        Assert.AreEqual(0.1, SurfaceCalibration.SupportAlong(plate, 0, 180)!.Value, 1e-9);
+        Assert.AreEqual(-0.5, SurfaceCalibration.SupportAlong(plate, 0, 270)!.Value, 1e-9, "behind the plate the support is negative");
+        Assert.AreEqual((0.7 + 0.1) * Math.Sqrt(0.5), SurfaceCalibration.SupportAlong(plate, 0, 45)!.Value, 1e-9);
+    }
+
+    [TestMethod]
+    public void OnlyTheBandAroundTheHeightCountsAndTheNearestBandIsUsedWhenEmpty()
+    {
+        var verts = Ring(2.0, 0.02).Concat(Ring(1.0, 0.5)).Concat(Ring(0.4, 4.0)).ToList();
+        Assert.AreEqual(2.0, SurfaceCalibration.SupportAlong(verts, 0, 0)!.Value, 1e-9, "within 5 cm");
+        Assert.AreEqual(1.0, SurfaceCalibration.SupportAlong(verts, 0.55, 0)!.Value, 1e-9);
+        Assert.AreEqual(1.0, SurfaceCalibration.SupportAlong(verts, 0.3, 0)!.Value, 1e-9, "nothing within 5 cm of 0.3: the nearest vertex height (0.5) is used");
+        Assert.AreEqual(0.4, SurfaceCalibration.SupportAlong(verts, 20, 0)!.Value, 1e-9, "nearest band, even far away");
+        Assert.IsNull(SurfaceCalibration.SupportAlong(new Vector[0], 0, 0));
+        Assert.IsNull(SurfaceCalibration.SupportAlong(new[] { new Vector(double.NaN, 0, 0) }, 0, 0));
+        Assert.IsNull(SurfaceCalibration.SupportAlong(null, 0, 0));
+        Assert.IsNull(SurfaceCalibration.SupportAlong(verts, 0, double.NaN));
+    }
+
+    [TestMethod]
+    public void KeysNormaliseTheAngle()
+    {
+        Assert.AreEqual(SurfaceCalibration.Key(7, 1.5, 0), SurfaceCalibration.Key(7, 1.5, 360));
+        Assert.AreEqual(SurfaceCalibration.Key(7, 1.5, 270), SurfaceCalibration.Key(7, 1.5, -90));
+        Assert.AreNotEqual(SurfaceCalibration.Key(7, 1.5, 0), SurfaceCalibration.Key(7, 1.5, 90));
     }
 
     [TestMethod]
@@ -64,7 +90,8 @@ public class SurfaceCalibrationTests
         Assert.IsTrue(SurfaceCalibration.NeedsCalibration(plan.Layout));
         var sites = SurfaceCalibration.Sites(plan.Layout);
         Assert.AreEqual(8, sites.Count, "four decouplers and four boosters");
-        Assert.AreEqual(5, SurfaceCalibration.MeasurementSites(plan.Layout).Count, "one tank site plus one decoupler site per booster");
+        Assert.AreEqual(8, SurfaceCalibration.MeasurementSites(plan.Layout).Count, "the tank in each of four directions plus each decoupler once");
+        CollectionAssert.AreEquivalent(new[] { 0.0, 90.0, 180.0, 270.0 }, SurfaceCalibration.MeasurementSites(plan.Layout!).Select(x => x.AngleDegrees).Distinct().ToList());
         Assert.IsTrue(sites.All(s => s.RadiusUsed == 0.625), "provisional radius recorded");
         var t1 = new GraphDto { Name = "x", Facility = "VAB", Root = "core" };
         t1.Parts.Add(G("core", "probeCoreOcto.v2")); t1.Parts.Add(G("tank", "Rockomax64.BW", "core", "bottom", "top")); t1.Parts.Add(G("engine", "engineLargeSkipper", "tank", "bottom", "top"));
@@ -117,7 +144,7 @@ public class SurfaceCalibrationTests
         var g = Radial(2, height: 1.5);
         var first = CraftPlanner.Plan(g, Catalog()); Assert.IsTrue(first.Ok, string.Join(";", first.Issues));
         var m = new SurfaceMeasurements();
-        foreach (var s in SurfaceCalibration.MeasurementSites(first.Layout!)) m.SetRadius(s.ParentCid, s.Height, s.ParentCid == first.Layout!.Parts.First(p => p.Source.Id == "tank").Cid ? 1.9 : 0.4);
+        foreach (var s in SurfaceCalibration.MeasurementSites(first.Layout!)) m.SetRadius(s.ParentCid, s.Height, s.AngleDegrees, s.ParentCid == first.Layout!.Parts.First(p => p.Source.Id == "tank").Cid ? 1.9 : 0.4);
         var second = SurfaceCalibration.Recalibrate(g, Catalog(), null, first.Layout!, m);
         Assert.IsTrue(second.Ok, string.Join(";", second.Issues));
         var tank = second.Layout!.Parts.First(p => p.Source.Id == "tank");
@@ -161,16 +188,47 @@ public class SurfaceCalibrationTests
     }
 
     [TestMethod]
-    public void ClearanceIsFiveCentimetres()
+    public void ClearanceComparesTheLiveAttachPointWithTheLoadedSurface()
     {
         var plan = CraftPlanner.Plan(Radial(2), Catalog()); Assert.IsTrue(plan.Ok);
         var sites = SurfaceCalibration.Sites(plan.Layout!);
-        Assert.AreEqual(0, SurfaceCalibration.Clearance(sites, (c, h) => 0.625 + 0.0499).Count);
-        Assert.AreEqual(0, SurfaceCalibration.Clearance(sites, (c, h) => 0.625 - 0.05).Count, "5 cm itself passes");
-        var off = SurfaceCalibration.Clearance(sites, (c, h) => 0.625 + 0.0501);
+        // The child's attach point sits d metres out along its direction at the site's height; the loaded parent surface is at 0.9.
+        Func<double, Func<uint, uint, Vector?>> at = d => (parent, child) =>
+        {
+            var s = sites.First(x => x.ChildCid == child); var a = s.AngleDegrees * Math.PI / 180;
+            return new Vector(d * Math.Sin(a), s.Height, d * Math.Cos(a));
+        };
+        Func<uint, double, double, double?> surface = (c, h, a) => 0.9;
+        Assert.AreEqual(0, SurfaceCalibration.Clearance(sites, surface, at(0.9)).Count);
+        Assert.AreEqual(0, SurfaceCalibration.Clearance(sites, surface, at(0.9499)).Count);
+        Assert.AreEqual(0, SurfaceCalibration.Clearance(sites, surface, at(0.8501)).Count);
+        var off = SurfaceCalibration.Clearance(sites, surface, at(0.9501));
         Assert.AreEqual(sites.Count, off.Count); StringAssert.Contains(off[0], "surface_clearance");
-        var missing = SurfaceCalibration.Clearance(sites, (c, h) => null);
-        Assert.IsTrue(missing.All(p => p.StartsWith("surface_unmeasured")));
+        Assert.AreEqual(sites.Count, SurfaceCalibration.Clearance(sites, surface, at(0.7)).Count, "buried inside the parent");
+        // height off by more than 5 cm
+        var high = SurfaceCalibration.Clearance(sites, surface, (p, c) => { var v = at(0.9)(p, c)!.Value; return new Vector(v.X, v.Y + 0.06, v.Z); });
+        Assert.IsTrue(high.Count > 0 && high.All(x => x.StartsWith("surface_height")));
+        Assert.IsTrue(SurfaceCalibration.Clearance(sites, (c, h, a) => null, at(0.9)).All(p => p.StartsWith("surface_unmeasured")));
+        Assert.IsTrue(SurfaceCalibration.Clearance(sites, surface, (p, c) => null).All(p => p.StartsWith("surface_unmeasured")));
+    }
+
+    [TestMethod]
+    public void ThePlacementThatLandsOnTheMeasuredSurfaceClearsItAndAPassOnePlacementDoesNot()
+    {
+        // End to end in the pure model: the planner's pass-2 attach points are on the measured surface; the provisional pass-1 ones are not.
+        var first = CraftPlanner.Plan(Radial(4), Catalog()); Assert.IsTrue(first.Ok);
+        var m = Measure(first.Layout!, p => p.Source.Id == "tank" ? 1.25 : 0.3125);
+        var second = SurfaceCalibration.Recalibrate(Radial(4), Catalog(), null, first.Layout!, m);
+        Assert.IsTrue(second.Ok);
+        Func<StructuralLayout, Func<uint, uint, Vector?>> attach = layout => (parent, child) =>
+        {
+            var c = layout.Parts.First(x => x.Cid == child); var pa = layout.Parts.First(x => x.Cid == parent);
+            // srf node at the child's origin in this catalog: the attach point in the parent frame is child - parent, unrotated (rotated into the parent's frame)
+            return RotationMath.InverseRotate(RotationMath.Sub(c.Position, pa.Position), pa.Rotation);
+        };
+        Func<uint, double, double, double?> surface = (cid, h, a) => cid == second.Layout!.Parts.First(x => x.Source.Id == "tank").Cid ? 1.25 : 0.3125;
+        Assert.AreEqual(0, SurfaceCalibration.Clearance(SurfaceCalibration.Sites(second.Layout!), surface, attach(second.Layout!)).Count);
+        Assert.IsTrue(SurfaceCalibration.Clearance(SurfaceCalibration.Sites(first.Layout!), surface, attach(first.Layout!)).Count > 0);
     }
 
     [TestMethod]
@@ -179,7 +237,7 @@ public class SurfaceCalibrationTests
         var g = new GraphDto { Name = "x", Facility = "VAB", Root = "core" };
         g.Parts.Add(G("core", "probeCoreOcto.v2")); g.Parts.Add(G("tank", "Rockomax64.BW", "core", "bottom", "top")); g.Parts.Add(G("engine", "engineLargeSkipper", "tank", "bottom", "top"));
         var a = CraftPlanner.Plan(g, Catalog());
-        var b = CraftPlanner.Plan(g, Catalog(), new PlannerOptions { SurfaceRadiusProvider = (c, h) => 9.0 });
+        var b = CraftPlanner.Plan(g, Catalog(), new PlannerOptions { SurfaceRadiusProvider = (c, h, a) => 9.0 });
         Assert.AreEqual(a.Craft!.ToText(), b.Craft!.ToText());
     }
 }

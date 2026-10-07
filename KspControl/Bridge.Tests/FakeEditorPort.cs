@@ -161,10 +161,13 @@ namespace KspControl.BridgeTests
         public IReadOnlyList<string> ReadCrew() { return CrewList; }
 
         // ---- surface placement (P2.8): scriptable live measurements, every call counted ----
-        public Func<uint, double, double?> RadiusOf;
+        public Func<uint, double, double, double?> RadiusOf;
+        public Func<uint, uint, Pure.Vector?> AttachOf;
         public Func<uint, Pure.SurfaceNodeDefinition> SurfaceNodeOf;
         public int MeasureCalls, NodeReads;
-        public double? MeasureSurfaceRadius(uint parentCraftId, double localHeight) { MeasureCalls++; return RadiusOf == null ? (double?)null : RadiusOf(parentCraftId, localHeight); }
+        public int AttachReads;
+        public double? MeasureSurfaceRadius(uint parentCraftId, double localHeight, double angleDegrees) { MeasureCalls++; return RadiusOf == null ? (double?)null : RadiusOf(parentCraftId, localHeight, angleDegrees); }
+        public Pure.Vector? ReadAttachPoint(uint parentCraftId, uint childCraftId) { AttachReads++; return AttachOf == null ? (Pure.Vector?)null : AttachOf(parentCraftId, childCraftId); }
         public Pure.SurfaceNodeDefinition ReadSurfaceNode(uint craftId) { NodeReads++; return SurfaceNodeOf == null ? null : SurfaceNodeOf(craftId); }
 
         /// <summary>A three-part craft. Each argument changes exactly one thing the fingerprint must notice.</summary>

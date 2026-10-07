@@ -187,10 +187,13 @@ namespace KspControl.Bridge
         // ---- surface placement (plan R1-section 6.5, P2.8). Main thread only; both read the live editor craft and change nothing. ----
 
         /// <summary>
-        /// The live radius, in metres, of the part with craft id <paramref name="parentCraftId"/> at <paramref name="localHeight"/> in that part's local frame,
-        /// from its own renderer bounds (never prefab bounds). Null when the part is absent or has no renderer spanning the height.
+        /// The live surface support, in metres, of the part with craft id <paramref name="parentCraftId"/> along the outward direction
+        /// <paramref name="angleDegrees"/> (0 = +Z, 90 = +X, in the part's frame) at <paramref name="localHeight"/>, from the vertices of its own meshes
+        /// (never prefab bounds). Null when the part is absent or has no mesh vertices.
         /// </summary>
-        double? MeasureSurfaceRadius(uint parentCraftId, double localHeight);
+        double? MeasureSurfaceRadius(uint parentCraftId, double localHeight, double angleDegrees);
+        /// <summary>The child's live attach point (its srfAttachNode position) expressed in the parent's frame, or null when either part is absent.</summary>
+        Pure.Vector? ReadAttachPoint(uint parentCraftId, uint childCraftId);
         /// <summary>The live srfAttachNode (part-local position and orientation) of the part with craft id <paramref name="craftId"/>, or null.</summary>
         Pure.SurfaceNodeDefinition ReadSurfaceNode(uint craftId);
     }

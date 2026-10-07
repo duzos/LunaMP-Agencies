@@ -138,46 +138,52 @@ namespace KspControl.Bridge
         }
 
         /// <summary>
-        /// The part's own renderer boxes in its local frame: each MeshRenderer or SkinnedMeshRenderer under the part but not under a child part, its
-        /// mesh-space bounds taken through the full transform chain, so a rotated or scaled mesh still gives an exact oriented box.
+        /// The part's own mesh vertices in its local frame: every MeshRenderer or SkinnedMeshRenderer under the part but not under a child part,
+        /// each vertex taken through the full transform chain.
         /// </summary>
-        private static List<Pure.Vector[]> RendererBoxes(Part part)
+        private static List<Pure.Vector> MeshVertices(Part part)
         {
-            var boxes = new List<Pure.Vector[]>();
+            var vertices = new List<Pure.Vector>();
             foreach (var renderer in part.GetComponentsInChildren<Renderer>(false))
             {
                 if (renderer == null || !renderer.enabled || renderer.GetComponentInParent<Part>() != part) continue;
-                Bounds local;
+                Mesh mesh;
                 var skinned = renderer as SkinnedMeshRenderer;
-                if (skinned != null) local = skinned.localBounds;
+                if (skinned != null) mesh = skinned.sharedMesh;
                 else if (renderer is MeshRenderer)
                 {
                     var filter = renderer.GetComponent<MeshFilter>();
-                    if (filter == null || filter.sharedMesh == null) continue;
-                    local = filter.sharedMesh.bounds;
+                    mesh = filter == null ? null : filter.sharedMesh;
                 }
                 else continue;
-                var corners = new Pure.Vector[8];
-                var i = 0;
-                for (var x = -1; x <= 1; x += 2)
-                    for (var y = -1; y <= 1; y += 2)
-                        for (var z = -1; z <= 1; z += 2)
-                        {
-                            var world = renderer.transform.TransformPoint(local.center + Vector3.Scale(local.extents, new Vector3(x, y, z)));
-                            var inPart = part.transform.InverseTransformPoint(world);
-                            corners[i++] = new Pure.Vector(inPart.x, inPart.y, inPart.z);
-                        }
-                boxes.Add(corners);
+                if (mesh == null || !mesh.isReadable) continue;
+                foreach (var vertex in mesh.vertices)
+                {
+                    var inPart = part.transform.InverseTransformPoint(renderer.transform.TransformPoint(vertex));
+                    vertices.Add(new Pure.Vector(inPart.x, inPart.y, inPart.z));
+                }
             }
-            return boxes;
+            return vertices;
         }
 
-        public double? MeasureSurfaceRadius(uint parentCraftId, double localHeight)
+        public double? MeasureSurfaceRadius(uint parentCraftId, double localHeight, double angleDegrees)
         {
             try
             {
                 var part = FindPart(parentCraftId);
-                return part == null ? null : Pure.SurfaceCalibration.RadiusAtHeight(RendererBoxes(part), localHeight);
+                return part == null ? null : Pure.SurfaceCalibration.SupportAlong(MeshVertices(part), localHeight, angleDegrees);
+            }
+            catch (Exception) { return null; }
+        }
+
+        public Pure.Vector? ReadAttachPoint(uint parentCraftId, uint childCraftId)
+        {
+            try
+            {
+                var parent = FindPart(parentCraftId); var child = FindPart(childCraftId);
+                if (parent == null || child == null || child.srfAttachNode == null) return null;
+                var p = parent.transform.InverseTransformPoint(child.transform.TransformPoint(child.srfAttachNode.position));
+                return new Pure.Vector(p.x, p.y, p.z);
             }
             catch (Exception) { return null; }
         }

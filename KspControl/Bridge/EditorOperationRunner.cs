@@ -256,9 +256,9 @@ namespace KspControl.Bridge
             var measured = new Pure.SurfaceMeasurements();
             foreach (var site in Pure.SurfaceCalibration.MeasurementSites(plan.Plan.Layout))
             {
-                var radius = port.MeasureSurfaceRadius(site.ParentCid, site.Height);
+                var radius = port.MeasureSurfaceRadius(site.ParentCid, site.Height, site.AngleDegrees);
                 if (!radius.HasValue) { LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, "surface_unmeasured " + site.PartId); return; }
-                measured.SetRadius(site.ParentCid, site.Height, radius.Value);
+                measured.SetRadius(site.ParentCid, site.Height, site.AngleDegrees, radius.Value);
             }
             foreach (var site in job.SurfaceSites)
             {
@@ -271,6 +271,8 @@ namespace KspControl.Bridge
             if (!second.Ok) { LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, second.Issues.Count == 0 ? "recalibration_failed" : second.Issues[0].ToString()); return; }
             var text = second.Craft.ToText();
             if (text.Length > Pure.ConfigText.MaxChars) { LoadFailure(job, OperationReasons.GeometryMismatchAfterLoad, "recalibrated_craft_too_large"); return; }
+            // A revision bump between the loads (our own settle events) must not cancel the job: adopt it first, as every other phase does.
+            Rebase(job);
             Validate(job);
             var bytes = new UTF8Encoding(false).GetBytes(text);
             files.WriteAtomic(job.StagingPath, bytes); // the pass-1 file was already consumed by the synchronous load; the same declared path is reused
@@ -299,7 +301,7 @@ namespace KspControl.Bridge
             }
             if (job.SurfacePass == 2)
             {
-                var clearance = Pure.SurfaceCalibration.Clearance(job.SurfaceSites, (cid, height) => port.MeasureSurfaceRadius(cid, height));
+                var clearance = Pure.SurfaceCalibration.Clearance(job.SurfaceSites, (cid, height, angle) => port.MeasureSurfaceRadius(cid, height, angle), (parent, child) => port.ReadAttachPoint(parent, child));
                 if (clearance.Count != 0)
                 {
                     foreach (var problem in clearance.Take(20)) job.VerifyProblems.Add(OperationReasons.GeometryMismatchAfterLoad + ": " + problem);

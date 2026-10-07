@@ -53,8 +53,24 @@ namespace KspControl.BridgeTests
         private void LiveRadii(OperationJob job, double tank = 0.9, double decoupler = 0.2)
         {
             var layout = job.Plan.Plan.Layout;
-            rig.Port.RadiusOf = (cid, h) => layout.Parts.Where(p => p.Cid == cid).Select(p => (double?)(p.Source.Id == "tank" ? tank : decoupler)).FirstOrDefault();
+            rig.Port.RadiusOf = (cid, h, a) => layout.Parts.Where(p => p.Cid == cid).Select(p => (double?)(p.Source.Id == "tank" ? tank : decoupler)).FirstOrDefault();
             rig.Port.SurfaceNodeOf = cid => new Pure.SurfaceNodeDefinition { Position = new Pure.Vector(0, 0, 0), Orientation = new Pure.Vector(1, 0, 0) };
+            Attach(job, 0);
+        }
+
+        /// <summary>The live attach point of each child, read from the plan the editor holds now (pass 2 once calibrated), pushed <paramref name="extra"/> metres outward.</summary>
+        private void Attach(OperationJob job, double extra)
+        {
+            rig.Port.AttachOf = (parent, child) =>
+            {
+                var layout = job.Plan.Plan.Layout;
+                var c = layout.Parts.First(x => x.Cid == child); var pa = layout.Parts.First(x => x.Cid == parent);
+                var node = rig.Port.SurfaceNodeOf(child).Position;
+                var world = Pure.RotationMath.Add(c.Position, Pure.RotationMath.Rotate(node, c.Rotation));
+                var v = Pure.RotationMath.InverseRotate(Pure.RotationMath.Sub(world, pa.Position), pa.Rotation);
+                var a = c.SurfaceAngleDegrees * Math.PI / 180;
+                return new Pure.Vector(v.X + extra * Math.Sin(a), v.Y, v.Z + extra * Math.Cos(a));
+            };
         }
 
         private static double Horizontal(Pure.ConfigNode craft, string partName, int index)
@@ -103,7 +119,8 @@ namespace KspControl.BridgeTests
             var job = Start(); LiveRadii(job);
             rig.RunToEnd();
             // Sites: the tank (one site, shared by both decouplers) and each decoupler (one per booster) in pass 1, then every surface part once in the clearance gate.
-            Assert.AreEqual(3 + 4, rig.Port.MeasureCalls);
+            Assert.AreEqual(4 + 4, rig.Port.MeasureCalls);
+            Assert.AreEqual(4, rig.Port.AttachReads, "each child's live attach point once, in the clearance gate");
             Assert.AreEqual(2, rig.Port.NodeReads, "the live srfAttachNode of each distinct child part, read once");
         }
 
@@ -118,13 +135,12 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void AClearanceGapOverFiveCentimetresAfterThePassTwoLoadFailsAndRestores()
+        public void AChildThatDidNotLandOnTheLoadedSurfaceFailsAndRestores()
         {
             var job = Start(); LiveRadii(job);
-            var layout = job.Plan.Plan.Layout;
-            var calls = 0;
-            // The three pass-1 measurements are right; after the second load the tank reports a surface 8 cm away from where the child was placed.
-            rig.Port.RadiusOf = (cid, h) => { calls++; var p = layout.Parts.First(x => x.Cid == cid); return calls <= 3 ? (p.Source.Id == "tank" ? 0.9 : 0.2) : (p.Source.Id == "tank" ? 0.98 : 0.2); };
+            // The parents and nodes read correctly in pass 1; once pass 2 is loaded the decouplers' attach points are 8 cm off the surface.
+            Func<uint, uint, Pure.Vector?> honest = rig.Port.AttachOf;
+            rig.Port.AttachOf = (p, c) => { var v = honest(p, c).Value; var s = job.SurfaceSites.First(x => x.ChildCid == c); var a = s.AngleDegrees * Math.PI / 180; return new Pure.Vector(v.X + 0.08 * Math.Sin(a), v.Y, v.Z + 0.08 * Math.Cos(a)); };
             rig.RunToEnd();
             Assert.AreEqual("failed", job.Status); Assert.AreEqual("geometry_mismatch_after_load", job.ReasonCode);
             StringAssert.Contains(job.Detail, "surface_clearance");
@@ -135,13 +151,63 @@ namespace KspControl.BridgeTests
         }
 
         [TestMethod]
-        public void AGapUnderFiveCentimetresPasses()
+        public void AParentWhoseLoadedSurfaceMovedAfterPassOneFailsEvenIfTheChildIsWhereItWasPlaced()
         {
             var job = Start(); LiveRadii(job);
             var layout = job.Plan.Plan.Layout; var calls = 0;
-            rig.Port.RadiusOf = (cid, h) => { calls++; var p = layout.Parts.First(x => x.Cid == cid); var r = p.Source.Id == "tank" ? 0.9 : 0.2; return calls <= 3 ? r : r + 0.0499; };
+            // The parent's measured support is right for pass 1 (the first measurements) and 8 cm larger once pass 2 is loaded.
+            rig.Port.RadiusOf = (cid, h, a) => { calls++; var p = layout.Parts.First(x => x.Cid == cid); var r = p.Source.Id == "tank" ? 0.9 : 0.2; return calls <= 4 ? r : r + 0.08; };
+            rig.RunToEnd();
+            Assert.AreEqual("failed", job.Status); Assert.AreEqual("geometry_mismatch_after_load", job.ReasonCode); StringAssert.Contains(job.Detail, "surface_clearance");
+            Assert.AreEqual("restored", job.Restore.Result);
+        }
+
+        [TestMethod]
+        public void AGapUnderFiveCentimetresPasses()
+        {
+            var job = Start(); LiveRadii(job); Attach(job, 0.0499);
             rig.RunToEnd();
             Assert.AreEqual("completed", job.Status, job.ReasonCode + " " + job.Detail);
+        }
+
+        [TestMethod]
+        public void AChildAttachPointThatCannotBeReadFailsAndRestores()
+        {
+            var job = Start(); LiveRadii(job); rig.Port.AttachOf = null;
+            rig.RunToEnd();
+            Assert.AreEqual("failed", job.Status); Assert.AreEqual("geometry_mismatch_after_load", job.ReasonCode); StringAssert.Contains(job.Detail, "surface_unmeasured");
+            Assert.AreEqual("restored", job.Restore.Result);
+        }
+
+        [TestMethod]
+        public void ARevisionBumpBetweenThePassesDoesNotCancelTheJob()
+        {
+            var job = Start(); LiveRadii(job);
+            var bumped = false;
+            for (var i = 0; i < 4000 && !job.Terminal; i++)
+            {
+                if (!bumped && job.Phase == OperationPhase.SurfaceMeasure) { rig.Tracker.OnEvent(EditorEventKind.ShipModified); bumped = true; }
+                rig.Frame(50);
+            }
+            Assert.IsTrue(bumped);
+            Assert.AreEqual("completed", job.Status, job.ReasonCode + " " + job.Detail);
+            Assert.AreEqual(2, rig.Port.LoadCalls);
+        }
+
+        [TestMethod]
+        public void HumanInputBetweenThePassesIsIndeterminateAsEverywhereElse()
+        {
+            var job = Start(); LiveRadii(job);
+            var done = false;
+            for (var i = 0; i < 4000 && !job.Terminal; i++)
+            {
+                if (!done && job.Phase == OperationPhase.SurfaceMeasure) { rig.Tracker.OnEvent(EditorEventKind.PartPicked); done = true; }
+                rig.Frame(50);
+            }
+            Assert.IsTrue(done);
+            Assert.AreEqual("indeterminate", job.Status); Assert.AreEqual("human_input_during_operation", job.ReasonCode);
+            Assert.AreEqual(1, rig.Port.LoadCalls, "pass 2 was never loaded and nothing was restored");
+            Assert.IsFalse(rig.Port.Locks.Contains(EditorIdle.OperationLockId));
         }
 
         [TestMethod]

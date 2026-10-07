@@ -28,6 +28,7 @@
     <Compile Include="../EditorModel/ValueRule.cs" Link="EditorModel/ValueRule.cs" />
     <Compile Include="../EditorModel/RoundtripVolatileKeys.cs" Link="EditorModel/RoundtripVolatileKeys.cs" />
     <Compile Include="../EditorModel/EditorRevisionToken.cs" Link="EditorModel/EditorRevisionToken.cs" />
+    <Compile Include="../Bridge/ConstructionCatalogMapper.cs" Link="ConstructionCatalogMapper.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
     <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />

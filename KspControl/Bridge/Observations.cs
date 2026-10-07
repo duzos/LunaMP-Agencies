@@ -57,6 +57,7 @@ namespace KspControl.Bridge
                 case "bridge.capabilities": data = Capabilities(); break;
                 case "game.context": data = Context(); break;
                 case "parts.list": data = Catalog(request.Arguments); break;
+                case ConstructionOperations.Catalog: data = ConstructionCatalog(request.Arguments); break;
                 case "parts.definition":
                     var partName = ArgString(request.Arguments, "partName");
                     if (string.IsNullOrWhiteSpace(partName) || partName.Length > ObservationLimits.MaxPartName) return Fail(request, "invalid_part_name");
@@ -122,7 +123,7 @@ namespace KspControl.Bridge
         private static JObject Capabilities() => new JObject
         {
             ["bridgeVersion"] = BridgeVersion,
-            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
+            ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", ConstructionOperations.Catalog, "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect"),
             ["inline"] = new JArray(ControlOperations.All),
             ["unavailable"] = new JObject { ["mutations"] = "authority_and_job_execution_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },

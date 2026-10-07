@@ -12,8 +12,12 @@ namespace KspControl.Bridge
     // under the gate plus the monotonic clock and never touch the game.
     internal static class Identifiers
     {
-        internal static string Required(string value)
-        { if (string.IsNullOrWhiteSpace(value) || value.Length > 256) throw new ArgumentException("invalid_identifier"); return value; }
+        // Two methods, not an optional parameter: method groups passed to Select would otherwise bind the index overload.
+        internal static string Required(string value) { return Required(value, 256); }
+        internal static string Required(string value, int max)
+        { if (string.IsNullOrWhiteSpace(value) || value.Length > max) throw new ArgumentException("invalid_identifier"); return value; }
+        /// <summary>Agency keys are "offline:" plus a save folder of up to 256 characters, matching the grant payload limit.</summary>
+        internal const int MaxAgency = 300;
     }
 
     /// <summary>What a grant is bound to. Deliberately has no world or vessel: a scene change must not invalidate it.</summary>
@@ -23,7 +27,7 @@ namespace KspControl.Bridge
         public string SaveFolder { get; }
         public string Agency { get; }
         public GrantBinding(string install, string saveFolder, string agency)
-        { Install = Identifiers.Required(install); SaveFolder = Identifiers.Required(saveFolder); Agency = Identifiers.Required(agency); }
+        { Install = Identifiers.Required(install); SaveFolder = Identifiers.Required(saveFolder); Agency = Identifiers.Required(agency, Identifiers.MaxAgency); }
         public bool Equals(GrantBinding other) => other != null
             && string.Equals(Install, other.Install, StringComparison.OrdinalIgnoreCase)
             && string.Equals(SaveFolder, other.SaveFolder, StringComparison.Ordinal)
@@ -86,7 +90,7 @@ namespace KspControl.Bridge
             Generation = generation; Binding = binding ?? throw new ArgumentNullException(nameof(binding)); ExpiresUtc = expiresUtc.ToUniversalTime();
             this.permissions = (permissions ?? throw new ArgumentNullException(nameof(permissions))).Take(1025).ToArray();
             if (this.permissions.Length > 1024 || this.permissions.Any(p => p == null)) throw new ArgumentException("invalid_permissions");
-            this.entities = (entities ?? throw new ArgumentNullException(nameof(entities))).Select(Identifiers.Required).ToArray();
+            this.entities = (entities ?? throw new ArgumentNullException(nameof(entities))).Select(e => Identifiers.Required(e)).ToArray();
         }
         internal bool Allows(ClassifiedEffect effect) => permissions.Any(p => p.Operation == effect.Operation && p.Recipient == effect.Recipient);
         internal bool AllowsEntity(string entity) => entities.Contains(entity, StringComparer.Ordinal);
@@ -129,6 +133,7 @@ namespace KspControl.Bridge
     {
         private const long MaxGrantMilliseconds = 7L * 24 * 3600 * 1000;
         private const long CooldownMilliseconds = ControlLimits.CooldownSeconds * 1000L;
+        internal const string SeenReason = "seen";
         private static readonly TimeSpan SuspensionRetention = TimeSpan.FromDays(30);
         private readonly object gate = new object();
         private readonly Func<long> monotonicMilliseconds;
@@ -154,13 +159,19 @@ namespace KspControl.Bridge
         {
             this.monotonicMilliseconds = monotonicMilliseconds ?? throw new ArgumentNullException(nameof(monotonicMilliseconds));
             this.utcNow = utcNow ?? (() => DateTime.UtcNow);
-            this.knownEffects = new HashSet<string>((knownEffects ?? throw new ArgumentNullException(nameof(knownEffects))).Select(Identifiers.Required), StringComparer.Ordinal);
+            this.knownEffects = new HashSet<string>((knownEffects ?? throw new ArgumentNullException(nameof(knownEffects))).Select(e => Identifiers.Required(e)), StringComparer.Ordinal);
             if (watchdogMilliseconds < 1 || watchdogMilliseconds > 5000) throw new ArgumentException("invalid_watchdog");
             this.watchdogMilliseconds = watchdogMilliseconds; lastClock = monotonicMilliseconds();
             this.store = store ?? new MemorySuspensionStore();
             try
             {
-                foreach (var item in this.store.Load()) { suspensions.Add(item); burned.Add(Key(item.GrantId, item.Generation)); }
+                foreach (var item in this.store.Load())
+                {
+                    suspensions.Add(item);
+                    // "seen" entries only record the highest generation per grant id so an older file cannot return after a restart.
+                    if (item.Reason != SeenReason) burned.Add(Key(item.GrantId, item.Generation));
+                    long known; if (!highestGenerations.TryGetValue(item.GrantId, out known) || item.Generation > known) highestGenerations[item.GrantId] = item.Generation;
+                }
             }
             catch (Exception) { suspensionsUnreadable = true; } // Fail closed: no grant is provisioned if suspensions cannot be read.
         }
@@ -208,14 +219,14 @@ namespace KspControl.Bridge
                 if (grant != null && grant.Id == value.Id && grant.Generation == value.Generation) return;
                 if (grant != null) RevokeLease("grant_replaced");
                 var milliseconds = Math.Min((long)remaining.TotalMilliseconds, MaxGrantMilliseconds);
-                grant = value; grantDeadline = now + milliseconds; highestGenerations[value.Id] = value.Generation;
+                grant = value; grantDeadline = now + milliseconds; RaiseHighest(value.Id, value.Generation);
             }
         }
 
         /// <summary>Records a generation seen in a verified file so an older file cannot be replayed.</summary>
         public void NoteGeneration(string grantId, long grantGeneration)
         {
-            lock (gate) { long h; if (!highestGenerations.TryGetValue(grantId, out h) || grantGeneration > h) highestGenerations[grantId] = grantGeneration; }
+            lock (gate) RaiseHighest(grantId, grantGeneration);
         }
 
         public long HighestGeneration(string grantId)
@@ -238,25 +249,57 @@ namespace KspControl.Bridge
             {
                 var burning = grant;
                 DropGrant(reason);
-                if (burning == null) return;
-                burned.Add(Key(burning.Id, burning.Generation));
-                if (reason == "stop" || reason == "fault") Persist(burning.Id, burning.Generation, reason);
+                if (burning != null) BurnPair(burning.Id, burning.Generation, reason);
             }
         }
 
-        public void Stop() => BurnGrant("stop");
+        /// <summary>
+        /// Burns the provisioned grant. With nothing provisioned (for example dropped for a binding change) it burns the
+        /// last verified, unrevoked, unexpired (id, generation) the watcher published, so Stop cannot be sidestepped.
+        /// </summary>
+        public void Stop()
+        {
+            lock (gate)
+            {
+                if (grant != null) { BurnGrant("stop"); return; }
+                RevokeLease("stop");
+                var seen = publishedStatus;
+                if (seen.Id != null && seen.Generation.HasValue && (seen.State == GrantStates.Valid || seen.State == GrantStates.BindingMismatch || seen.State == GrantStates.NotYetApplicable))
+                    BurnPair(seen.Id, seen.Generation.Value, "stop");
+            }
+        }
+
+        private void BurnPair(string id, long grantGeneration, string reason)
+        {
+            burned.Add(Key(id, grantGeneration)); RaiseHighest(id, grantGeneration);
+            if (reason == "stop" || reason == "fault") Persist(id, grantGeneration, reason);
+        }
+
+        /// <summary>True when a persistence write failed, so a Stop may not survive a restart. Shown in status and the panel.</summary>
+        public bool StopPersistFailed { get { lock (gate) return PersistFailed; } }
+
+        private void RaiseHighest(string id, long grantGeneration)
+        {
+            long known;
+            if (highestGenerations.TryGetValue(id, out known) && grantGeneration <= known) return;
+            highestGenerations[id] = grantGeneration;
+            suspensions.RemoveAll(s => s.Reason == SeenReason && s.GrantId == id);
+            suspensions.Add(new Suspension { GrantId = id, Generation = grantGeneration, Reason = SeenReason, Utc = GrantPayload.FormatUtc(utcNow()) });
+            try { store.Save(suspensions); PersistFailed = false; } catch (Exception) { PersistFailed = true; }
+        }
 
         public void HumanTakeover()
         { lock (gate) { var now = monotonicMilliseconds(); RevokeLease("human_takeover"); cooldownUntil = now + CooldownMilliseconds; } }
 
         public void Tick() { lock (gate) CheckExpiry(); }
 
-        public void PruneSuspensions(long currentGeneration)
+        /// <summary>Drops suspensions older than 30 days whose generation is below the highest known for the same grant id.</summary>
+        public void PruneSuspensions()
         {
             lock (gate)
             {
                 var cutoff = utcNow() - SuspensionRetention;
-                var kept = suspensions.Where(s => !(Age(s) < cutoff && s.Generation < currentGeneration)).ToList();
+                var kept = suspensions.Where(s => !(Age(s) < cutoff && s.Generation < HighestOf(s.GrantId))).ToList();
                 if (kept.Count == suspensions.Count) return;
                 suspensions.Clear(); suspensions.AddRange(kept);
                 try { store.Save(suspensions); PersistFailed = false; } catch (Exception) { PersistFailed = true; }
@@ -385,7 +428,7 @@ namespace KspControl.Bridge
                 { shown.State = GrantStates.Suspended; shown.Detail = suspensionsUnreadable ? "suspensions_unreadable" : null; }
                 var lease = new LeaseStatusInfo { Held = leaseId != null };
                 if (leaseId != null) { lease.Purpose = leasePurpose; lease.ExpiresInSeconds = Math.Max(0, (leaseDeadline - now + 999) / 1000); }
-                return new ControlStatusInfo { Grant = shown, Lease = lease, CooldownSeconds = Math.Max(0, (cooldownUntil - now + 999) / 1000) };
+                return new ControlStatusInfo { Grant = shown, Lease = lease, CooldownSeconds = Math.Max(0, (cooldownUntil - now + 999) / 1000), StopPersistFailed = PersistFailed };
             }
         }
 
@@ -469,6 +512,8 @@ namespace KspControl.Bridge
             suspensions.Add(new Suspension { GrantId = grantId, Generation = grantGeneration, Reason = reason, Utc = GrantPayload.FormatUtc(utcNow()) });
             try { store.Save(suspensions); PersistFailed = false; } catch (Exception) { PersistFailed = true; }
         }
+
+        private long HighestOf(string id) { long h; return highestGenerations.TryGetValue(id, out h) ? h : 0; }
 
         private static DateTime Age(Suspension s)
         { DateTime value; return GrantCodec.TryParseUtc(s.Utc, out value) ? value : DateTime.MinValue; }

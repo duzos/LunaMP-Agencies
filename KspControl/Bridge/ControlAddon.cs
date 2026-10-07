@@ -57,10 +57,11 @@ namespace KspControl.Bridge
         public void Update()
         {
             if (server == null) return;
+            // Stop is independent of everything below, so a failing context refresh can never swallow it.
+            if (stopKey != KeyCode.None && Input.GetKeyDown(stopKey)) authority.Stop();
             try { observations.RefreshContext(); }
             catch { return; } // Scene teardown can invalidate game objects; pending requests expire without disclosure.
             try { pump.Update(); } catch { /* the trust layer must never break the frame */ }
-            if (stopKey != KeyCode.None && Input.GetKeyDown(stopKey)) authority.Stop();
             queue.Drain(observations.Execute);
         }
         public void OnGUI()
@@ -76,6 +77,7 @@ namespace KspControl.Bridge
             if (status.Grant.Generation.HasValue) text.Append(" g").Append(status.Grant.Generation.Value);
             if (status.Lease.Held) text.Append(" | lease '").Append(status.Lease.Purpose).Append("' ").Append(status.Lease.ExpiresInSeconds).Append('s');
             if (status.CooldownSeconds > 0) text.Append(" | cooldown ").Append(status.CooldownSeconds).Append('s');
+            if (status.StopPersistFailed) text.Append(" | WARNING: stop not saved to disk");
             return text.ToString();
         }
         public void OnDestroy() { server?.Dispose(); queue.Stop(); }

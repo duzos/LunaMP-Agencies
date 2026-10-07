@@ -110,5 +110,7 @@ namespace KspControl.Contracts
         [JsonProperty("grant")] public GrantStatusInfo Grant { get; set; } = GrantStatusInfo.Missing();
         [JsonProperty("lease")] public LeaseStatusInfo Lease { get; set; } = new LeaseStatusInfo();
         [JsonProperty("cooldownSeconds")] public long CooldownSeconds { get; set; }
+        /// <summary>True when a Stop or suspension could not be written, so it may not survive a game restart.</summary>
+        [JsonProperty("stopPersistFailed")] public bool StopPersistFailed { get; set; }
     }
 }

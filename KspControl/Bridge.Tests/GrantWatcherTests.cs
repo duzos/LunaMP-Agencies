@@ -188,6 +188,44 @@ namespace KspControl.BridgeTests
             source.Context = AuthorityHelpers.Ctx("epoch3", "editor:VAB"); pump.Update();
             Assert.IsNotNull(authority.AcquireLease(30000, "new scene"));
         }
+        [TestMethod] public void OlderGenerationStaysRefusedAfterStopAndRestart()
+        {
+            Write(Payload(1)); Frame(); Write(Payload(2)); Frame(); authority.Stop(); Frame();
+            Build(store); Write(Payload(1)); Frame(); // an unexpired older envelope reappears after the restart
+            Assert.AreEqual(GrantStates.Revoked, Status.State); Assert.AreEqual("generation_regressed", Status.Detail); Assert.IsNull(authority.CurrentGrantId);
+        }
+        [TestMethod] public void OlderGenerationStaysRefusedAfterRevokeAndRestart()
+        {
+            Write(Payload(2)); Frame(); Write(Payload(3, p => p.Revoked = true)); Frame();
+            Build(store); Write(Payload(2)); Frame();
+            Assert.AreEqual(GrantStates.Revoked, Status.State); Assert.IsNull(authority.CurrentGrantId);
+            Write(Payload(4)); Frame(); Assert.AreEqual(GrantStates.Valid, Status.State);
+        }
+        [TestMethod] public void StopAfterABindingDropStillBurnsTheWatchersLastVerifiedGeneration()
+        {
+            Write(Payload()); Frame(); source.Binding = AuthorityHelpers.Bind(agency: "elsewhere"); Frame();
+            Assert.IsNull(authority.CurrentGrantId); authority.Stop();
+            source.Binding = AuthorityHelpers.Bind(); Frame(); Assert.AreEqual(GrantStates.Suspended, Status.State);
+        }
+        [TestMethod] public void PumpIsolatesEveryStepSoTickAlwaysRuns()
+        {
+            Write(Payload()); Frame(); var lease = authority.AcquireLease(30000, "x");
+            var throwing = new ThrowingSource(); var brokenPump = new ControlPump(authority, watcher, throwing);
+            now += 2500; brokenPump.Update(); // watchdog deadline passed; both inputs throw
+            Assert.IsFalse(authority.Heartbeat(lease), "Tick ran despite the throwing source");
+        }
+        [TestMethod] public void InvalidBindingYieldsBindingMismatchNotASkippedPoll()
+        {
+            Write(Payload()); Frame(); Assert.AreEqual(GrantStates.Valid, Status.State);
+            var pump2 = new ControlPump(authority, new GrantWatcher(authority, grantPath, keyPath, () => { throw new ArgumentException("invalid_identifier"); }, () => now, () => utc), new ThrowingSource { ContextOk = true });
+            now += 1000; pump2.Update();
+            Assert.AreEqual(GrantStates.BindingMismatch, Status.State); Assert.IsNull(authority.CurrentGrantId);
+        }
+        [TestMethod] public void OversizedKeyFileIsRejectedWithoutReadingIt()
+        {
+            Write(Payload()); File.WriteAllBytes(keyPath, new byte[5000]); Frame();
+            Assert.AreEqual(GrantStates.Missing, Status.State); Assert.AreEqual("key_unavailable", Status.Detail);
+        }
         [TestMethod] public void UnreadableSuspensionStoreFailsClosedAsSuspended()
         {
             var broken = new MemorySuspensionStore { FailLoad = true }; Build(broken); Write(Payload()); Frame();
@@ -195,10 +233,17 @@ namespace KspControl.BridgeTests
         }
         [TestMethod] public void OldSuspensionsArePrunedWhenAHigherGenerationIsProvisioned()
         {
-            Write(Payload()); Frame(); authority.Stop(); Assert.AreEqual(1, store.Load().Count);
+            Write(Payload()); Frame(); authority.Stop(); Assert.AreEqual(1, store.Load().Count(s => s.Reason != "seen"));
             utc = AuthorityHelpers.Utc0.AddDays(45).AddMinutes(10); Write(Payload(2, p => { p.IssuedUtc = GrantPayload.FormatUtc(utc); p.ExpiresUtc = GrantPayload.FormatUtc(utc.AddHours(1)); })); Frame();
-            Assert.AreEqual(GrantStates.Valid, Status.State); Assert.AreEqual(0, store.Load().Count);
+            Assert.AreEqual(GrantStates.Valid, Status.State); Assert.AreEqual(0, store.Load().Count(s => s.Reason != "seen"));
         }
+    }
+
+    internal sealed class ThrowingSource : IEditorContextSource
+    {
+        public bool ContextOk;
+        public LeaseContext CurrentContext() { if (ContextOk) return AuthorityHelpers.Ctx(); throw new InvalidOperationException("scene teardown"); }
+        public GrantBinding CurrentBinding() { throw new ArgumentException("invalid_identifier"); }
     }
 
     [TestClass]

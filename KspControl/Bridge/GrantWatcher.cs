@@ -68,7 +68,8 @@ namespace KspControl.Bridge
         public void PollNow()
         {
             RefreshVerification();
-            var binding = currentBinding();
+            GrantBinding binding;
+            try { binding = currentBinding(); } catch (Exception) { binding = null; }
             var verified = verification.Ok ? verification.Payload : null;
             var status = GrantEvaluator.Evaluate(verification, utcNow(), binding?.ToInfo(), authority.IsBurned, verified == null ? 0 : authority.HighestGeneration(verified.GrantId));
             if (verified != null && status.Detail != "generation_regressed") authority.NoteGeneration(verified.GrantId, verified.Generation);
@@ -77,7 +78,7 @@ namespace KspControl.Bridge
                 try { authority.ProvisionGrant(GrantMapping.ToGrant(verified)); }
                 catch (InvalidOperationException error) { status = Downgrade(status, error.Message); }
                 catch (ArgumentException) { status = Downgrade(status, "malformed"); }
-                if (status.State == GrantStates.Valid && verified.Generation != prunedGeneration) { prunedGeneration = verified.Generation; authority.PruneSuspensions(verified.Generation); }
+                if (status.State == GrantStates.Valid && verified.Generation != prunedGeneration) { prunedGeneration = verified.Generation; authority.PruneSuspensions(); }
             }
             else if (authority.CurrentGrantId != null) authority.DropGrant(status.State);
             Status = status;
@@ -114,6 +115,7 @@ namespace KspControl.Bridge
                 if (!File.Exists(grantPath)) { Set(current, GrantVerification.Fail(GrantStates.Missing, "grant_file_missing")); return; }
                 if (!File.Exists(keyPath)) { Set(current, GrantVerification.Fail(GrantStates.Missing, "key_unavailable")); return; }
                 if (new FileInfo(grantPath).Length > MaxFileBytes) { Set(current, GrantVerification.Fail(GrantStates.Malformed, "envelope_size")); return; }
+                if (new FileInfo(keyPath).Length > 64) { Set(current, GrantVerification.Fail(GrantStates.Missing, "key_unavailable")); return; }
                 var key = File.ReadAllBytes(keyPath);
                 var text = new System.Text.UTF8Encoding(false, false).GetString(File.ReadAllBytes(grantPath));
                 Set(current, GrantCodec.Verify(text, key));
@@ -146,10 +148,17 @@ namespace KspControl.Bridge
 
         public void Update()
         {
-            try { authority.UpdateContext(source.CurrentContext(), source.CurrentBinding(), watcher?.Status); }
-            catch (InvalidOperationException) { /* revision regression already revoked the lease */ }
+            // Every step is isolated so one failing input can never skip the rest, in particular Tick.
+            LeaseContext context = null; GrantBinding binding = null;
+            try { context = source.CurrentContext(); } catch (Exception) { /* scene teardown: keep the last published context */ }
+            try { binding = source.CurrentBinding(); } catch (Exception) { binding = null; /* invalid binding means binding_mismatch */ }
+            if (context != null)
+            {
+                try { authority.UpdateContext(context, binding, watcher?.Status); }
+                catch (Exception) { /* revision regression already revoked the lease */ }
+            }
             try { watcher?.Poll(); } catch (Exception) { /* a bad file must never break the frame */ }
-            try { authority.Tick(); } catch (InvalidOperationException) { /* clock regression already burned the grant */ }
+            try { authority.Tick(); } catch (Exception) { /* clock regression already burned the grant */ }
         }
     }
 }

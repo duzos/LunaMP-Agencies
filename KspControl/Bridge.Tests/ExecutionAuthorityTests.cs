@@ -54,6 +54,7 @@ namespace KspControl.BridgeTests
             lease = authority.AcquireLease(30000, "test purpose");
         }
 
+        private List<Suspension> Burns() { return store.Load().Where(s => s.Reason != "seen").ToList(); }
         private ExecutionAuthority New() => new ExecutionAuthority(() => now, GrantMapping.KnownEffects, 2000, store, () => utc);
         private void Provision(long generation = 1, double hours = 1, string id = "grant") => authority.ProvisionGrant(AuthorityHelpers.Grant(generation, id, hours));
         private void Refresh(LeaseContext context = null) => authority.UpdateContext(context ?? Ctx(), Bind());
@@ -134,14 +135,14 @@ namespace KspControl.BridgeTests
         {
             now--; Throws(ControlReasons.ClockRegressed, () => authority.Tick());
             Assert.IsNull(authority.CurrentGrantId); Assert.IsTrue(authority.IsBurned("grant", 1));
-            var saved = store.Load(); Assert.AreEqual(1, saved.Count); Assert.AreEqual("fault", saved[0].Reason); Assert.AreEqual(1, saved[0].Generation);
+            var saved = Burns(); Assert.AreEqual(1, saved.Count); Assert.AreEqual("fault", saved[0].Reason); Assert.AreEqual(1, saved[0].Generation);
             Refresh(); Throws("grant_suspended", () => Provision());
         }
         [TestMethod] public void MapGrantDeadlineBurnsExpiredWithoutPersisting()
         {
             now += 3600 * 1000L; Refresh(); authority.Tick();
             Assert.IsNull(authority.CurrentGrantId); Assert.IsTrue(authority.IsBurned("grant", 1));
-            Assert.AreEqual(0, store.Load().Count, "expiry is not persisted");
+            Assert.AreEqual(0, Burns().Count, "expiry is not persisted");
             Assert.IsFalse(authority.Heartbeat(lease));
         }
         [TestMethod] public void MapWallClockExpiryWinsWhenEarlier()
@@ -203,7 +204,7 @@ namespace KspControl.BridgeTests
         {
             authority.Stop();
             Assert.IsNull(authority.CurrentGrantId); Assert.IsFalse(authority.Heartbeat(lease));
-            var saved = store.Load(); Assert.AreEqual(1, saved.Count); Assert.AreEqual("stop", saved[0].Reason);
+            var saved = Burns(); Assert.AreEqual(1, saved.Count); Assert.AreEqual("stop", saved[0].Reason);
             // "restart": a new instance over the same store refuses the same generation
             var restarted = New(); restarted.UpdateContext(Ctx(), Bind());
             Assert.IsTrue(restarted.IsBurned("grant", 1));
@@ -324,8 +325,61 @@ namespace KspControl.BridgeTests
         [TestMethod] public void PruneRemovesOnlyOldLowerGenerations()
         {
             authority.Stop();
-            utc = AuthorityHelpers.Utc0.AddDays(31); authority.PruneSuspensions(1); Assert.AreEqual(1, store.Load().Count, "same generation is kept");
-            authority.PruneSuspensions(2); Assert.AreEqual(0, store.Load().Count);
+            utc = AuthorityHelpers.Utc0.AddDays(31); authority.PruneSuspensions(); Assert.AreEqual(1, Burns().Count, "the highest generation of its own id is kept");
+            authority.NoteGeneration("grant", 2); authority.NoteGeneration("other-id", 99); authority.PruneSuspensions(); Assert.AreEqual(0, Burns().Count);
+            Assert.AreEqual(2L, store.Load().Single(s => s.GrantId == "grant").Generation, "the seen record stays");
+        }
+
+        // ---- restart safety (review round 1) ----
+
+        [TestMethod] public void StopOfNewerGenerationRefusesAnOlderEnvelopeAfterRestart()
+        {
+            authority.ProvisionGrant(AuthorityHelpers.Grant(2)); authority.Stop(); // stop gen 2
+            var restarted = New(); restarted.UpdateContext(Ctx(), Bind());
+            Assert.AreEqual(2L, restarted.HighestGeneration("grant"));
+            Throws("grant_generation_regressed", () => restarted.ProvisionGrant(AuthorityHelpers.Grant(1)));
+            Throws("grant_suspended", () => restarted.ProvisionGrant(AuthorityHelpers.Grant(2)));
+        }
+        [TestMethod] public void SeenGenerationFromARevokedFileSurvivesRestart()
+        {
+            authority.NoteGeneration("grant", 3); // the watcher saw revoked generation 3
+            var restarted = New(); restarted.UpdateContext(Ctx(), Bind());
+            Throws("grant_generation_regressed", () => restarted.ProvisionGrant(AuthorityHelpers.Grant(2)));
+            restarted.ProvisionGrant(AuthorityHelpers.Grant(4));
+        }
+        [TestMethod] public void ProvisioningPersistsTheHighestGenerationOncePerIncrease()
+        {
+            var before = store.Saves; authority.NoteGeneration("grant", 1); Assert.AreEqual(before, store.Saves, "no change, no write");
+            authority.Stop(); authority.UpdateContext(Ctx(), Bind()); authority.ProvisionGrant(AuthorityHelpers.Grant(2));
+            Assert.AreEqual(2L, store.Load().Single(s => s.Reason == "seen" && s.GrantId == "grant").Generation);
+        }
+        [TestMethod] public void StopWithNothingProvisionedBurnsTheLastVerifiedPair()
+        {
+            authority.UpdateContext(Ctx(), Bind(agency: "elsewhere")); // binding change drops the grant
+            Assert.IsNull(authority.CurrentGrantId);
+            authority.PublishGrantStatus(new GrantStatusInfo { Present = true, State = GrantStates.BindingMismatch, Id = "grant", Generation = 1 });
+            authority.Stop();
+            Assert.IsTrue(authority.IsBurned("grant", 1)); Assert.AreEqual(1, Burns().Count);
+            authority.UpdateContext(Ctx(), Bind()); Throws("grant_suspended", () => Provision());
+        }
+        [TestMethod] public void StopWithNoVerifiedGrantBurnsNothingButRevokesTheLease()
+        {
+            authority.DropGrant("x"); authority.PublishGrantStatus(GrantStatusInfo.Missing()); authority.Stop();
+            Assert.AreEqual(0, Burns().Count);
+            authority.PublishGrantStatus(new GrantStatusInfo { Present = true, State = GrantStates.Revoked, Id = "grant", Generation = 9 }); authority.Stop();
+            Assert.AreEqual(0, Burns().Count, "a revoked or expired pair is not burned");
+        }
+        [TestMethod] public void FailedPersistIsVisibleInStatus()
+        {
+            Assert.IsFalse(authority.Status().StopPersistFailed);
+            store.FailSave = true; authority.Stop();
+            Assert.IsTrue(authority.Status().StopPersistFailed);
+            Assert.IsTrue(Newtonsoft.Json.JsonConvert.SerializeObject(authority.Status()).Contains("\"stopPersistFailed\":true"));
+        }
+        [TestMethod] public void LongAgencyKeyIsAcceptedUpToTheSharedLimit()
+        {
+            var save = new string('s', 256); var agency = GrantBindingKey.AgencyKey(Guid.Empty, save); Assert.IsTrue(agency.Length <= Identifiers.MaxAgency);
+            Assert.IsNotNull(new GrantBinding("install", save, agency));
         }
 
         // ---- thread model ----

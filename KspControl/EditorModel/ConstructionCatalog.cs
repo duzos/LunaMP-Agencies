@@ -19,6 +19,8 @@ namespace KspControl.EditorModel
         /// as a decoupler for dstg (stock Science Jr: HeatShield1 istg=-1 dstg=1 sidx=-1 sqor=-1 sepI=-1). Supported as the command pod's bottom-node child.
         /// </summary>
         public const string HeatShield = "heatshield";
+        /// <summary>A part the planner can never place (fairings, launch clamps, third-party parachutes, staged animations). Refused anywhere in a craft.</summary>
+        public const string Unsupported = "unsupported";
         public const string Other = "other";
     }
     public sealed class ConstructionNode
@@ -49,6 +51,8 @@ namespace KspControl.EditorModel
         public string Name { get; set; }
         public string Category { get; set; } = PartCategories.Other;
         public bool Buildable { get; set; }
+        /// <summary>True when the prefab carries a stageable module (KSP IsStageable, honouring stagingEnabled). A stageable part in category other is refused.</summary>
+        public bool Stageable { get; set; }
         /// <summary>"verified" or "unverified" (R1-section 0). Anything else is treated as unverified.</summary>
         public string ConstructionSupport { get; set; } = "unverified";
         public List<ConstructionNode> StackNodes { get; set; } = new List<ConstructionNode>();
@@ -79,7 +83,7 @@ namespace KspControl.EditorModel
             foreach (var n in names)
             {
                 var p = Parts[n];
-                sb.Append(n).Append('|').Append(p.Category).Append('|').Append(p.Buildable).Append('|').Append(p.ConstructionSupport).Append('|');
+                sb.Append(n).Append('|').Append(p.Category).Append('|').Append(p.Buildable).Append('|').Append(p.ConstructionSupport).Append('|'); if (p.Stageable) sb.Append("stageable|");
                 var r = p.AttachRules ?? new AttachRulesDefinition();
                 sb.Append(r.Stack).Append(r.Srf).Append(r.AllowStack).Append(r.AllowSrf).Append(r.AllowCollision).Append(r.AllowDock).Append('|');
                 var nodes = new List<ConstructionNode>(p.StackNodes ?? new List<ConstructionNode>());

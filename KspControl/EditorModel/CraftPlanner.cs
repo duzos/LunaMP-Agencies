@@ -74,6 +74,12 @@ namespace KspControl.EditorModel
             result.Layout = layout;
             if (layout == null || result.Issues.Count != 0) return result;
             string reason;
+            var stageable = TopologyClassifier.FirstStageableOther(layout);
+            if (stageable != null)
+            {
+                result.Issues.Add(new PlanIssue("unsupported_stageable_part", stageable.Source.Id, "a stageable part in category other would silently take its parent's stage"));
+                return result;
+            }
             var kind = TopologyClassifier.Classify(layout, out reason);
             result.Topology = kind == TopologyKind.Unsupported ? null : kind.ToString();
             if (kind == TopologyKind.Unsupported) { result.Issues.Add(new PlanIssue("unsupported_staging_topology", null, reason)); return result; }

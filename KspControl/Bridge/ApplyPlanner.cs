@@ -148,7 +148,7 @@ namespace KspControl.Bridge
                     var part = new Pure.ConstructionPart
                     {
                         Name = name, Category = Category((string)o["category"]), Buildable = (bool?)o["buildable"] ?? false,
-                        ConstructionSupport = (string)o["constructionSupport"] == "verified" ? "verified" : "unverified",
+                        ConstructionSupport = (string)o["constructionSupport"] == "verified" ? "verified" : "unverified", Stageable=(bool?)o["stageable"]??false,
                         AttachRules = new Pure.AttachRulesDefinition
                         {
                             Stack = (bool?)rules["stack"] ?? false, Srf = (bool?)rules["srf"] ?? false, AllowStack = (bool?)rules["allowStack"] ?? false,
@@ -178,7 +178,7 @@ namespace KspControl.Bridge
         {
             switch (c)
             {
-                case Pure.PartCategories.Command: case Pure.PartCategories.Tank: case Pure.PartCategories.Engine: case Pure.PartCategories.Decoupler: case Pure.PartCategories.Parachute: case Pure.PartCategories.HeatShield: return c;
+                case Pure.PartCategories.Command: case Pure.PartCategories.Tank: case Pure.PartCategories.Engine: case Pure.PartCategories.Decoupler: case Pure.PartCategories.Parachute: case Pure.PartCategories.HeatShield: case Pure.PartCategories.Unsupported: return c;
                 default: return Pure.PartCategories.Other;
             }
         }

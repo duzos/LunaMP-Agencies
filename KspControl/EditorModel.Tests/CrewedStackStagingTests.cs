@@ -42,6 +42,7 @@ public class CrewedStackStagingTests
         c.Add(Part("HeatShield1", PartCategories.HeatShield, ("direct", 0, -1), ("bottom", -0.17, -1), ("top", 0.022, 1)));
         c.Add(Part("Decoupler.1", PartCategories.Decoupler, ("top", 0.05, 1), ("bottom", -0.05, -1)));
         c.Add(Part("science.module", PartCategories.Other, ("top", 0.6125, 1), ("bottom", -0.5125, -1)));
+        var fairing = Part("fairing.base", PartCategories.Other, ("top", 0.1, 1), ("bottom", -0.1, -1)); fairing.Stageable = true; c.Add(fairing);
         c.Add(Part("fuelTankSmall", PartCategories.Tank, ("top", 0.55525, 1), ("bottom", -0.55525, -1)));
         c.Add(Part("fuelTank", PartCategories.Tank, ("top", 0.981725, 1), ("bottom", -0.9125, -1)));
         c.Add(Part("fuelTank.long", PartCategories.Tank, ("top", 1.875, 1), ("bottom", -1.8875, -1)));
@@ -167,5 +168,28 @@ public class CrewedStackStagingTests
         two.Parts.Single(p => p.Id == "d1").Parent = "hs2";
         two.Parts.Add(G("hs2", "HeatShield1", "hs", "direct", "top"));
         Refused(two, "two heat shields");
+    }
+
+    [TestMethod]
+    public void StageableOtherPartIsRefusedWhileUnstagedUtilityIsAccepted()
+    {
+        var ok = CraftPlanner.Plan(ScienceJrStack(), Catalog());
+        Assert.IsNotNull(ok.Craft, string.Join(";", ok.Issues));
+        var g = ScienceJrStack();
+        g.Parts.Single(p => p.Id == "sci").Part = "fairing.base";
+        var r = CraftPlanner.Plan(g, Catalog());
+        Assert.IsNull(r.Craft);
+        var issue = r.Issues.Single(i => i.Code == "unsupported_stageable_part");
+        Assert.AreEqual("sci", issue.PartId);
+    }
+
+    [TestMethod]
+    public void HeatShieldChildMustAttachToTheDirectNode()
+    {
+        var g = ScienceJrStack();
+        g.Parts.Single(p => p.Id == "d1").ParentNode = "bottom";
+        var r = CraftPlanner.Plan(g, Catalog());
+        Assert.IsNull(r.Craft);
+        Assert.IsTrue(r.Issues.Any(i => i.Code == "unsupported_staging_topology" && (i.Reason ?? "").Contains("heatshield_child_node")), string.Join(";", r.Issues));
     }
 }

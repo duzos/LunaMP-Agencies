@@ -20,12 +20,15 @@ namespace KspControl.EditorModel
             reason = null;
             if (layout == null || layout.Parts.Count == 0) { reason = "empty layout"; return TopologyKind.Unsupported; }
             if (layout.Parts[0].Definition.Category != PartCategories.Command) { reason = "root is not a command part"; return TopologyKind.Unsupported; }
+            var stageableOther = FirstStageableOther(layout);
+            if (stageableOther != null) { reason = "unsupported_stageable_part: '" + stageableOther.Source.Id + "' is a stageable part the planner cannot stage"; return TopologyKind.Unsupported; }
             var chute = StagingMath.Chute(layout);
             if (layout.Parts.Count(p => p.Definition.Category == PartCategories.Parachute) > 1) { reason = "more than one parachute"; return TopologyKind.Unsupported; }
             if (chute != null && !ChuteOnTopNode(layout, chute)) { reason = "a parachute is supported only on the command pod's top node"; return TopologyKind.Unsupported; }
             var shields = layout.Parts.Where(p => p.Definition.Category == PartCategories.HeatShield).ToList();
             if (shields.Count > 1) { reason = "more than one heat shield"; return TopologyKind.Unsupported; }
             if (shields.Count == 1 && !ShieldUnderPod(layout, shields[0])) { reason = "a heat shield is supported only as the command pod's stack child on a downward node"; return TopologyKind.Unsupported; }
+            if (shields.Count == 1 && !ShieldChildOnDirectNode(layout, shields[0])) { reason = "heatshield_child_node: the part under a heat shield must attach to its direct node (the bottom node generates a fairing)"; return TopologyKind.Unsupported; }
             var core = layout.Parts.Where(p => p != chute && !InSurfaceSubtree(layout, p)).ToList();
             var surface = layout.Parts.Where(p => InSurfaceSubtree(layout, p)).ToList();
             if (!IsChain(core)) { reason = "core is not a single stack chain"; return TopologyKind.Unsupported; }
@@ -40,6 +43,12 @@ namespace KspControl.EditorModel
             if (!RadialGroup(layout, surface, out reason)) return TopologyKind.Unsupported;
             return TopologyKind.T3;
         }
+        /// <summary>The first category-other part whose prefab is stageable (it would silently take its parent's stage), or null.</summary>
+        public static LayoutPart FirstStageableOther(StructuralLayout layout)
+        {
+            if (layout == null) return null;
+            return layout.Parts.FirstOrDefault(p => p.Definition.Category == PartCategories.Other && p.Definition.Stageable);
+        }
         private static bool CoreCategory(string c)
         {
             return c == PartCategories.Command || c == PartCategories.Tank || c == PartCategories.Engine || c == PartCategories.Decoupler
@@ -51,6 +60,10 @@ namespace KspControl.EditorModel
             if (shield.Kind != AttachKind.Stack || shield.ParentIndex != 0) return false;
             var node = layout.Parts[0].Definition.FindNode(shield.ParentNodeId);
             return node != null && node.Orientation.Y < -0.5;
+        }
+        private static bool ShieldChildOnDirectNode(StructuralLayout layout, LayoutPart shield)
+        {
+            return Children(layout, shield.Index).All(c => c.Kind == AttachKind.Stack && string.Equals(c.ParentNodeId, "direct", StringComparison.Ordinal));
         }
         /// <summary>The parachute is a stack child of the root command part, on a node that points up, and has nothing attached.</summary>
         private static bool ChuteOnTopNode(StructuralLayout layout, LayoutPart chute)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using KspControl.Contracts;
 using Newtonsoft.Json.Linq;
 
@@ -33,6 +34,8 @@ namespace KspControl.Bridge
         public IList<string> ModuleNames { get; set; } = new List<string>();
         public IList<string> ResourceNames { get; set; } = new List<string>();
         public bool Buildable { get; set; }
+        /// <summary>True when any prefab module reports IsStageable() (respects stagingEnabled).</summary>
+        public bool Stageable { get; set; }
         /// <summary>Null when ResearchAndDevelopment is absent (sandbox).</summary>
         public bool? TechAvailable { get; set; }
         /// <summary>Null when ResearchAndDevelopment is absent (sandbox).</summary>
@@ -102,26 +105,36 @@ namespace KspControl.Bridge
     {
         // Category vocabulary is the EditorModel one (PartCategories). A nosecone is "other"; a solid booster is an engine; a ModuleParachute part is "parachute";
         // an ablative heat shield (ModuleAblator, with its unstaged ModuleDecouple) is "heatshield".
-        public const string Command = "command", Tank = "tank", Engine = "engine", Decoupler = "decoupler", Parachute = "parachute", HeatShield = "heatshield", Other = "other";
+        public const string Command = "command", Tank = "tank", Engine = "engine", Decoupler = "decoupler", Parachute = "parachute", HeatShield = "heatshield", Unsupported = "unsupported", Other = "other";
         public const int MaxNodes = 32;
 
         /// <summary>
         /// Role from modules first, then propellant resources, then the KSP editor category. The KSP category fallback matters with fuel-switch mods
         /// (CryoTanks/B9PartSwitch): they remove the RESOURCE nodes from stock tanks, so a prefab FL-T200 carries no LiquidFuel/Oxidizer but is still category FuelTank.
         /// </summary>
-        public static string MapCategory(IEnumerable<string> modules, IEnumerable<string> resources, string kspCategory = null)
+        public static string MapCategory(IEnumerable<string> modules, IEnumerable<string> resources, string kspCategory = null, bool stageable = false)
         {
             var m = new HashSet<string>(modules ?? new string[0], StringComparer.Ordinal);
             var r = new HashSet<string>(resources ?? new string[0], StringComparer.Ordinal);
             if (m.Contains("ModuleCommand")) return Command;
-            if (m.Contains("ModuleAblator") && m.Contains("ModuleDecouple")) return HeatShield;
+            // A heat shield is an ablator whose decoupler is unstaged; a stageable one is a staged decoupler.
+            if (m.Contains("ModuleAblator") && m.Contains("ModuleDecouple") && !stageable) return HeatShield;
             if (m.Contains("ModuleDecouple") || m.Contains("ModuleAnchoredDecoupler")) return Decoupler;
             if (m.Contains("ModuleEngines") || m.Contains("ModuleEnginesFX")) return Engine;
             if (m.Contains("ModuleParachute")) return Parachute;
+            if (m.Any(IsUnsupportedModule)) return Unsupported;
             if (!m.Contains("ModuleRCS") && !m.Contains("ModuleRCSFX")
                 && (r.Contains("LiquidFuel") || r.Contains("Oxidizer") || r.Contains("MonoPropellant") || r.Contains("XenonGas")
                     || string.Equals(kspCategory, "FuelTank", StringComparison.Ordinal))) return Tank;
             return Other;
+        }
+
+        /// <summary>Modules of parts that stage or deploy in ways the planner cannot reproduce: fairings, launch clamps, mod parachutes, staged animations.</summary>
+        private static bool IsUnsupportedModule(string module)
+        {
+            if (module == null) return false;
+            return module.IndexOf("Fairing", StringComparison.OrdinalIgnoreCase) >= 0
+                || module == "RealChuteModule" || module == "LaunchClamp" || module == "ModuleStagedAnimation";
         }
 
         /// <summary>Parses and bounds the part name list. Throws ArgumentException (mapped to invalid_argument by the caller).</summary>
@@ -200,7 +213,8 @@ namespace KspControl.Bridge
             {
                 ["name"] = part.Name,
                 ["found"] = true,
-                ["category"] = MapCategory(part.ModuleNames, part.ResourceNames, part.KspCategory),
+                ["category"] = MapCategory(part.ModuleNames, part.ResourceNames, part.KspCategory, part.Stageable),
+                ["stageable"] = part.Stageable,
                 ["kspCategory"] = part.KspCategory,
                 ["buildable"] = part.Buildable,
                 ["partsStockAllowed"] = allowed,

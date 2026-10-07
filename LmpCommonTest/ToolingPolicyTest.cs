@@ -110,8 +110,42 @@ namespace LmpCommonTest
             var distinct = Enumerable.Range(0, 20).Select(i => Part("n" + i, 100)).ToArray();
             var singles = distinct.Select(p => Design(Craft(p), 1000)).ToArray();
             var complex = ToolingPolicy.Quote(Craft(distinct), singles, Rates);
-            Assert.IsFalse(complex.Success);
-            StringAssert.Contains(complex.Reason, "complex");
+            // The cover search giving up must not fail the quote: tooling falls back to full uncovered pricing.
+            Assert.IsTrue(complex.Success, complex.Reason);
+            Assert.IsTrue(complex.CoverSearchExhausted);
+        }
+        [TestMethod]
+        public void ExhaustedCoverSearchPricesToolingUncoveredAndLeavesLaunchCostAlone()
+        {
+            var parts = Enumerable.Range(0, 20).Select(i => Part("n" + i, 100)).Concat(new[] { new ToolingPart { Name = "lab", UnitCost = 700, IsScience = true } }).ToArray();
+            var singles = Enumerable.Range(0, 20).Select(i => Design(Craft(Part("n" + i, 100)), 1000)).ToArray();
+            var craft = Craft(parts);
+            var quote = ToolingPolicy.Quote(craft, singles, Rates);
+            Assert.IsTrue(quote.Success, quote.Reason);
+            Assert.IsTrue(quote.CoverSearchExhausted);
+            Assert.AreEqual(0, quote.Matches.Length);
+            Assert.AreEqual(10d * 2000, quote.ToolingCost, 1e-9, "Tooling multiplier times non-science part costs, no covers.");
+            Assert.IsFalse(quote.AlreadyTooled);
+            Assert.AreEqual(ToolingPolicy.LaunchCost(700, 0, 2000, false, Rates), quote.LaunchCost, 1e-9);
+            var again = ToolingPolicy.Quote(craft, singles.Reverse().ToArray(), Rates);
+            Assert.AreEqual(quote.ToolingCost, again.ToolingCost);
+            Assert.AreEqual(quote.LaunchCost, again.LaunchCost);
+            Assert.IsTrue(again.CoverSearchExhausted);
+            // A craft the search can handle is not flagged.
+            var simple = ToolingPolicy.Quote(Craft(Part("n0", 100)), singles, Rates);
+            Assert.IsTrue(simple.AlreadyTooled);
+            Assert.IsFalse(simple.CoverSearchExhausted);
+        }
+        [TestMethod]
+        public void AlreadyTooledCraftNeverRunsCoverSearch()
+        {
+            var distinct = Enumerable.Range(0, 20).Select(i => Part("n" + i, 100)).ToArray();
+            var designs = distinct.Select(p => Design(Craft(p), 1000)).Concat(new[] { Design(Craft(distinct), 1000) }).ToArray();
+            var quote = ToolingPolicy.Quote(Craft(distinct), designs, Rates);
+            Assert.IsTrue(quote.Success);
+            Assert.IsTrue(quote.AlreadyTooled);
+            Assert.IsFalse(quote.CoverSearchExhausted);
+            Assert.AreEqual(2000 * .1, quote.LaunchCost, 1e-9);
         }
         [TestMethod]
         public void RejectsNonfiniteNegativeAndOversizedInputsWithoutCharges()

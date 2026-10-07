@@ -73,6 +73,50 @@ namespace ServerTest.Agency
             return id;
         }
 
+        // A craft whose cover search exceeds ToolingPolicy.MaxSearchStates: twenty distinct parts, each already tooled alone.
+        private static ToolingManifest Complex() => new ToolingManifest { Parts = Enumerable.Range(0, 20).Select(i => new ToolingPart { Name = "n" + i, UnitCost = 10 }).ToArray() };
+        private static void ToolSingles(AgencyTradeTest.Fixture f)
+        {
+            for (var i = 0; i < 20; i++)
+            {
+                var single = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "n" + i, UnitCost = 10 } } };
+                var tooled = f.Economy.Execute(new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = single, ManifestHash = ToolingPolicy.ManifestHash(single) });
+                Assert.IsTrue(tooled.Success, tooled.Reason);
+            }
+        }
+
+        [TestMethod]
+        public void OverLimitCraftStillPreparesLaunchAtUntooledPrice()
+        {
+            using (var f = Start())
+            {
+                ToolSingles(f);
+                var before = f.Economy.Snapshot.Funds;
+                var manifest = Complex();
+                var prepared = f.Economy.Execute(new EconomyCommand { Operation = EconomyOperation.PrepareLaunch, LaunchId = Guid.NewGuid(), Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) });
+                Assert.IsTrue(prepared.Success, prepared.Reason);
+                Assert.IsTrue(prepared.Quote.CoverSearchExhausted);
+                Assert.IsFalse(prepared.Quote.AlreadyTooled);
+                Assert.AreEqual(200 * 2d, prepared.Quote.LaunchCost, 1e-9);
+                Assert.AreEqual(before - 400d, f.Economy.Snapshot.Funds, 1e-9);
+            }
+        }
+
+        [TestMethod]
+        public void OverLimitCraftStillCreatesSingleLaunchOffer()
+        {
+            using (var f = Start())
+            {
+                ToolSingles(f);
+                var manifest = Complex();
+                var blueprint = "ship = Big\ntype = VAB\n" + string.Concat(Enumerable.Range(0, 20).Select(i => "PART\n{\npart = n" + i + "_" + (100 + i) + "\n}\n"));
+                var offer = SingleOffer(f, manifest);
+                offer.Trade.BlueprintData = Encoding.UTF8.GetBytes(blueprint);
+                var created = f.Economy.Execute(offer);
+                Assert.IsTrue(created.Success, created.Reason);
+            }
+        }
+
         private static object Document() => typeof(AgencyEconomyStore).GetField("_document", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
 
         [DataTestMethod]

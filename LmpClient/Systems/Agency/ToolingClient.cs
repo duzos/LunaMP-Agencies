@@ -113,7 +113,7 @@ namespace LmpClient.Systems.Agency
             return new ToolingQuote
             {
                 Success = standard.Success, Reason = standard.Reason, Fingerprint = standard.Fingerprint, ToolingCost = standard.ToolingCost,
-                ScienceCost = standard.ScienceCost, NonScienceCost = standard.NonScienceCost, CargoCost = standard.CargoCost, AlreadyTooled = standard.AlreadyTooled, Matches = standard.Matches,
+                ScienceCost = standard.ScienceCost, NonScienceCost = standard.NonScienceCost, CargoCost = standard.CargoCost, AlreadyTooled = standard.AlreadyTooled, CoverSearchExhausted = standard.CoverSearchExhausted, Matches = standard.Matches,
                 LaunchCost = TradePolicy.VoucherLaunchCharge(standard, voucher.PrepaidFunds, voucher.LaunchMultiplier)
             };
         }

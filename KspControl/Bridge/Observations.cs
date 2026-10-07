@@ -88,7 +88,7 @@ namespace KspControl.Bridge
                         return listFailed;
                     }
                     data = listed.Data; break;
-                case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.SaveCraft: case EditorOperations.OperationStatus:
+                case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.SaveCraft: case EditorOperations.LoadCraft: case EditorOperations.OperationStatus:
                     // Mutations answer with their own envelope: not an observation, so no readOnly marker and no size cap.
                     if (Operations == null) return Fail(request, "operation_unavailable");
                     var operation = Operations.Handle(request);
@@ -147,7 +147,7 @@ namespace KspControl.Bridge
                 EditorOperations.OperationStatus, CraftOperations.List),
             ["mutations"] = new JArray(Operations == null ? new string[0] : EditorOperations.Mutations),
             ["inline"] = new JArray(ControlOperations.All),
-            ["unavailable"] = new JObject { ["mutations"] = Operations == null ? "operation_layer_not_wired" : "editor_load_craft_not_implemented", ["screenshots"] = "disclosure_validation_not_implemented",
+            ["unavailable"] = new JObject { ["mutations"] = Operations == null ? "operation_layer_not_wired" : "none", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },
             ["maximumPageSize"] = ObservationLimits.MaxPage
         };

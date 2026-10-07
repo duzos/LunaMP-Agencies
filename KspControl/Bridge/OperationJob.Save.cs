@@ -33,6 +33,7 @@ namespace KspControl.Bridge
             {
                 case OperationKind.Apply: return "apply_craft";
                 case OperationKind.Save: return "save_craft";
+                case OperationKind.Load: return "load_craft";
                 default: return "restore_snapshot";
             }
         }

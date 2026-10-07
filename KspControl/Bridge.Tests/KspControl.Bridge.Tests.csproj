@@ -52,6 +52,10 @@
     <Compile Include="../Bridge/EditorOperationRunner.Save.cs" Link="EditorOperationRunner.Save.cs" />
     <Compile Include="../Bridge/EditorOperationService.cs" Link="EditorOperationService.cs" />
     <Compile Include="../Bridge/EditorOperationService.Save.cs" Link="EditorOperationService.Save.cs" />
+    <Compile Include="../Bridge/EditorOperationService.Load.cs" Link="EditorOperationService.Load.cs" />
+    <Compile Include="../Bridge/EditorOperationRunner.Load.cs" Link="EditorOperationRunner.Load.cs" />
+    <Compile Include="../Bridge/OperationJob.Load.cs" Link="OperationJob.Load.cs" />
+    <Compile Include="../Bridge/LoadValidator.cs" Link="LoadValidator.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
     <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />

@@ -14,6 +14,6 @@ builder.Services.AddSingleton<LeaseKeeper>();
 builder.Services.AddHostedService(services => services.GetRequiredService<LeaseKeeper>());
 builder.Services.AddSingleton<JournalAccess>();
 builder.Services.AddSingleton<MutationService>();
-builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>().WithTools<MutationTools>();
+builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>().WithTools<MutationTools>().WithTools<LoadTools>();
 await builder.Build().RunAsync();
 return 0;

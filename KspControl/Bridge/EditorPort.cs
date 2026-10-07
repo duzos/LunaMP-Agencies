@@ -196,6 +196,35 @@ namespace KspControl.Bridge
         Pure.Vector? ReadAttachPoint(uint parentCraftId, uint childCraftId);
         /// <summary>The live srfAttachNode (part-local position and orientation) of the part with craft id <paramref name="craftId"/>, or null.</summary>
         Pure.SurfaceNodeDefinition ReadSurfaceNode(uint craftId);
+        // ---- load members (plan R4-section 6.4, editor_load_craft) ----
+
+        /// <summary>
+        /// Loads the craft file twice (a reference node that is never handed on, and a work node), runs
+        /// KSPUpgradePipeline.Process on the work node synchronously, and returns both as pure trees. Main thread only, never re-entrant.
+        /// Never throws: a failure is reported in the outcome, after the pipeline's failure popup and lock have been cleared.
+        /// </summary>
+        UpgradeOutcome RunUpgradePipeline(string craftPath);
+        /// <summary>The MODULE names of the part prefab, or null when no such part is installed.</summary>
+        IReadOnlyCollection<string> PrefabModuleNames(string partName);
+    }
+
+    /// <summary>What the port reports about one run of the upgrade pipeline on a staged craft copy.</summary>
+    internal sealed class UpgradeOutcome
+    {
+        /// <summary>True only when the pipeline's success callback fired before Process returned.</summary>
+        public bool Succeeded { get; set; }
+        /// <summary>The craft as loaded from the staged copy and never passed to the pipeline.</summary>
+        public Pure.ConfigNode Reference { get; set; }
+        /// <summary>The node the success callback received. Null unless <see cref="Succeeded"/>.</summary>
+        public Pure.ConfigNode Output { get; set; }
+        /// <summary>The names of the upgrade scripts that ran, or null when the game does not tell.</summary>
+        public IReadOnlyList<string> ScriptsApplied { get; set; }
+        /// <summary>The SaveUpgradeFail popup was found and dismissed (only after a failure).</summary>
+        public bool PopupDismissed { get; set; }
+        /// <summary>The SaveUpgradeFailDialog input lock was found and removed (only after a failure).</summary>
+        public bool LockRemoved { get; set; }
+        /// <summary>The exception type name when Process threw.</summary>
+        public string Error { get; set; }
     }
 
     /// <summary>The facts of a live native-save header that the renderer copies.</summary>

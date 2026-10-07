@@ -183,6 +183,7 @@ namespace KspControl.Bridge
 
         private void DoStaging(OperationJob job, long now)
         {
+            if (job.Kind == OperationKind.Load) { DoLoadStaging(job, now); return; }
             if (!Guard(job)) return;
             Validate(job);
             var paths = pathsFactory();
@@ -293,6 +294,7 @@ namespace KspControl.Bridge
 
         private void DoVerify(OperationJob job, long now)
         {
+            if (job.Kind == OperationKind.Load) { DoLoadVerify(job, now); return; }
             if (!Guard(job)) return;
             var capture = tracker.CaptureGuarded();
             if (capture == null) { LoadFailure(job, OperationReasons.StructureMismatchAfterLoad, "capture_unavailable"); return; }
@@ -439,6 +441,7 @@ namespace KspControl.Bridge
                 || job.TakeoverDuringGrace;
             if (!settled) return;
             if (job.Thumbs != null) { job.Thumbs.Finish(job.Declared); job.ThumbnailResult = job.ThumbObserved ? "settled" : "cache_unobserved"; }
+            if (job.Kind == OperationKind.Load) CheckLoadSource(job);
             SetPhase(job, OperationPhase.Finalize, now);
         }
 
@@ -624,6 +627,7 @@ namespace KspControl.Bridge
         /// <summary>Staging files go at the terminal state unless the job is indeterminate (plan R3-section 9). Recovery files stay.</summary>
         private void CleanStaging(OperationJob job)
         {
+            CleanLoadFiles(job);
             if (job.StagingPath == null) return;
             if (job.KeepStaging || job.PendingStatus == JobStatuses.Indeterminate)
             {

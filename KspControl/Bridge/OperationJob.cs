@@ -8,7 +8,7 @@ using Pure = KspControl.EditorModel;
 
 namespace KspControl.Bridge
 {
-    internal enum OperationKind { Apply, Restore, Save }
+    internal enum OperationKind { Apply, Restore, Save, Load }
 
     /// <summary>
     /// The runner's phases (plan R4-section 6.4). Restore* phases are the snapshot reload: the automatic recovery after a failed apply
@@ -177,6 +177,7 @@ namespace KspControl.Bridge
             if (Plan != null && Plan.PlanHash != null) envelope["planHash"] = Plan.PlanHash;
             AddSaveEnvelope(envelope);
             if (Detail != null) envelope["detail"] = Detail;
+            if (Load != null) AppendLoad(envelope);
             return envelope;
         }
 

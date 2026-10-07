@@ -13,7 +13,7 @@ namespace KspControl.Host;
 /// whether the game changed: it records what the bridge reported. When it cannot tell (the connection broke, the bridge restarted),
 /// the job is indeterminate and stays reserved until reconciled.
 /// </summary>
-public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,JournalAccess journal)
+public sealed partial class MutationService(BridgeClient bridge,LeaseKeeper keeper,JournalAccess journal)
 {
  /// <summary>How often a running job is polled. Tests shorten it.</summary>
  public TimeSpan PollInterval { get; set; }=TimeSpan.FromMilliseconds(300);
@@ -171,7 +171,7 @@ public sealed class MutationService(BridgeClient bridge,LeaseKeeper keeper,Journ
  private string Indeterminate(ControlJournal j,Job job,string reason,string detail)
  {
   Safely(()=>j.Finish(job.RequestId,"indeterminate",reason,""));
-  var data=new JObject { ["operation"]=job.Operation switch { "editor.restore_snapshot" => "restore_snapshot", OperationEffects.WriteCraft => "save_craft", _ => "apply_craft" },["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
+  var data=new JObject { ["operation"]=OperationLabel(job),["requestId"]=job.RequestId,["phase"]="unknown",["notDispatched"]=false,["detail"]=detail,["reconcile"]="read editor_state and the recent snapshots before retrying; this request id stays reserved" };
   return JsonConvert.SerializeObject(new BridgeResponse { Status="indeterminate",ReasonCode=reason,Data=data });
  }
 

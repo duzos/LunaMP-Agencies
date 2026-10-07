@@ -53,6 +53,7 @@ namespace KspControl.Bridge
                 case EditorOperations.ApplyCraft: return Apply(request);
                 case EditorOperations.RestoreSnapshot: return Restore(request);
                 case EditorOperations.SaveCraft: return Save(request);
+                case EditorOperations.LoadCraft: return LoadCraft(request);
                 case EditorOperations.OperationStatus: return Status(request);
                 default: return Refuse(request, ControlReasons.OperationUnavailable, null);
             }

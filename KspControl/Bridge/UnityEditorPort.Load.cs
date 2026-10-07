@@ -54,14 +54,17 @@ namespace KspControl.Bridge
 
         private static void ClearUpgradeFailure(UpgradeOutcome outcome)
         {
-            try { PopupDialog.DismissPopup(UpgradeFailPopup); outcome.PopupDismissed = true; }
-            catch (Exception) { outcome.PopupDismissed = false; }
-            try
+            // DismissPopup returns nothing, so "a popup was found" is read from the lock the pipeline sets together with it.
+            var popupOpen = false;
+            try { var stack = InputLockManager.lockStack; popupOpen = stack != null && stack.ContainsKey(UpgradeFailLock); }
+            catch (Exception) { }
+            if (popupOpen)
             {
-                var stack = InputLockManager.lockStack;
-                if (stack != null && stack.ContainsKey(UpgradeFailLock)) { InputLockManager.RemoveControlLock(UpgradeFailLock); outcome.LockRemoved = true; }
+                try { PopupDialog.DismissPopup(UpgradeFailPopup); outcome.PopupDismissed = true; }
+                catch (Exception) { outcome.PopupDismissed = false; }
+                try { InputLockManager.RemoveControlLock(UpgradeFailLock); outcome.LockRemoved = true; }
+                catch (Exception) { outcome.LockRemoved = false; }
             }
-            catch (Exception) { outcome.LockRemoved = false; }
         }
 
         public IReadOnlyCollection<string> PrefabModuleNames(string partName)

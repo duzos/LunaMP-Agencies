@@ -109,12 +109,28 @@ namespace KspControl.BridgeTests
             Assert.IsNull(job.Snapshot);
         }
 
-        [TestMethod] public void ALoadLeavesKspsOwnSaveNameValuesInPlace()
+        [TestMethod] public void APlainLoadWritesTheOverwriteGuard()
         {
             var job = Run(PutSource());
             Assert.AreEqual("completed", job.Status);
-            Assert.AreEqual(0, rig.Port.GuardWrites, "no sentinel and no unsaved marker after a load (plan R3-section 8)");
-            Assert.AreEqual("Probe", rig.Port.LastSaved, "the loaded header ship name, as StartEditor sets it");
+            Assert.AreEqual("sentinel_and_unsaved_marker", (string)job.ToEnvelope()["observed"]["overwriteGuard"]);
+            Assert.IsTrue(rig.Port.GuardWrites > 0, "KSP prompts before a human Save overwrites the source");
+        }
+
+        [TestMethod] public void AnUpgradedLoadWritesTheOverwriteGuard()
+        {
+            rig.Port.PipelineTransform = node => node.Children("PART").First().Entries.Add(new Pure.ConfigEntry("upgradedKey", "1"));
+            var job = Run(PutSource(), true);
+            Assert.AreEqual("completed", job.Status, job.ReasonCode + " " + job.Detail);
+            Assert.AreEqual("sentinel_and_unsaved_marker", (string)job.ToEnvelope()["observed"]["overwriteGuard"]);
+        }
+
+        [TestMethod] public void AnOverwriteGuardThatCannotBeWrittenFailsTheLoadAndRestores()
+        {
+            rig.Port.GuardWritesFail = true;
+            var job = Run(PutSource());
+            Assert.AreEqual("failed", job.Status); Assert.AreEqual(OperationReasons.SaveOverwriteGuardUnavailable, job.ReasonCode);
+            Assert.IsTrue(job.Restore.Attempted);
         }
 
         // ---- admission refusals ----

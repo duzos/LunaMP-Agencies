@@ -225,7 +225,7 @@ The human's file is never loaded in place, never rewritten and never gets a side
 Then the standard runner: snapshot of a non-empty editor, dispatch, settle, verify (`comparison` = the staged craft against the editor's
 own `SaveShip`; reported, never a failure), locked grace, thumbnail settle. After grace the source, its `.original` and its `.loadmeta`
 are hashed again: a change to the source or `.original` fails the job `source_changed_during_load` (the editor keeps the loaded copy and
-the snapshot stays); a changed `.loadmeta` is reported. KSP's own save-name values are left as the load set them.
+the snapshot stays); a changed `.loadmeta` is reported. An overwrite guard (sentinel save name and unsaved marker) is written after every load, so KSP prompts before a human Save overwrites the source.
 `scriptsApplied` is `"unavailable"` unless the game reports it.
 
 ## Offline preview packaging

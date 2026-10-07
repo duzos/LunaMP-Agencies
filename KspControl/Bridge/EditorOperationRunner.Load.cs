@@ -68,7 +68,7 @@ namespace KspControl.Bridge
             if (!outcome.Succeeded || outcome.Output == null)
             {
                 load.PipelineRan = true;
-                Fail(job, LoadReasons.CraftUpgradeFailed, outcome.Error ?? "the pipeline did not report success"
+                Fail(job, LoadReasons.CraftUpgradeFailed, (outcome.Error ?? "the pipeline did not report success")
                     + (outcome.PopupDismissed ? "; the failure popup was dismissed" : ""));
                 return;
             }
@@ -130,6 +130,9 @@ namespace KspControl.Bridge
             var capture = tracker.CaptureGuarded();
             if (capture == null) { LoadFailure(job, OperationReasons.StructureMismatchAfterLoad, "capture_unavailable"); return; }
             job.Load.Comparison = Pure.CraftComparator.Compare(job.Load.Output, capture.Craft);
+            // After every load, KSP must prompt before a human Save overwrites the source with an upgraded or differing craft:
+            // this path deliberately writes no .original backup.
+            if (!ApplyOverwriteGuard(job)) { LoadFailure(job, OperationReasons.SaveOverwriteGuardUnavailable, "the save-name guard could not be written"); return; }
             job.EffectsApplied.Add("craft_loaded");
             SetPhase(job, OperationPhase.GraceStart, now);
         }

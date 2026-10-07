@@ -47,7 +47,7 @@ logs. `KSP_CONTROL_PORT` optionally overrides loopback TCP port 43819. Provision
 installation, game lifecycle and client configuration are orchestrator tasks, not
 MCP tools. An absent credential produces `credential_not_configured`.
 
-Current tools are `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
+Current tools are `editor_state`, `editor_engineering`, `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
 `part_controls`, `science`, `part_definition` and `editor_snapshot`. The latter two provide bounded configured-part and native editor snapshots; they do not import or create craft. Part and vessel pages are bounded. Part controls
 and science require a part ID from an accessible craft observation. Controls are
 descriptors only; field values/invocation are not available. Flight inspection
@@ -107,7 +107,7 @@ change) and publishes an immutable status: `missing`, `malformed`, `invalid_mac`
 drops only the lease; a binding change drops the grant (re-provisioned when it matches again);
 the Stop button or `KSP_CONTROL_STOP_KEY` hotkey burns the current generation and persists it
 in `<KSP root>/KspControlData/control/suspensions.json`, so it survives a restart until
-`grant rearm` writes a higher generation. The highest generation seen per grant id is stored in the same file, so an older envelope cannot be replayed after a restart; a failed write shows as `stopPersistFailed` in `control_status` and a warning on the panel. A human edit takeover (wired in a later slice) revokes
+`grant rearm` writes a higher generation. The highest generation seen per grant id is stored in the same file, so an older envelope cannot be replayed after a restart; a failed write shows as `stopPersistFailed` in `control_status` and a warning on the panel. A human edit takeover (see Editor state) revokes
 the lease and starts a 30 s cooldown.
 
 **Tools.** `control_status`, `control_acquire_lease(purpose 1..128, durationSeconds 30..300)`,
@@ -123,6 +123,52 @@ queue-wait slots, otherwise `bridge_busy`. `BridgeClient` keeps disjoint read, c
 
 Not live-verified: the scene-ready definition, the OnGUI Stop button, the hotkey and the
 watchdog behaviour during a real long frame need a KSP run.
+
+## Editor state (revision, takeover, idle)
+
+`editor_state` and `editor_engineering` are read-only: no lease, no grant, no change to the game. Both are queued
+observations served on the main thread.
+
+**`editor_state`** returns `editorRevision` (an opaque token, `v1|epoch|generation|editRevision|fingerprint[0..12]`, base64url; null when the
+craft fingerprint cannot be computed), `editRevision`, `generation`, `partCount`, `facility`, `shipName` (the editor name field), `unsaved`
+(`true`, `false` or `"unknown"`), `idle`, `fsmState` (or `"unavailable"`), `busy[]` (`part_held`, `fsm_not_idle`, `modal_lock:<id>`,
+`operation_running`, `launch_pending`), `capabilities` (`fsm`, `unsavedMarker`, `saveOverwriteGuard`: `available` or `unavailable`, with
+the individual guard members), `lastSavedName`, `fingerprintMode` (`full` or `dirty_tracked`) and `lastPollCostMs`.
+
+**`editor_engineering`** (`offset` 0..100000, `limit` 1..50, `includeDeltaV` default true) returns stock data only: dry/fuel mass and cost,
+`allPartsConnected`, `shipPartsUnlocked`, stageable parts per stage, per-stage delta-V (`ready=false` until the stock calculation finishes), a
+paged part table (craft id, parent, stack node pair or surface, symmetry group, stage, mass), the largest linked stack-node gap,
+`partsStockAllowed` (`PartTechAvailable && PartModelPurchased` for every part; null in a save without research), `craftIdentifiersValid`
+(the `ToolingClient.CraftIndices` rule over a native save) and provenance labels. `toolingQuote` and `launchResearchAllowance` are
+`deferred_to_P3`. Invalid arguments return `invalid_argument` without contacting the game.
+
+**Revision model.** `generation` increments when the editor's `ShipConstruct` object changes (load, new craft, undo restore).
+`editRevision` is a never-decreasing counter bumped by human-input events, generation changes and fingerprint changes; it is published as
+`LeaseContext.Revision`. The fingerprint is the `CraftFingerprint` projection of `ShipConstruct.SaveShip()` with the volatile-key registry
+applied, plus the editor name, description and flag. A bare `onEditorShipModified`, `onEditorPartEvent` or `onEditorVariantApplied` only
+marks the editor dirty: the fingerprint is rechecked (throttled to 250 ms) and nothing happens if it is unchanged, which absorbs animation
+and KSPCF re-fires. Events raised while the tracker's own native save runs are ignored.
+
+**Takeover.** Outside an operation, with a lease held, any fingerprint change, generation change, name/description/flag change, selected part
+or human-input event (part picked, placed or deleted, pod picked or deleted, undo, redo, load) calls `HumanTakeover` (lease revoked, 30 s
+cooldown). With no lease the same signals only bump the revision and nothing polls: the fingerprint is recaptured at each observation and at admission. Acquiring a lease re-baselines silently, so earlier edits are never a takeover. While a lease is held the fingerprint is rechecked every second
+(`full` mode), or a cheap structural hash is checked every second with a full recheck on any event or every 10 s (`dirty_tracked` mode,
+chosen when the measured fingerprint cost exceeds about 20 ms). The operation windows (lock, dispatch, `post_unlock_grace`) that attribute
+the operation's own events are implemented and unit-tested in `EditorRevisionTracker`; no operation runner drives them yet.
+
+**Busy.** Idle needs an FSM state in `st_idle`, `st_podSelect`, `st_offset_select`, `st_rotate_select` or `st_root_unselected`, no selected part,
+and none of the known modal locks (`EditorLogic_loadDialog`, `LoadConfirmationDialog`, `SaveConfirmationDialog`, `Saving`,
+`EditorLogic_dialog_softLock`, `CreatorCraftName`, `SaveCraftOverwrite`, `NewCraft`, `LoadCraft`, `SaveUpgradeFailDialog`). `LMP_ToolingLaunch`
+reports `launch_pending` and `KspControl.Op` reports `operation_running`. Other input locks (for example hover locks) are ignored. The FSM,
+the unsaved marker and the overwrite-guard fields are private editor members read by guarded reflection and resolved once at startup; if a
+member is missing, its capability reads `unavailable` and the check falls back to the selected part and the lock list.
+
+The `EditorModel` sources the tracker needs are linked into the bridge as source files (no new DLL, package allowlist unchanged).
+
+Not live-verified: the FSM state names, the reflection targets (`fsm`, `undoLevel`, `undoIndexAtLastSave`, `vesselNameAtLastSave`,
+`vesselNameAtLastSave_Sanitized`, `SetLastSanitizedSaveName`), the `SaveShip` cost per poll and the resulting polling mode, that an
+idle editor (including deployable-panel animation and a KSPCF re-fire) keeps a stable fingerprint, and the stock part-research,
+delta-V, mass and node-gap readings.
 
 ## Offline preview packaging
 

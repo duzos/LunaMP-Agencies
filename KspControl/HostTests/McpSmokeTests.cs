@@ -28,7 +28,9 @@ namespace KspControl.HostTests;
    var names=list.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t=>t.GetProperty("name").GetString()).ToArray();
    CollectionAssert.Contains(names,"context");
    var call=await Request(new { jsonrpc="2.0",id=3,method="tools/call",@params=new { name="context",arguments=new {} } },3);
-   Assert.IsTrue(call.GetProperty("result").GetProperty("isError").GetBoolean());
+   string output=call.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
+   using var failure=JsonDocument.Parse(output); Assert.AreEqual("credential_not_configured",failure.RootElement.GetProperty("ReasonCode").GetString());
   } finally { process.StandardInput.Close(); if(!process.WaitForExit(1000)) process.Kill(true); await errors; }
  }
 }
+

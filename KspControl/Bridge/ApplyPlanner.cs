@@ -178,7 +178,7 @@ namespace KspControl.Bridge
         {
             switch (c)
             {
-                case Pure.PartCategories.Command: case Pure.PartCategories.Tank: case Pure.PartCategories.Engine: case Pure.PartCategories.Decoupler: case Pure.PartCategories.Parachute: return c;
+                case Pure.PartCategories.Command: case Pure.PartCategories.Tank: case Pure.PartCategories.Engine: case Pure.PartCategories.Decoupler: case Pure.PartCategories.Parachute: case Pure.PartCategories.HeatShield: return c;
                 default: return Pure.PartCategories.Other;
             }
         }

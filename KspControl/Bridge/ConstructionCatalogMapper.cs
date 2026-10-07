@@ -97,20 +97,27 @@ namespace KspControl.Bridge
     /// <summary>Pure mapping from loaded-part primitives to the construction catalog wire shape. No Unity or KSP types.</summary>
     public static class ConstructionCatalogMapper
     {
-        // Category vocabulary is the EditorModel one (PartCategories). A nosecone is "other"; a solid booster is an engine; a ModuleParachute part is "parachute".
-        public const string Command = "command", Tank = "tank", Engine = "engine", Decoupler = "decoupler", Parachute = "parachute", Other = "other";
+        // Category vocabulary is the EditorModel one (PartCategories). A nosecone is "other"; a solid booster is an engine; a ModuleParachute part is "parachute";
+        // an ablative heat shield (ModuleAblator, with its unstaged ModuleDecouple) is "heatshield".
+        public const string Command = "command", Tank = "tank", Engine = "engine", Decoupler = "decoupler", Parachute = "parachute", HeatShield = "heatshield", Other = "other";
         public const int MaxNodes = 32;
 
-        public static string MapCategory(IEnumerable<string> modules, IEnumerable<string> resources)
+        /// <summary>
+        /// Role from modules first, then propellant resources, then the KSP editor category. The KSP category fallback matters with fuel-switch mods
+        /// (CryoTanks/B9PartSwitch): they remove the RESOURCE nodes from stock tanks, so a prefab FL-T200 carries no LiquidFuel/Oxidizer but is still category FuelTank.
+        /// </summary>
+        public static string MapCategory(IEnumerable<string> modules, IEnumerable<string> resources, string kspCategory = null)
         {
             var m = new HashSet<string>(modules ?? new string[0], StringComparer.Ordinal);
             var r = new HashSet<string>(resources ?? new string[0], StringComparer.Ordinal);
             if (m.Contains("ModuleCommand")) return Command;
+            if (m.Contains("ModuleAblator") && m.Contains("ModuleDecouple")) return HeatShield;
             if (m.Contains("ModuleDecouple") || m.Contains("ModuleAnchoredDecoupler")) return Decoupler;
             if (m.Contains("ModuleEngines") || m.Contains("ModuleEnginesFX")) return Engine;
             if (m.Contains("ModuleParachute")) return Parachute;
             if (!m.Contains("ModuleRCS") && !m.Contains("ModuleRCSFX")
-                && (r.Contains("LiquidFuel") || r.Contains("Oxidizer") || r.Contains("MonoPropellant") || r.Contains("XenonGas"))) return Tank;
+                && (r.Contains("LiquidFuel") || r.Contains("Oxidizer") || r.Contains("MonoPropellant") || r.Contains("XenonGas")
+                    || string.Equals(kspCategory, "FuelTank", StringComparison.Ordinal))) return Tank;
             return Other;
         }
 
@@ -190,7 +197,7 @@ namespace KspControl.Bridge
             {
                 ["name"] = part.Name,
                 ["found"] = true,
-                ["category"] = MapCategory(part.ModuleNames, part.ResourceNames),
+                ["category"] = MapCategory(part.ModuleNames, part.ResourceNames, part.KspCategory),
                 ["kspCategory"] = part.KspCategory,
                 ["buildable"] = part.Buildable,
                 ["partsStockAllowed"] = allowed,

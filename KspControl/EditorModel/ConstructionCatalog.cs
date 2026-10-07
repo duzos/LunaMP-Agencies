@@ -14,6 +14,11 @@ namespace KspControl.EditorModel
         public const string Decoupler = "decoupler";
         /// <summary>ModuleParachute. Supported only as the single parachute on the command pod's top node (stage group 0).</summary>
         public const string Parachute = "parachute";
+        /// <summary>
+        /// An ablative heat shield (ModuleAblator). It carries a ModuleDecouple whose staging is off by default, so it is not a stage group, but KSP still counts it
+        /// as a decoupler for dstg (stock Science Jr: HeatShield1 istg=-1 dstg=1 sidx=-1 sqor=-1 sepI=-1). Supported as the command pod's bottom-node child.
+        /// </summary>
+        public const string HeatShield = "heatshield";
         public const string Other = "other";
     }
     public sealed class ConstructionNode

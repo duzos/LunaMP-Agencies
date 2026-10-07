@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using CommNet;
 using HarmonyLib;
 using LmpClient.Systems.Agency;
+using LmpClient.Systems.PlayerColorSys;
+using LmpClient.Systems.SettingsSys;
+using LmpCommon.Agency;
+using LmpCommon.Enums;
 using UnityEngine;
 
 namespace LmpClient.Harmony
@@ -14,6 +19,8 @@ namespace LmpClient.Harmony
         internal static string DiagnosticReason { get; private set; }
         private static FieldInfo uiPoints, uiLine;
         private static PropertyInfo lineActive;
+        private static MethodInfo getLineColor, setLineColor;
+        private static bool coloursReady;
         private static DateTime nextDiagnostic;
         [ThreadStatic] private static RenderScope current;
 
@@ -24,9 +31,14 @@ namespace LmpClient.Harmony
         }
         private sealed class RenderScope
         {
+            internal CommNetUI Ui;
             internal List<Vector3> Points;
+            internal bool MaskHidden = true, ColourShared;
+            internal Guid Viewer;
             internal readonly Dictionary<CommNode, bool> Visible = new Dictionary<CommNode, bool>(new NodeIdentityComparer());
-            internal int Evaluated, Masked, Unresolved;
+            internal readonly Dictionary<Guid, Color32?> AgencyColours = new Dictionary<Guid, Color32?>();
+            internal readonly List<Color32?> SegmentColours = new List<Color32?>();
+            internal int Evaluated, Masked, Unresolved, Coloured;
         }
 
         internal static bool TryAttach(HarmonyLib.Harmony harmony)
@@ -47,6 +59,7 @@ namespace LmpClient.Harmony
                 Attach(harmony, attached, ExactMethod(typeof(CommNode), "GetLinkPoints", points), null, nameof(NodePoints));
                 Attach(harmony, attached, ExactMethod(typeof(CommNetwork), "GetLinkPoints", points), null, nameof(NetworkPoints));
                 DiagnosticReason = null;
+                TryAttachColours(harmony, uiLine.FieldType);
                 return true;
             }
             catch (Exception e)
@@ -59,6 +72,33 @@ namespace LmpClient.Harmony
                 DiagnosticReason = "CommNet display hooks unavailable: " + e.Message;
                 LunaLog.LogError("[AgencyCommNetVisibility] " + DiagnosticReason);
                 return false;
+            }
+        }
+
+        // Colouring is optional. Its API/patch failures must never roll back the masking hooks above.
+        private static void TryAttachColours(HarmonyLib.Harmony harmony, Type lineType)
+        {
+            coloursReady = false;
+            var attached = new List<KeyValuePair<MethodBase, MethodInfo>>();
+            try
+            {
+                getLineColor = AccessTools.Method(lineType, "GetColor", new[] { typeof(int) });
+                setLineColor = AccessTools.Method(lineType, "SetColor", new[] { typeof(Color32), typeof(int) });
+                if (getLineColor?.ReturnType != typeof(Color32) || setLineColor?.ReturnType != typeof(void))
+                    throw new MissingMethodException("CommNet line colour API is unavailable.");
+                Attach(harmony, attached, ExactMethod(lineType, "Draw", Type.EmptyTypes), nameof(BeforeDraw), null);
+                Attach(harmony, attached, ExactMethod(lineType, "Draw3D", Type.EmptyTypes), nameof(BeforeDraw), null);
+                coloursReady = true;
+            }
+            catch (Exception e)
+            {
+                foreach (var patch in attached)
+                {
+                    try { harmony.Unpatch(patch.Key, patch.Value); }
+                    catch (Exception rollback) { LunaLog.LogWarning("[AgencyCommNetVisibility] Colour hook rollback failed: " + rollback.Message); }
+                }
+                DiagnosticReason = "CommNet colours unavailable; hiding remains active: " + e.Message;
+                LunaLog.LogWarning("[AgencyCommNetVisibility] " + DiagnosticReason);
             }
         }
 
@@ -83,10 +123,14 @@ namespace LmpClient.Harmony
         {
             __state = current;
             current = null;
-            if (!VisibilityClient.Enabled) return true;
+            var mask = VisibilityClient.Enabled;
+            var colour = coloursReady && MainSystem.NetworkState >= ClientState.Handshaking &&
+                SettingsSystem.ServerSettings.AgencyCommNetPerAgency && SettingsSystem.ServerSettings.AgencyCommNetOptIn;
+            if (!mask && !colour) return true;
             try
             {
-                current = new RenderScope { Points = (List<Vector3>)uiPoints.GetValue(__instance) };
+                current = new RenderScope { Ui = __instance, Points = (List<Vector3>)uiPoints.GetValue(__instance),
+                    MaskHidden = mask, ColourShared = colour, Viewer = AgencySystem.Singleton.MyAgencyId };
                 // This refresh does not depend on the simulation adapter having attached successfully.
                 CommNet_AgencyFilter.BuildNodeMap();
                 if (!CommNetNetwork.Instance) HideLine(__instance);
@@ -109,7 +153,7 @@ namespace LmpClient.Harmony
             {
                 nextDiagnostic = DateTime.UtcNow.AddSeconds(5);
                 Diagnostics.PlaytestDiagnostics.Write("client.visibility.commnet", () =>
-                    $"evaluated={completed.Evaluated} masked={completed.Masked} unresolved={completed.Unresolved} diagnostic={DiagnosticReason ?? "none"}");
+                    $"evaluated={completed.Evaluated} masked={completed.Masked} unresolved={completed.Unresolved} coloured={completed.Coloured} diagnostic={DiagnosticReason ?? "none"}");
             }
             return __exception;
         }
@@ -137,12 +181,17 @@ namespace LmpClient.Harmony
         private static void Mask(CommLink link, List<Vector3> points, int pair)
         {
             current.Evaluated++;
-            if (link != null && Visible(link.a) && Visible(link.b)) return;
-            points[pair * 2] = points[pair * 2 + 1] = Vector3.zero;
-            current.Masked++;
+            if (current.MaskHidden && (link == null || !Visible(link.a) || !Visible(link.b)))
+            {
+                points[pair * 2] = points[pair * 2 + 1] = Vector3.zero;
+                current.Masked++;
+                current.SegmentColours.Add(null);
+            }
+            else current.SegmentColours.Add(current.ColourShared ? SharedColour(link) : null);
         }
         private static bool CheckCount(List<Vector3> points, int links)
         {
+            current.SegmentColours.Clear();
             if (points.Count == links * 2) return true;
             Fail(current, "CommNet display point/link count mismatch.");
             return false;
@@ -150,8 +199,83 @@ namespace LmpClient.Harmony
         private static void Fail(RenderScope scope, string reason)
         {
             DiagnosticReason = reason;
+            scope?.SegmentColours.Clear();
             if (scope?.Points != null)
                 for (var i = 0; i < scope.Points.Count; i++) scope.Points[i] = Vector3.zero;
+        }
+
+        private static Color32? SharedColour(CommLink link)
+        {
+            try
+            {
+                if (link?.a == null || link.b == null || link.a.isHome || link.b.isHome ||
+                    !CommNet_AgencyFilter.TryGetVessel(link.a, out var a) || !a ||
+                    !CommNet_AgencyFilter.TryGetVessel(link.b, out var b) || !b) return null;
+                var system = AgencySystem.Singleton;
+                var selected = SelectColourAgency(current.Viewer, system.GetVesselAgency(a.id), system.GetVesselAgency(b.id));
+                if (selected == Guid.Empty || !system.CanLinkCommNet(a.id, b.id)) return null;
+                if (current.AgencyColours.TryGetValue(selected, out var cached)) return cached;
+                Color32? colour = null;
+                if (system.KnownAgencies.TryGetValue(selected, out var agency))
+                    colour = RepresentativeColour(agency, PlayerColorSystem.Singleton.PlayerColors,
+                        SettingsSystem.CurrentSettings.PlayerName, SettingsSystem.CurrentSettings.PlayerColor);
+                current.AgencyColours[selected] = colour;
+                return colour;
+            }
+            catch (Exception e)
+            {
+                DiagnosticReason = "CommNet colour lookup failed; stock colours retained: " + e.GetType().Name;
+                return null;
+            }
+        }
+        private static Guid SelectColourAgency(Guid viewer, Guid a, Guid b)
+        {
+            if (a == Guid.Empty || b == Guid.Empty || a == b) return Guid.Empty;
+            if (a == viewer) return b;
+            if (b == viewer) return a;
+            return a.CompareTo(b) < 0 ? a : b;
+        }
+        private static Color32? RepresentativeColour(AgencyInfo agency, IDictionary<string, Color> colours, string localName, Color localColour)
+        {
+            var candidates = new[] { agency.OwnerDisplayName }.Concat((agency.MemberDisplayNames ?? Array.Empty<string>()).OrderBy(n => n, StringComparer.Ordinal));
+            foreach (var name in candidates)
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                Color colour;
+                if (string.Equals(name, localName, StringComparison.Ordinal)) colour = localColour;
+                else if (!colours.TryGetValue(name, out colour)) continue;
+                if (float.IsNaN(colour.r) || float.IsInfinity(colour.r) || float.IsNaN(colour.g) || float.IsInfinity(colour.g) ||
+                    float.IsNaN(colour.b) || float.IsInfinity(colour.b)) continue;
+                return (Color32)colour;
+            }
+            return null;
+        }
+        private static void BeforeDraw(object __instance)
+        {
+            if (!coloursReady || current == null || !current.ColourShared || ReferenceEquals(current.Ui, null)) return;
+            var originals = new List<KeyValuePair<int, Color32>>();
+            try
+            {
+                if (!ReferenceEquals(__instance, uiLine.GetValue(current.Ui))) return;
+                if (current.Points.Count != current.SegmentColours.Count * 2) return;
+                for (var i = 0; i < current.SegmentColours.Count; i++)
+                {
+                    if (!current.SegmentColours[i].HasValue) continue;
+                    var original = (Color32)getLineColor.Invoke(__instance, new object[] { i });
+                    originals.Add(new KeyValuePair<int, Color32>(i, original));
+                    var colour = current.SegmentColours[i].Value;
+                    colour.a = original.a;
+                    setLineColor.Invoke(__instance, new object[] { colour, i });
+                }
+                current.Coloured += originals.Count;
+            }
+            catch (Exception e)
+            {
+                // Keep an optional colour failure independent of geometry hiding, including partial application.
+                foreach (var original in originals)
+                    try { setLineColor.Invoke(__instance, new object[] { original.Value, original.Key }); } catch { }
+                DiagnosticReason = "CommNet tint failed; stock colours retained: " + e.GetType().Name;
+            }
         }
         private static void LinkPoints(CommLink __instance, List<Vector3> __0)
         {

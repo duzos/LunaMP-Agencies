@@ -27,6 +27,8 @@ namespace KspControl.EditorModel.Tests;
  [TestMethod] public void SurfaceRuleEnforced(){var c=Catalog();c["tank"].AllowsSurfaceChildren=false;Has(Rocket(),"surface_attachment_denied",c);}
  [TestMethod] public void AttachmentPositionUsesBothRotations(){var identity=new Rotation(0,0,0,1);var rotated=new Rotation(0,0,1,0);var result=AttachmentGeometry.StackPosition(new(5,5,0),rotated,new(0,-1,0),identity,new(0,2,0));Assert.AreEqual(5,result.X,1e-9);Assert.AreEqual(4,result.Y,1e-9);}
  [TestMethod] public void InvalidCatalogEntriesProduceDiagnostics() { var c=Catalog();c["tank"]=null!;Has(Rocket(),"unknown_part",c);c=Catalog();c["tank"].Nodes[0].Orientation=new();Has(Rocket(),"invalid_catalog_nodes",c); }
+ [TestMethod] public void ExtremeFiniteGeometryAndOversizeNodeCatalogRejected() { Assert.ThrowsException<ArgumentException>(()=>AttachmentGeometry.Rotate(new(double.MaxValue,0,0),new(0,0,0,1))); var c=Catalog();c["tank"].Nodes.AddRange(Enumerable.Range(0,129).Select(i=>new AttachNodeDefinition {Name="node"+i,Orientation=new(0,1,0)}));Has(Rocket(),"invalid_catalog_nodes",c); }
  [TestMethod] public void GeometryRejectsInvalidQuaternion(){Assert.ThrowsException<ArgumentException>(()=>AttachmentGeometry.StackPosition(new(),new(),new(),new(0,0,0,1),new()));}
 }
+
 

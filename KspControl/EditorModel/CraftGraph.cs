@@ -58,7 +58,7 @@ namespace KspControl.EditorModel
         public string PartId { get; }
         public GraphIssue(string code,string partId) { Code=code;PartId=partId; }
     }
-    /// <summary>Validates a detached proposal, never edits KSP. Geometry collision and flight viability are separate gates.</summary>
+    /// <summary>Validates detached topology and individual transforms only, never edits KSP. Linked-node alignment, collision and flight viability require separate gates before import.</summary>
     public static class GraphValidator
     {
         public static IReadOnlyList<GraphIssue> Validate(CraftGraph graph,IReadOnlyDictionary<string,PartDefinition> catalog)
@@ -79,7 +79,7 @@ namespace KspControl.EditorModel
                 if(part.Definition==null || !catalog.TryGetValue(part.Definition,out var definition)||definition==null) { add("unknown_part",part.Id);continue; }
                 if(!definition.Unlocked) add("part_locked",part.Id);
                 if(!definition.ConfigurationVerified) add("configuration_unverified",part.Id);
-                if(definition.Nodes==null || definition.Nodes.Any(n=>n==null||!Handle(n.Name)||!n.Position.IsFinite||!n.Orientation.IsFinite||n.Orientation.LengthSquared<1e-12||n.Orientation.LengthSquared>1e12) || definition.Nodes.Where(n=>n!=null).GroupBy(n=>n.Name).Any(g=>g.Count()>1)) add("invalid_catalog_nodes",part.Id);
+                if(definition.Nodes==null || definition.Nodes.Count>128 || definition.Nodes.Any(n=>n==null||!Handle(n.Name)||!n.Position.IsFinite||n.Position.LengthSquared>1e12||!n.Orientation.IsFinite||n.Orientation.LengthSquared<1e-12||n.Orientation.LengthSquared>1e12) || definition.Nodes.Where(n=>n!=null).GroupBy(n=>n.Name).Any(g=>g.Count()>1)) add("invalid_catalog_nodes",part.Id);
             }
             if(graph.RootId==null || !parts.TryGetValue(graph.RootId,out var root)) add("missing_root",null);
             else if(root.ParentId!=null) add("root_has_parent",root.Id);
@@ -116,5 +116,6 @@ namespace KspControl.EditorModel
         private static bool Handle(string value) => !string.IsNullOrEmpty(value)&&value.Length<=64&&value.All(c=>char.IsLetterOrDigit(c)||c=='-'||c=='_');
     }
 }
+
 
 

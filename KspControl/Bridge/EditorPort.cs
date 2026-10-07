@@ -183,6 +183,17 @@ namespace KspControl.Bridge
         bool TrySetBackup();
         /// <summary>Crew seats as "craftId|seat|name", or null when the manifest cannot be read. Best effort.</summary>
         IReadOnlyList<string> ReadCrew();
+
+        // ---- load members (plan R4-section 6.4, editor_load_craft) ----
+
+        /// <summary>
+        /// Loads the craft file twice (a reference node that is never handed on, and a work node), runs
+        /// KSPUpgradePipeline.Process on the work node synchronously, and returns both as pure trees. Main thread only, never re-entrant.
+        /// Never throws: a failure is reported in the outcome, after the pipeline's failure popup and lock have been cleared.
+        /// </summary>
+        UpgradeOutcome RunUpgradePipeline(string craftPath);
+        /// <summary>The MODULE names of the part prefab, or null when no such part is installed.</summary>
+        IReadOnlyCollection<string> PrefabModuleNames(string partName);
     }
 
     /// <summary>The facts of a live native-save header that the renderer copies.</summary>

@@ -76,7 +76,7 @@ namespace KspControl.Bridge
                         return failed;
                     }
                     data = editorResult.Data; break;
-                case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.OperationStatus:
+                case EditorOperations.ApplyCraft: case EditorOperations.RestoreSnapshot: case EditorOperations.LoadCraft: case EditorOperations.OperationStatus:
                     // Mutations answer with their own envelope: not an observation, so no readOnly marker and no size cap.
                     if (Operations == null) return Fail(request, "operation_unavailable");
                     var operation = Operations.Handle(request);

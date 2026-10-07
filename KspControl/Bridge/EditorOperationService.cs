@@ -21,7 +21,7 @@ namespace KspControl.Bridge
     /// observation drain, in one frame: it either refuses with a reason and a no-effect envelope, or registers a job, hands it to the
     /// runner and answers <c>running</c>. The long work happens in <see cref="EditorOperationRunner"/>, one step per frame.
     /// </summary>
-    internal sealed class EditorOperationService : IOperationSummary
+    internal sealed partial class EditorOperationService : IOperationSummary
     {
         private readonly IEditorPort port;
         private readonly EditorRevisionTracker tracker;
@@ -49,6 +49,7 @@ namespace KspControl.Bridge
             {
                 case EditorOperations.ApplyCraft: return Apply(request);
                 case EditorOperations.RestoreSnapshot: return Restore(request);
+                case EditorOperations.LoadCraft: return LoadCraft(request);
                 case EditorOperations.OperationStatus: return Status(request);
                 default: return Refuse(request, ControlReasons.OperationUnavailable, null);
             }
@@ -315,7 +316,7 @@ namespace KspControl.Bridge
             if (shown == null) return JValue.CreateNull();
             return new JObject
             {
-                ["requestId"] = shown.RequestId, ["operation"] = shown.Kind == OperationKind.Apply ? "apply_craft" : "restore_snapshot",
+                ["requestId"] = shown.RequestId, ["operation"] = shown.OperationName,
                 ["status"] = shown.Status, ["phase"] = OperationJob.PhaseName(shown.Phase),
                 ["reasonCode"] = shown.ReasonCode == null ? JValue.CreateNull() : (JToken)shown.ReasonCode,
                 ["completedUtc"] = shown.CompletedUtc.HasValue ? (JToken)shown.CompletedUtc.Value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture) : JValue.CreateNull()

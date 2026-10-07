@@ -25,7 +25,7 @@ namespace KspControl.BridgeTests
     /// A scriptable editor: a craft text the test edits, a ship identity object, UI fields, locks and FSM state. It records how
     /// often it was saved so tests can assert that no capture happens where none is allowed.
     /// </summary>
-    internal sealed class EditorFake : IEditorPort
+    internal sealed partial class EditorFake : IEditorPort
     {
         private readonly FakeClock clock;
         public EditorFake(FakeClock clock) { this.clock = clock; Ship = new object(); Craft = CraftText(); }

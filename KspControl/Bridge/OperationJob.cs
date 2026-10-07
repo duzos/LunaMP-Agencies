@@ -8,7 +8,7 @@ using Pure = KspControl.EditorModel;
 
 namespace KspControl.Bridge
 {
-    internal enum OperationKind { Apply, Restore }
+    internal enum OperationKind { Apply, Restore, Load }
 
     /// <summary>
     /// The runner's phases (plan R4-section 6.4). Restore* phases are the snapshot reload: the automatic recovery after a failed apply
@@ -46,7 +46,7 @@ namespace KspControl.Bridge
     /// One mutation job. Created at admission, advanced once per frame by the runner, and read by editor.operation_status.
     /// Everything the envelope reports is a plain property; the runner-only state is internal.
     /// </summary>
-    internal sealed class OperationJob
+    internal sealed partial class OperationJob
     {
         public string RequestId { get; set; }
         public OperationKind Kind { get; set; }
@@ -131,7 +131,7 @@ namespace KspControl.Bridge
             var cleaned = new JArray(Declared.Where(d => d.Action == "deleted" || d.Action == "restored").Select(d => (JToken)d.ToJson()));
             var envelope = new JObject
             {
-                ["operation"] = Kind == OperationKind.Apply ? "apply_craft" : "restore_snapshot",
+                ["operation"] = OperationName,
                 ["requestId"] = RequestId,
                 ["phase"] = PhaseName(Phase),
                 ["notDispatched"] = Terminal && !Dispatched,
@@ -166,6 +166,7 @@ namespace KspControl.Bridge
             };
             if (Plan != null && Plan.PlanHash != null) envelope["planHash"] = Plan.PlanHash;
             if (Detail != null) envelope["detail"] = Detail;
+            if (Load != null) AppendLoad(envelope);
             return envelope;
         }
 

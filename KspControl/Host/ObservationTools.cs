@@ -1,54 +1,10 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
-using System.Net;
-using System.Net.Sockets;
 using KspControl.Contracts;
 using ModelContextProtocol.Server;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 namespace KspControl.Host;
-public sealed class BridgeClient
-{
- public async Task<string> ReadAsync(string operation, JObject? arguments, CancellationToken cancellationToken)
- {
-  if (!Allowed.Contains(operation)) throw new ArgumentException("unsupported_operation");
-  try { return await ReadCore(operation,arguments,cancellationToken); }
-  catch(OperationCanceledException) when(!cancellationToken.IsCancellationRequested) { return Failure("bridge_timeout"); }
-  catch(SocketException) { return Failure("bridge_unreachable"); }
-  catch(ObjectDisposedException) { return Failure("bridge_timeout"); }
-  catch(InvalidDataException) { return Failure("protocol_invalid"); }
-  catch(Newtonsoft.Json.JsonException) { return Failure("protocol_invalid"); }
-  catch(IOException) { return Failure("bridge_io_failure"); }
- }
- private static string Failure(string reason) => JsonConvert.SerializeObject(new BridgeResponse { Status="failed",ReasonCode=reason });
- private static async Task<string> ReadCore(string operation,JObject? arguments,CancellationToken cancellationToken)
- {
-  string? tokenPath = Environment.GetEnvironmentVariable("KSP_CONTROL_TOKEN_FILE");
-  if(string.IsNullOrWhiteSpace(tokenPath)) return Failure("credential_not_configured");
-  string token;
-  try {
-   if(new FileInfo(tokenPath).Length>512) return Failure("credential_invalid");
-   token=(await File.ReadAllTextAsync(tokenPath,cancellationToken)).Trim();
-  } catch(Exception error) when(error is IOException or UnauthorizedAccessException or ArgumentException) { return Failure("credential_invalid"); }
-  if(token.Length < 32 || token.Length > 256) return Failure("credential_invalid");
-  int port = int.TryParse(Environment.GetEnvironmentVariable("KSP_CONTROL_PORT"),out int configured) ? configured : BridgeFrames.DefaultPort;
-  if(port<1024||port>65535) return Failure("bridge_configuration_invalid");
-  using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-  timeout.CancelAfter(TimeSpan.FromSeconds(10));
-  using var client = new TcpClient();
-  using var close = timeout.Token.Register(() => client.Dispose());
-  await client.ConnectAsync(IPAddress.Loopback,port,timeout.Token);
-  var request = new BridgeRequest { RequestId=Guid.NewGuid().ToString("N"),Token=token,Operation=operation,Arguments=arguments ?? new JObject() };
-  // Blocking framing runs off the MCP dispatch thread. Cancellation disposes the socket.
-  return await Task.Run(() => {
-   var stream=client.GetStream(); BridgeFrames.Write(stream,request);
-   var reply=BridgeFrames.Read<BridgeResponse>(stream);
-   if(reply==null || reply.ProtocolVersion!=1 || reply.RequestId!=request.RequestId) throw new InvalidDataException("invalid_bridge_response");
-   return JsonConvert.SerializeObject(reply);
-  },timeout.Token);
- }
- private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal) { "bridge.capabilities","game.context","parts.list","editor.inspect","vessel.inspect","part.controls","science.inspect","parts.definition","editor.snapshot" };
-}
 [McpServerToolType]
 public sealed class ObservationTools(BridgeClient bridge)
 {

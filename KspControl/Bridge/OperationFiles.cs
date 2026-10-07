@@ -29,6 +29,13 @@ namespace KspControl.Bridge
         byte[] ReadAllBytes(string path);
         /// <summary>Creates the directory, writes a temporary sibling and moves (or replaces) it into place.</summary>
         void WriteAtomic(string path, byte[] bytes);
+        /// <summary>
+        /// Creates <paramref name="path"/> only if nothing is there: writes <c>&lt;path&gt;.kspcontrol.&lt;guid&gt;.tmp</c>, flushes it and moves it into place.
+        /// Throws <see cref="IOException"/> ("exists") when the target exists, leaving it untouched and the temporary file removed.
+        /// </summary>
+        void CreateNew(string path, byte[] bytes);
+        /// <summary>Replaces an existing file through a temporary sibling and <c>File.Replace</c>. Throws <see cref="FileNotFoundException"/> when it is missing; never creates it.</summary>
+        void ReplaceExisting(string path, byte[] bytes);
         /// <summary>Deletes the file. Does nothing when it does not exist.</summary>
         void Delete(string path);
         void Copy(string from, string to, bool overwrite);
@@ -70,6 +77,38 @@ namespace KspControl.Bridge
                 if (File.Exists(path)) File.Replace(temporary, path, null);
                 else File.Move(temporary, path);
             }
+            catch { try { File.Delete(temporary); } catch (IOException) { } throw; }
+        }
+
+        private static string TemporarySibling(string path) { return path + ".kspcontrol." + Guid.NewGuid().ToString("N") + ".tmp"; }
+
+        private static string WriteTemporary(string path, byte[] bytes)
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            var temporary = TemporarySibling(path);
+            try
+            {
+                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                { stream.Write(bytes, 0, bytes.Length); stream.Flush(true); }
+            }
+            catch { try { File.Delete(temporary); } catch (IOException) { } throw; }
+            return temporary;
+        }
+
+        public void CreateNew(string path, byte[] bytes)
+        {
+            if (File.Exists(path) || Directory.Exists(path)) throw new IOException("exists");
+            var temporary = WriteTemporary(path, bytes);
+            try { File.Move(temporary, path); } // fails when the target appeared meanwhile: File.Move never overwrites
+            catch { try { File.Delete(temporary); } catch (IOException) { } throw; }
+        }
+
+        public void ReplaceExisting(string path, byte[] bytes)
+        {
+            if (!File.Exists(path)) throw new FileNotFoundException("missing", path);
+            var temporary = WriteTemporary(path, bytes);
+            try { File.Replace(temporary, path, null); }
             catch { try { File.Delete(temporary); } catch (IOException) { } throw; }
         }
 

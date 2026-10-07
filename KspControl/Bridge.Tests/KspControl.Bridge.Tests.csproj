@@ -41,6 +41,7 @@
     <Compile Include="../Bridge/OperationFiles.cs" Link="OperationFiles.cs" />
     <Compile Include="../Bridge/OperationJob.cs" Link="OperationJob.cs" />
     <Compile Include="../Bridge/SnapshotStore.cs" Link="SnapshotStore.cs" />
+    <Compile Include="../Bridge/CraftLedger.cs" Link="CraftLedger.cs" />
     <Compile Include="../Bridge/ThumbnailHousekeeper.cs" Link="ThumbnailHousekeeper.cs" />
     <Compile Include="../Bridge/PlanVerifier.cs" Link="PlanVerifier.cs" />
     <Compile Include="../Bridge/ApplyPlanner.cs" Link="ApplyPlanner.cs" />

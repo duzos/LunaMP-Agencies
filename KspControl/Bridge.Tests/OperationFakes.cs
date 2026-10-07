@@ -41,6 +41,17 @@ namespace KspControl.BridgeTests
             if (CorruptWrite(path) && stored.Length > 0) stored[stored.Length / 2] ^= 0x55;
             Put(path, stored);
         }
+        public void CreateNew(string path, byte[] bytes)
+        {
+            if (FailWrite(path)) throw new IOException("write_failed");
+            if (Data.ContainsKey(path)) throw new IOException("exists");
+            WriteAtomic(path, bytes);
+        }
+        public void ReplaceExisting(string path, byte[] bytes)
+        {
+            if (!Data.ContainsKey(path)) throw new FileNotFoundException(path);
+            WriteAtomic(path, bytes);
+        }
         public void Delete(string path)
         {
             if (FailDelete(path)) throw new IOException("delete_failed");

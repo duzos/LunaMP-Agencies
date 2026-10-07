@@ -8,10 +8,11 @@ if (args.Length > 0 && args[0] == "grant") return GrantCli.Run(args[1..], Consol
 var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(args);
 builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 builder.Services.AddSingleton<BridgeClient>();
+builder.Services.AddSingleton<ICatalogFetcher,BridgeCatalogFetcher>();
 builder.Services.AddSingleton<IBeatSender, BridgeBeatSender>();
 builder.Services.AddSingleton<LeaseKeeper>();
 builder.Services.AddHostedService(services => services.GetRequiredService<LeaseKeeper>());
 builder.Services.AddSingleton<JournalAccess>();
-builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>();
+builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ObservationTools>().WithTools<ControlTools>().WithTools<CraftPlanTools>();
 await builder.Build().RunAsync();
 return 0;

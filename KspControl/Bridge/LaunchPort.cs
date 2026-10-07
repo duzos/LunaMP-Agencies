@@ -44,6 +44,8 @@ namespace KspControl.Bridge
         bool LaunchPending { get; }
         /// <summary>The confirmed server-authoritative balance, or null while unknown.</summary>
         double? Funds { get; }
+        /// <summary>False in a game mode without an economy (sandbox, science): launches there cost nothing.</summary>
+        bool FundsApply { get; }
         /// <summary>The latest tooling status line.</summary>
         string LaunchStatus { get; }
         /// <summary>Counts confirmed launch reservations; <see cref="LastCharge"/> is the latest one's charge.</summary>

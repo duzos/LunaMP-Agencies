@@ -65,6 +65,7 @@ namespace KspControl.Bridge
             if (port.LaunchPending) return Refuse(request, OperationReasons.LaunchPending, "a launch reservation is already pending");
             var quote = port.Quote();
             if (quote == null || !quote.Success) return Refuse(request, OperationReasons.QuoteUnavailable, quote == null ? "no quote" : quote.Reason);
+            if (!port.FundsApply) quote.LaunchCost = 0; // no economy (sandbox): the stock ship cost is never charged
             if (double.IsNaN(quote.LaunchCost) || double.IsInfinity(quote.LaunchCost) || quote.LaunchCost < 0) return Refuse(request, OperationReasons.QuoteUnavailable, "the quote is not a finite cost");
             var quoted = new JObject { ["launchCost"] = quote.LaunchCost, ["toolingCost"] = quote.ToolingCost, ["alreadyTooled"] = quote.AlreadyTooled, ["fingerprint"] = quote.Fingerprint };
             // The host reserved maxSpendFunds before asking; a quote above it is refused here, so the grant's cap is never exceeded.

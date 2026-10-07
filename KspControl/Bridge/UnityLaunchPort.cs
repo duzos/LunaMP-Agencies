@@ -82,6 +82,8 @@ namespace KspControl.Bridge
 
         public double? Funds { get { return Number("AgencyFunds"); } }
 
+        public bool FundsApply { get { return HighLogic.CurrentGame == null || HighLogic.CurrentGame.Mode == Game.Modes.CAREER; } }
+
         public string LaunchStatus { get { return Property("LaunchStatus") as string; } }
 
         public long ChargeSerial { get { var value = Property("LaunchChargeSerial"); return value is long ? (long)value : 0; } }

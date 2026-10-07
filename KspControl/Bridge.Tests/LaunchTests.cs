@@ -120,6 +120,13 @@ namespace KspControl.BridgeTests
             Assert.AreEqual("running", rig.Launch("launch-0002").Status);
         }
 
+        [TestMethod] public void AGameWithoutAnEconomyLaunchesForFreeWithoutABalance()
+        {
+            rig.Port.FundsValue = null; rig.Port.FundsApplyValue = false;
+            var response = rig.Launch();
+            Assert.AreEqual("running", response.Status);
+        }
+
         [TestMethod] public void ADuplicateRequestAnswersFromTheSameJobAndANewIdWhileRunningIsBusy()
         {
             var first = rig.Launch(); Assert.AreEqual("running", first.Status);

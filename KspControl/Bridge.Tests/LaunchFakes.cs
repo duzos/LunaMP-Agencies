@@ -41,6 +41,8 @@ namespace KspControl.BridgeTests
         public bool Allowed(out string reason) { reason = AllowedReason; return AllowedValue; }
         public bool LaunchPending { get { return Pending; } }
         public double? Funds { get { return FundsValue; } }
+        public bool FundsApplyValue = true;
+        public bool FundsApply { get { return FundsApplyValue; } }
         public string LaunchStatus { get { return Status; } }
         public long ChargeSerial { get { return Serial; } }
         public double? LastCharge { get { return Charge; } }

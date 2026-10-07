@@ -41,16 +41,27 @@ public sealed class ObservationTools(BridgeClient bridge)
  [McpServerTool, Description("Inspect a bounded page of loaded parts. Read-only.")]
  public Task<string> Parts(int offset=0,int limit=50,string filter="",CancellationToken cancellationToken=default)
  {
-  if(offset<0 || limit<1 || limit>100 || filter.Length>128) throw new ArgumentOutOfRangeException(nameof(limit));
-  return bridge.ReadAsync("parts.list",new JObject { ["offset"]=offset,["limit"]=limit,["filter"]=filter },cancellationToken);
+  if(offset<0 || offset>100000 || limit<1 || limit>50 || filter==null || filter.Length>128) throw new ArgumentOutOfRangeException(nameof(limit));
+  return bridge.ReadAsync("parts.list",new JObject { ["offset"]=offset,["limit"]=limit,["query"]=filter },cancellationToken);
  }
  [McpServerTool, Description("Inspect the current editor craft without changing it.")]
- public Task<string> Editor(CancellationToken cancellationToken) => bridge.ReadAsync("editor.inspect",null,cancellationToken);
+ public Task<string> Editor(int offset=0,int limit=20,CancellationToken cancellationToken=default) => bridge.ReadAsync("editor.inspect",Page(offset,limit),cancellationToken);
  [McpServerTool, Description("Inspect available part right-click controls. Discovery only; no invocation.")]
- public Task<string> PartControls(CancellationToken cancellationToken) => bridge.ReadAsync("part.controls",null,cancellationToken);
+ public Task<string> PartControls(string partId,int offset=0,CancellationToken cancellationToken=default) => bridge.ReadAsync("part.controls",Part(partId,offset),cancellationToken);
  [McpServerTool, Description("Inspect science experiment state without running or transmitting experiments.")]
- public Task<string> Science(CancellationToken cancellationToken) => bridge.ReadAsync("science.inspect",null,cancellationToken);
+ public Task<string> Science(string partId,CancellationToken cancellationToken=default) => bridge.ReadAsync("science.inspect",Part(partId,0),cancellationToken);
  [McpServerTool, Description("Inspect the active vessel through bridge disclosure policy. No foreign vessel lookup.")]
- public Task<string> Vessel(CancellationToken cancellationToken) => bridge.ReadAsync("vessel.inspect",null,cancellationToken);
+ public Task<string> Vessel(int offset=0,int limit=20,CancellationToken cancellationToken=default) => bridge.ReadAsync("vessel.inspect",Page(offset,limit),cancellationToken);
+ private static JObject Page(int offset,int limit)
+ {
+  if(offset<0||offset>100000||limit<1||limit>50) throw new ArgumentOutOfRangeException(nameof(offset));
+  return new JObject { ["offset"]=offset,["limit"]=limit };
+ }
+ private static JObject Part(string partId,int offset)
+ {
+  if(!uint.TryParse(partId,out _)) throw new ArgumentException("invalid_part_id",nameof(partId));
+  var args=Page(offset,4); args["partId"]=partId; return args;
+ }
 }
+
 

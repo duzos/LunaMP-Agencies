@@ -10,7 +10,11 @@ namespace KspControl.EditorModel
         RootRelativeVector,
         /// <summary>Each side's value must equal its own craft header key (for example description); sides are not compared to each other.</summary>
         HeaderDerived,
-        /// <summary>A missing key counts as <see cref="VolatileKeyEntry.DefaultValue"/>.</summary>
+        /// <summary>
+        /// A missing key counts as <see cref="VolatileKeyEntry.DefaultValue"/>. This rule type is an amendment to the plan's registry
+        /// rules (ignore | rootRelativeVector | headerDerived), added on evidence 33-log 18:51: hand-built craft write
+        /// "active = False" on the Autostrut actions while structurally loaded ones omit it.
+        /// </summary>
         AbsentEqualsDefault
     }
     public sealed class VolatileKeyEntry

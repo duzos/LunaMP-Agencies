@@ -25,6 +25,7 @@ namespace KspControl.EditorModel
             Action<string, string, string> add = (code, part, reason) => issues.Add(new PlanIssue(code, part, reason));
             if (root == null) { add("invalid_craft", null, "craft missing"); return issues; }
             if (HasControl(root, 0)) add("control_character", null, "control character in header");
+            if (root.First("_modVersions") == null) add("missing_mod_versions", null, "header _modVersions is required (copied from a live SaveShip header)");
             var model = CraftModel.Build(root);
             if (model.Parts.Count == 0) { add("no_parts", null, null); return issues; }
             if (model.Parts.Count > MaxParts) { add("too_many_parts", null, model.Parts.Count + " > " + MaxParts); return issues; }
@@ -70,6 +71,18 @@ namespace KspControl.EditorModel
                         foreach (var l in model.Parts[i].Links) { int c; if (l != null && l.CidValid && model.ByCid.TryGetValue(l.CidText, out c)) stack.Push(c); }
                     }
                     foreach (var p in model.Parts) if (!seen.Contains(p.Index)) add("disconnected", p.Ref, null);
+                }
+            }
+            // Attachment partners must agree with the link tree: srfN names the link parent; attN names the link parent or a link child.
+            foreach (var p in model.Parts)
+            {
+                if (p.Srf != null && p.Srf.CidValid && (p.Parent < 0 || model.Parts[p.Parent].CidText != p.Srf.CidText)) add("attach_partner_not_linked", p.Ref, "srfN");
+                foreach (var a in p.AttN)
+                {
+                    if (a.Partner == null || !a.Partner.CidValid) continue;
+                    bool isParent = p.Parent >= 0 && model.Parts[p.Parent].CidText == a.Partner.CidText;
+                    bool isChild = p.Children.Any(c => model.Parts[c].CidText == a.Partner.CidText);
+                    if (!isParent && !isChild) add("attach_partner_not_linked", p.Ref, "attN " + a.NodeId);
                 }
             }
             // Attach nodes.

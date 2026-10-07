@@ -27,6 +27,14 @@ public class ConfigTextTests
         Assert.AreEqual(printed, ConfigText.Print(ConfigText.Parse(printed), "\n"), "idempotent");
     }
     [TestMethod]
+    public void BomIsStrippedAndInlineBracesRejected()
+    {
+        Assert.AreEqual("1", ConfigText.Parse("\uFEFFa = 1\n").First("a"));
+        Assert.AreEqual("inline_braces", Assert.ThrowsException<ConfigParseException>(() => ConfigText.Parse("NAME { k = v }\n")).Code);
+        Assert.ThrowsException<ConfigParseException>(() => ConfigText.Parse("NAME { }\n"));
+        Assert.AreEqual("{x}", ConfigText.Parse("k = {x}\n").First("k"));
+    }
+    [TestMethod]
     public void MalformedAndBoundsRejected()
     {
         foreach (var bad in new[] { "}\n", "A\n{\n", "A\nB\n", "{\n}\n", " = 3\n" })
@@ -115,6 +123,27 @@ public class ValidatorTests
         Has(Edit(t => t.Replace("pos = 0,15,0", "pos = 0,1e999,0")), "non_finite_number");
         Has(Edit(t => t.Replace("pos = 0,15,0", "pos = 0,abc,0")), "invalid_number");
         Has(Edit(t => t.Replace("istg = 0", "istg = zero")), "invalid_integer");
+    }
+    [TestMethod] public void AttachmentPartnersMustMatchTheLinkTree()
+    {
+        Has(Edit(t => t.Replace("attN = bottom,fuelTankSmall_100001", "attN = bottom,liquidEngine.v2_100002")), "attach_partner_not_linked");
+        var g = Fx.TwinGraph(); g.Parts.Add(new() { Id = "fin", Part = "basicFin", Parent = "tank", Surface = new() { AngleDegrees = 0 } });
+        var cat = Fx.TwinCatalog(); var good = ConfigText.Print(Good(), "\n")
+            .Replace("link = liquidEngine.v2_100002", "link = liquidEngine.v2_100002\n\tlink = basicFin_100003")
+            + "PART\n{\n\tpart = basicFin_100003\n\tpos = 0,14,0.6\n\trot = 0,0,0,1\n\tattPos0 = 0,0,0.6\n\tattRot0 = 0,0,0,1\n\tsrfN = srfAttach,fuelTankSmall_100001\n}\n";
+        Assert.AreEqual(0, StructuralCraftValidator.Validate(ConfigText.Parse(good), cat).Count(i => i.Code == "attach_partner_not_linked"), "srfN names a part that does not link it? " + string.Join(";", StructuralCraftValidator.Validate(ConfigText.Parse(good), cat)));
+    }
+    [TestMethod] public void ModVersionsHeaderRequired()
+    {
+        var n = Good(); n.Entries.RemoveAll(e => e.IsValue && e.Key == "_modVersions");
+        Has(n, "missing_mod_versions");
+        var noMods = CraftPlanner.Plan(Fx.TwinGraph(), Fx.TwinCatalog()).Craft!.ToConfigNode();
+        Has(noMods, "missing_mod_versions");
+    }
+    [TestMethod] public void GraphNameRejectsConfigSyntax()
+    {
+        foreach (var bad in new[] { "a//b", "a{b", "a}b", "a\nb" })
+        { var g = Fx.TwinGraph(); g.Name = bad; Assert.IsTrue(CraftPlanner.Plan(g, Fx.TwinCatalog()).Issues.Any(i => i.Code == "invalid_craft_name"), bad); }
     }
     [TestMethod] public void Oversize()
     {
@@ -222,6 +251,20 @@ public class TokenTests
         // Non-canonical base64 (trailing bits flipped) is rejected.
         var good = EditorRevisionToken.Create("e", 1, 1, Fp).Encode();
         Assert.IsTrue(EditorRevisionToken.TryParse(good, out _));
+        // Non-canonical base64: flip an unused trailing bit of an unpadded token. The bytes decode identically but the text is not what Encode produces.
+        string tailEpoch = null!;
+        foreach (var e in new[] { "e", "ee", "eee", "eeee" }) { var t = EditorRevisionToken.Create(e, 1, 1, Fp).Encode(); if (t.Length % 4 != 0) { tailEpoch = e; break; } }
+        var token = EditorRevisionToken.Create(tailEpoch, 1, 1, Fp).Encode();
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        var forged = token[..^1] + alphabet[alphabet.IndexOf(token[^1]) ^ 1];
+        Assert.AreNotEqual(token, forged);
+        Func<string, byte[]> raw64 = s2 => Convert.FromBase64String(s2.Replace('-', '+').Replace('_', '/') + new string('=', (4 - s2.Length % 4) % 4));
+        CollectionAssert.AreEqual(raw64(token), raw64(forged), "same decoded bytes");
+        Assert.IsFalse(EditorRevisionToken.TryParse(forged, out _));
+        // Encoded size is bounded for every valid input.
+        var max = EditorRevisionToken.Create(new string('e', 40), long.MaxValue, long.MaxValue, Fp).Encode();
+        Assert.IsTrue(max.Length <= 128 && EditorRevisionToken.TryParse(max, out _));
+        Assert.ThrowsException<ArgumentException>(() => EditorRevisionToken.Create(new string('e', 41), 1, 1, Fp));
         Assert.ThrowsException<ArgumentException>(() => EditorRevisionToken.Create("a|b", 1, 1, Fp));
         Assert.ThrowsException<ArgumentException>(() => EditorRevisionToken.Create("e", -1, 1, Fp));
         Assert.ThrowsException<ArgumentException>(() => EditorRevisionToken.Create("e", 1, 1, "short"));

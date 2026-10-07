@@ -72,7 +72,7 @@ namespace KspControl.EditorModel
             if (graph == null) { issues.Add(new PlanIssue("invalid_graph", null, "graph missing")); return issues; }
             if (graph.Parts == null || graph.Parts.Count == 0 || graph.Parts.Count > GraphDtoLimits.MaxParts)
             { issues.Add(new PlanIssue("part_count_out_of_range", null, "1.." + GraphDtoLimits.MaxParts + " parts required")); return issues; }
-            if (string.IsNullOrWhiteSpace(graph.Name) || graph.Name.Length > GraphDtoLimits.MaxNameLength || HasControl(graph.Name)) issues.Add(new PlanIssue("invalid_craft_name", null));
+            if (string.IsNullOrWhiteSpace(graph.Name) || graph.Name.Length > GraphDtoLimits.MaxNameLength || HasControl(graph.Name) || graph.Name.Contains("//") || graph.Name.IndexOfAny(new[] { '{', '}' }) >= 0) issues.Add(new PlanIssue("invalid_craft_name", null));
             if (!string.Equals(graph.Facility, "VAB", StringComparison.Ordinal)) issues.Add(new PlanIssue("facility_mismatch", null, "only VAB is supported"));
             var ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (var p in graph.Parts)

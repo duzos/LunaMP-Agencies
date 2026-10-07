@@ -40,7 +40,9 @@ namespace KspControl.EditorModel
                 double x, y;
                 if (TryNumber(ta[i], out x) && TryNumber(tb[i], out y))
                 {
-                    var tol = absTol >= 0 ? absTol : 1e-6 + 1e-6 * Math.Max(Math.Abs(x), Math.Abs(y));
+                    // Integer-valued tokens (no '.' or exponent) are counters, flags and ids: they compare exactly.
+                    var integers = ta[i].IndexOfAny(new[] { '.', 'e', 'E' }) < 0 && tb[i].IndexOfAny(new[] { '.', 'e', 'E' }) < 0;
+                    var tol = integers ? 0 : (absTol >= 0 ? absTol : 1e-6 + 1e-6 * Math.Max(Math.Abs(x), Math.Abs(y)));
                     if (!(Math.Abs(x - y) <= tol)) return false;
                 }
                 else if (!string.Equals(ta[i], tb[i], StringComparison.Ordinal)) return false;

@@ -1,14 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 namespace KspControl.EditorModel
 {
     public sealed class ComparatorOptions
     {
-        /// <summary>Twin mode: always tree mapping; header ship/description/rot are ignored (a hand-built twin differs there); surface-attached parts compare transforms at 5 cm / 2 degrees.</summary>
+        /// <summary>Twin mode: always tree mapping; the header ship name is ignored (twins are named differently); surface-attached parts compare transforms at 5 cm / 2 degrees. rot and description are compared like any other header key.</summary>
         public bool TwinMode { get; set; }
-        /// <summary>Compare only the structure fields a planner emits (no MODULE/RESOURCE/etc., no extra part keys).</summary>
-        public bool StructureOnly { get; set; }
+        /// <summary>Test-only: compare only the structure fields a planner emits (no MODULE/RESOURCE/etc., no extra part keys, short attN vectors allowed). Not reachable from production code.</summary>
+        internal bool StructureOnly { get; set; }
         public RoundtripVolatileKeys Registry { get; set; } = RoundtripVolatileKeys.Default();
     }
     public sealed class CraftDifference
@@ -54,13 +55,20 @@ namespace KspControl.EditorModel
                 if (an.Partner != null && an.Partner.CidText == c.CidText) { node = an.NodeId; break; }
             return "stk|" + node + "|" + c.Name;
         }
-        internal static string GeometryKey(CraftModel m, int part, int root)
+        /// <summary>Angle in [0, 2pi) of a part about its parent's vertical axis, root-relative. Values within 1e-3 rad of 2pi wrap to 0 so counterparts at 0 stay together.</summary>
+        internal static double AngleAbout(CraftModel m, int part, int root)
         {
-            Vector p, rp = new Vector(); Rotation rr = RotationMath.Identity;
+            var info = m.Parts[part];
+            Vector p, pp, rp = new Vector(); Rotation rr = RotationMath.Identity;
             if (root >= 0) { CraftModel.TryVector(m.Parts[root].Node.First("pos"), out rp); CraftModel.TryRotation(m.Parts[root].Node.First("rot"), out rr); }
-            if (!CraftModel.TryVector(m.Parts[part].Node.First("pos"), out p)) return "?";
+            if (!CraftModel.TryVector(info.Node.First("pos"), out p)) return 0;
             var rel = SafeInverse(RotationMath.Sub(p, rp), rr);
-            return Math.Round(rel.X * 1000).ToString("F0") + "," + Math.Round(rel.Y * 1000).ToString("F0") + "," + Math.Round(rel.Z * 1000).ToString("F0");
+            var origin = new Vector(0, 0, 0);
+            if (info.Parent >= 0 && CraftModel.TryVector(m.Parts[info.Parent].Node.First("pos"), out pp)) origin = SafeInverse(RotationMath.Sub(pp, rp), rr);
+            var a = Math.Atan2(rel.X - origin.X, rel.Z - origin.Z);
+            if (a < 0) a += 2 * Math.PI;
+            if (a > 2 * Math.PI - 1e-3) a = 0;
+            return a;
         }
         internal static Vector SafeInverse(Vector v, Rotation q)
         {
@@ -78,7 +86,7 @@ namespace KspControl.EditorModel
             private static readonly string[] SpecialKeys = { "part", "persistentId", "pos", "rot", "link", "attN", "srfN", "sym" };
             private static readonly string[] StructureKeys = { "attPos", "attPos0", "attRot", "attRot0", "mir", "symMethod", "autostrutMode", "rigidAttachment", "istg", "dstg", "sidx", "sqor", "sepI", "attm" };
             private static readonly string[] IgnoredHeader = { "version", "persistentId", "steamPublishedFileId", "size" };
-            private static readonly string[] TwinIgnoredHeader = { "ship", "description", "rot" };
+            private static readonly string[] TwinIgnoredHeader = { "ship" };
             private static readonly string[] StructureHeader = { "type", "missionFlag", "vesselType", "_modVersions" };
             public Run(ConfigNode a, ConfigNode b, ComparatorOptions options)
             { ra = a; rb = b; o = options; ma = CraftModel.Build(a); mb = CraftModel.Build(b); }
@@ -131,9 +139,13 @@ namespace KspControl.EditorModel
                 }
                 result.Mapping = "tree";
                 if (ma.Parts.Count == 0 && mb.Parts.Count == 0) return true;
-                if (rootA < 0 || rootB < 0) { Diff(null, "PART", "part_count", ma.Parts.Count.ToString(), mb.Parts.Count.ToString()); return false; }
+                if (rootA < 0 || rootB < 0) { Diff(null, "PART", "part_count", ma.Parts.Count.ToString(CultureInfo.InvariantCulture), mb.Parts.Count.ToString(CultureInfo.InvariantCulture)); return false; }
                 bool ok = MapTree(rootA, rootB);
                 if (!ok) { Diff(null, "PART", "mapping_ambiguous", null, null); return false; }
+                // Parts the walk never reached (unmatched children, orphans, other roots) are reported, not silently dropped.
+                var mapped = new HashSet<int>(map.Where(x => x >= 0));
+                for (int i = 0; i < ma.Parts.Count; i++) if (map[i] < 0) Diff(ma.Parts[i].Ref, "PART", "missing_part", ma.Parts[i].Ref, null);
+                for (int i = 0; i < mb.Parts.Count; i++) if (!mapped.Contains(i)) Diff(mb.Parts[i].Ref, "PART", "extra_part", null, mb.Parts[i].Ref);
                 return true;
             }
             private bool CidMappingPossible()
@@ -155,13 +167,11 @@ namespace KspControl.EditorModel
                     if (la.Count > 1 || lb.Count > 1)
                     {
                         if (!IsSymGroup(ma, la) || !IsSymGroup(mb, lb)) return false;
-                        la = la.OrderBy(i => CraftComparator.GeometryKey(ma, i, rootA), StringComparer.Ordinal).ThenBy(i => i).ToList();
-                        lb = lb.OrderBy(i => CraftComparator.GeometryKey(mb, i, rootB), StringComparer.Ordinal).ThenBy(i => i).ToList();
+                        la = la.OrderBy(i => CraftComparator.AngleAbout(ma, i, rootA)).ThenBy(i => i).ToList();
+                        lb = lb.OrderBy(i => CraftComparator.AngleAbout(mb, i, rootB)).ThenBy(i => i).ToList();
                     }
                     int n = Math.Min(la.Count, lb.Count);
                     for (int i = 0; i < n; i++) if (!MapTree(la[i], lb[i])) return false;
-                    for (int i = n; i < la.Count; i++) Diff(ma.Parts[la[i]].Ref, "PART", "missing_part", ma.Parts[la[i]].Ref, null);
-                    for (int i = n; i < lb.Count; i++) Diff(mb.Parts[lb[i]].Ref, "PART", "extra_part", null, mb.Parts[lb[i]].Ref);
                 }
                 return true;
             }
@@ -266,20 +276,24 @@ namespace KspControl.EditorModel
             }
             private void CompareAttN(string pr, CraftPartInfo a, CraftPartInfo b)
             {
-                var da = a.AttN.Where(x => x.Partner != null).GroupBy(x => x.NodeId).ToDictionary(g => g.Key, g => g.First());
-                var db = b.AttN.Where(x => x.Partner != null).GroupBy(x => x.NodeId).ToDictionary(g => g.Key, g => g.First());
+                var da = a.AttN.Where(x => x.Partner != null).GroupBy(x => x.NodeId).ToDictionary(g => g.Key, g => g.ToList());
+                var db = b.AttN.Where(x => x.Partner != null).GroupBy(x => x.NodeId).ToDictionary(g => g.Key, g => g.ToList());
                 foreach (var id in da.Keys.Concat(db.Keys.Where(k => !da.ContainsKey(k))))
                 {
-                    CraftAttN x, y; da.TryGetValue(id, out x); db.TryGetValue(id, out y);
+                    List<CraftAttN> la, lb; if (!da.TryGetValue(id, out la)) la = new List<CraftAttN>(); if (!db.TryGetValue(id, out lb)) lb = new List<CraftAttN>();
+                    if (la.Count > 1 || lb.Count > 1) { Diff(pr, "attN/" + id, "attN_duplicate", la.Count.ToString(CultureInfo.InvariantCulture), lb.Count.ToString(CultureInfo.InvariantCulture)); continue; }
+                    CraftAttN x = la.Count == 1 ? la[0] : null, y = lb.Count == 1 ? lb[0] : null;
                     var tx = x == null ? null : Translate(x.Partner); var ty = y == null ? null : y.Partner.CidText;
                     if (tx != ty) { Diff(pr, "attN/" + id, "attN", x == null ? null : x.Raw, y == null ? null : y.Raw); continue; }
                     if (x != null && y != null && x.Partner.VectorText != null && y.Partner.VectorText != null && !VectorsEqual(x.Partner.VectorText, y.Partner.VectorText))
                         Diff(pr, "attN/" + id, "attN_vector", x.Raw, y.Raw);
                 }
             }
-            private static bool VectorsEqual(string a, string b)
+            /// <summary>Vector segments must agree in count; only the internal structure-only mode accepts a short form against a full one.</summary>
+            private bool VectorsEqual(string a, string b)
             {
                 var sa = a.Split('_'); var sb = b.Split('_');
+                if (sa.Length != sb.Length && !o.StructureOnly) return false;
                 int n = Math.Min(sa.Length, sb.Length);
                 for (int i = 0; i < n; i++) if (!ValueRule.EqualAbsolute(sa[i], sb[i], 1e-4)) return false;
                 return true;
@@ -295,7 +309,7 @@ namespace KspControl.EditorModel
                     var ca = a.Children(name).ToList(); var cb = b.Children(name).ToList();
                     if (prefix == "" && name == "MODULE") { CompareModules(ca, cb, pr); continue; }
                     if (prefix == "" && name == "RESOURCE") { CompareResources(ca, cb, pr); continue; }
-                    if (ca.Count != cb.Count) { Diff(pr, prefix + name, "node_count", ca.Count.ToString(), cb.Count.ToString()); }
+                    if (ca.Count != cb.Count) { Diff(pr, prefix + name, "node_count", ca.Count.ToString(CultureInfo.InvariantCulture), cb.Count.ToString(CultureInfo.InvariantCulture)); }
                     int n = Math.Min(ca.Count, cb.Count);
                     for (int i = 0; i < n; i++) CompareNode(ca[i], cb[i], pr, prefix == "" ? name : "", prefix + name + (ca.Count > 1 ? "[" + i + "]" : "") + "/", prefix == "" ? name : null);
                 }
@@ -315,7 +329,7 @@ namespace KspControl.EditorModel
                     List<ConfigNode> la, lb;
                     if (!ga.TryGetValue(name, out la)) la = new List<ConfigNode>();
                     if (!gb.TryGetValue(name, out lb)) lb = new List<ConfigNode>();
-                    if (la.Count != lb.Count) { Diff(pr, "RESOURCE[" + name + "]", "resource_count", la.Count.ToString(), lb.Count.ToString()); }
+                    if (la.Count != lb.Count) { Diff(pr, "RESOURCE[" + name + "]", "resource_count", la.Count.ToString(CultureInfo.InvariantCulture), lb.Count.ToString(CultureInfo.InvariantCulture)); }
                     for (int i = 0; i < Math.Min(la.Count, lb.Count); i++) CompareNode(la[i], lb[i], pr, "RESOURCE", "RESOURCE[" + name + "]/", null);
                 }
             }
@@ -342,7 +356,7 @@ namespace KspControl.EditorModel
                 foreach (var name in names)
                 {
                     var ca = a.Children(name).ToList(); var cb = b.Children(name).ToList();
-                    if (ca.Count != cb.Count) Diff(pr, display + name, "node_count", ca.Count.ToString(), cb.Count.ToString());
+                    if (ca.Count != cb.Count) Diff(pr, display + name, "node_count", ca.Count.ToString(CultureInfo.InvariantCulture), cb.Count.ToString(CultureInfo.InvariantCulture));
                     for (int i = 0; i < Math.Min(ca.Count, cb.Count); i++)
                         CompareNodeInner(ca[i], cb[i], pr, module, path + name + (ca.Count > 1 ? "[" + i + "]" : "") + "/", display + name + (ca.Count > 1 ? "[" + i + "]" : "") + "/");
                 }
@@ -373,7 +387,8 @@ namespace KspControl.EditorModel
                                 }
                             case VolatileRule.HeaderDerived:
                                 {
-                                    var hx = Norm(x) == Norm(descA); var hy = Norm(y) == Norm(descB);
+                                    var hk = entry.HeaderKey ?? "description";
+                                    var hx = Norm(x) == Norm(HeaderValue(ra, hk)); var hy = Norm(y) == Norm(HeaderValue(rb, hk));
                                     if (x == null || y == null) { Diff(pr, ordinalPath, "missing_key", x, y); continue; }
                                     if (!hx || !hy) Diff(pr, ordinalPath, "header_derived_mismatch", x, y);
                                     else if (!Same(x, y)) Excluded(entry);
@@ -392,7 +407,8 @@ namespace KspControl.EditorModel
                 }
             }
             private static bool Same(string x, string y) { return x != null && y != null && ValueRule.Equal(x, y); }
-            private static string Norm(string s) { return s == null ? null : s.Replace("\r\n", "\n").Replace("\\n", "\n").Replace("\r", "\n"); }
+            /// <summary>KSP stores newlines in header descriptions as U+00A8; module copies may hold real newlines or a literal backslash-n.</summary>
+            private static string Norm(string s) { return s == null ? null : s.Replace("\r\n", "\n").Replace("\\n", "\n").Replace("\r", "\n").Replace("\u00A8", "\n"); }
             private bool RootRelativeEqual(string x, string y)
             {
                 Vector vx, vy; Rotation qx, qy;

@@ -62,6 +62,7 @@ namespace KspControl.EditorModel
         {
             if (text == null) throw new ArgumentNullException("text");
             if (text.Length > MaxChars) throw new ConfigParseException("config_too_large", 0);
+            if (text.Length > 0 && text[0] == '\uFEFF') text = text.Substring(1);
             var root = new ConfigNode("");
             var stack = new List<ConfigNode> { root };
             string pendingName = null; int pendingLine = 0;
@@ -91,6 +92,7 @@ namespace KspControl.EditorModel
                 {
                     var key = line.Substring(0, eq).Trim();
                     if (key.Length == 0) throw new ConfigParseException("empty_key", lineNo);
+                    if (key.IndexOf('{') >= 0 || key.IndexOf('}') >= 0) throw new ConfigParseException("inline_braces", lineNo);
                     stack[stack.Count - 1].AddValue(key, line.Substring(eq + 1).Trim());
                     continue;
                 }

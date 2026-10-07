@@ -7,9 +7,10 @@ namespace KspControl.EditorModel
     /// <summary>Parsed editor revision token: base64url of "v1|epoch|generation|editRevision|fp[0..12]".</summary>
     public sealed class EditorRevisionToken
     {
+        /// <summary>Longest encodable token: "v1|" + 40-char epoch + two 19-digit counters + 12-char fingerprint is 96 bytes, 128 base64url characters.</summary>
         public const int MaxLength = 128;
         private static readonly Regex Base64Url = new Regex("^[A-Za-z0-9_-]+$", RegexOptions.CultureInvariant);
-        private static readonly Regex Epoch = new Regex("^[A-Za-z0-9_.:-]{1,48}$", RegexOptions.CultureInvariant);
+        private static readonly Regex Epoch = new Regex("^[A-Za-z0-9_.:-]{1,40}$", RegexOptions.CultureInvariant);
         private static readonly Regex Fp = new Regex("^[0-9a-f]{12}$", RegexOptions.CultureInvariant);
         public string WorldEpoch { get; private set; }
         public long Generation { get; private set; }

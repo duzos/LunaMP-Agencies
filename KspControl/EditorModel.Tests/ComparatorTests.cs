@@ -128,7 +128,12 @@ PART
         var bad = C(Mini(), Mini(D(("VDESC", "stale"))));
         Assert.IsTrue(bad.Differences.Any(d => d.Kind == "header_derived_mismatch"));
         var twin = C(Mini(), Mini(D(("DESC", "other"), ("VDESC", "other"))), new ComparatorOptions { TwinMode = true });
-        Assert.IsTrue(twin.Equal, string.Join("\n", twin.Differences));
+        Assert.AreEqual(1, twin.Differences.Count, "description is compared in twin mode; the derived module copy is not an extra difference");
+        Assert.AreEqual("description", twin.Differences[0].Path);
+        Assert.IsTrue(C(Mini(), Mini(D(("DESC", "hello"))), new ComparatorOptions { TwinMode = true }).Equal);
+        // KSP stores header newlines as U+00A8; module copies may hold real newlines.
+        var nl = C(Mini(D(("DESC", "a\u00A8b"), ("VDESC", "a\\nb"))), Mini(D(("DESC", "a\u00A8b"), ("VDESC", "a\u00A8b"))));
+        Assert.IsTrue(nl.Equal, string.Join("\n", nl.Differences));
     }
     [TestMethod] public void TokenisedNumbersWithinTolerance()
     {
@@ -179,6 +184,37 @@ PART
         var changed = C(Mini(), Mini(D(("A", "5"), ("B", "6"), ("ISTG", "2"))));
         Assert.IsFalse(changed.Equal);
     }
+    [TestMethod] public void IntegerTokensCompareExactly()
+    {
+        Assert.IsFalse(ValueRule.Equal("100000000", "100000001"), "relative tolerance must not hide an off-by-one counter");
+        Assert.IsTrue(ValueRule.Equal("100000000.0", "100000000.0000001"));
+        Assert.IsFalse(ValueRule.Equal("-1", "0"));
+        Assert.IsTrue(ValueRule.Equal("5", "5.0"));
+        Assert.IsFalse(C(Mini(), Mini(D(("ISTG", "-2")))).Equal);
+    }
+    [TestMethod] public void OrphanPartsInEitherCraftAreReported()
+    {
+        var b = N(Mini() + "PART\n{\n\tpart = loose_900\n\tpos = 0,0,0\n\trot = 0,0,0,1\n}\n");
+        var c = CraftComparator.Compare(N(Mini()), b, new ComparatorOptions { TwinMode = true });
+        Assert.IsTrue(c.Differences.Any(d => d.Kind == "extra_part" && d.B == "loose_900"), string.Join("\n", c.Differences));
+        var d2 = CraftComparator.Compare(b, N(Mini()), new ComparatorOptions { TwinMode = true });
+        Assert.IsTrue(d2.Differences.Any(d => d.Kind == "missing_part" && d.A == "loose_900"));
+        var cid = CraftComparator.Compare(N(Mini()), b);
+        Assert.IsFalse(cid.Equal); Assert.AreEqual("tree", cid.Mapping);
+    }
+    [TestMethod] public void DuplicateAttNIdsAreReported()
+    {
+        var b = N(Mini()); var pod = b.Children("PART").First();
+        pod.AddValue("attN", "bottom,tank_100001_0|-0.4|0");
+        Assert.IsTrue(CraftComparator.Compare(N(Mini()), b).Differences.Any(d => d.Kind == "attN_duplicate"));
+    }
+    [TestMethod] public void VectorSegmentCountsMustAgree()
+    {
+        var full = Mini(D(("ATTN", "0|-0.4|0_0|-1|0")));
+        Assert.IsFalse(C(Mini(), full).Equal);
+        Assert.IsTrue(C(full, full).Equal);
+        Assert.IsTrue(C(Mini(), Mini(), new ComparatorOptions { TwinMode = true }).Equal);
+    }
     [TestMethod] public void TwinModeAlwaysUsesTreeMapping() { Assert.AreEqual("tree", C(Mini(), Mini(), new ComparatorOptions { TwinMode = true }).Mapping); }
 
     [TestMethod] public void SymmetricTiesMapByGeometryAndAmbiguousTiesFail()
@@ -194,6 +230,10 @@ PART
         Assert.AreEqual("tree", ok.Mapping); Assert.IsTrue(ok.Equal, string.Join("\n", ok.Differences));
         var swapped = C(Build(10, 11, true), Build(21, 20, true));
         Assert.IsTrue(swapped.Equal, "geometry decides, not file order");
+        // fins exactly on the 0/180 degree axes, with negative zero and tiny jitter in x, still pair by angle
+        string Jit(string t, string x1, string x2) => t.Replace("pos = 0,14,0.6", "pos = " + x1 + ",14,0.6").Replace("pos = 0,14,-0.6", "pos = " + x2 + ",14,-0.6");
+        var jitter = C(Jit(Build(10, 11, true), "0", "0"), Jit(Build(20, 21, true), "-0", "0.0000001"), new ComparatorOptions { TwinMode = true });
+        Assert.IsTrue(jitter.Equal, string.Join("\n", jitter.Differences));
         var amb = C(Build(10, 11, false), Build(20, 21, false));
         Assert.IsFalse(amb.Equal);
         Assert.IsTrue(amb.Differences.Any(d => d.Kind == "mapping_ambiguous"));
@@ -227,6 +267,46 @@ PART
         Assert.IsFalse(C(Make(""), Make("\t\t\tactive = True\n"), o).Equal);
         Assert.IsFalse(C(Make(""), Make("\t\t\tactive = False\n"), new ComparatorOptions { Registry = RoundtripVolatileKeys.Empty() }).Equal);
     }
+    [TestMethod] public void ComparatorAndFingerprintApplyEveryRuleTypeIdentically()
+    {
+        string Make(string pos, string orig, string vdesc, string desc, string active, string cryo) =>
+            Mini(D(("POS", pos), ("TANKPOS", pos.Replace(",15,", ",14,")), ("VDESC", vdesc), ("DESC", desc), ("CRYO", cryo)))
+                .Replace("\t\tdup = 1\n", "\t\tdup = 1\n\t\toriginalPos = " + orig + "\n")
+                .Replace("\tRESOURCE", "\tACTIONS\n\t{\n\t\tFoo\n\t\t{\n\t\t\tactionGroup = None\n" + active + "\t\t}\n\t}\n\tRESOURCE");
+        var reg = RoundtripVolatileKeys.Default()
+            .Add(new VolatileKeyEntry { Module = "ModuleX", KeyPath = "originalPos", Rule = VolatileRule.RootRelativeVector, EvidenceRef = "t" })
+            .Add(new VolatileKeyEntry { Module = "ACTIONS", KeyPath = "Foo/active", Rule = VolatileRule.AbsentEqualsDefault, DefaultValue = "False", EvidenceRef = "t" });
+        var a = N(Make("0,15,0", "0,15,0", "hello", "hello", "", "1"));
+        // every volatile aspect differs at once: cryo (Ignore), shifted root with shifted vector (RootRelativeVector), active present (AbsentEqualsDefault)
+        var b = N(Make("5,15,0", "5,15,0", "hello", "hello", "\t\t\tactive = False\n", "999"));
+        var cmp = CraftComparator.Compare(a, b, new ComparatorOptions { Registry = reg });
+        Assert.IsTrue(cmp.Equal, string.Join("\n", cmp.Differences));
+        Assert.IsTrue(new[] { "Ignore", "RootRelativeVector", "AbsentEqualsDefault" }.All(r => cmp.ExclusionsApplied.Any(e => e.Rule == r)), string.Join(",", cmp.ExclusionsApplied.Select(e => e.Rule)));
+        Assert.AreEqual(CraftFingerprint.Compute(a, reg), CraftFingerprint.Compute(b, reg));
+        // HeaderDerived: each side follows its own header description.
+        var h1 = N(Make("0,15,0", "0,15,0", "one", "one", "", "1")); var h2 = N(Make("0,15,0", "0,15,0", "two", "two", "", "1"));
+        Assert.AreEqual(CraftFingerprint.Compute(h1, reg).Length, 64);
+        // The header description is part of the fingerprint on its own; isolate the module copy by dropping that one line.
+        string Strip(ConfigNode n) => string.Join("\n", CraftFingerprint.Project(n, reg, null, null, null).Split('\n').Where(l => !l.StartsWith("H|description")));
+        Assert.AreEqual(Strip(h1), Strip(h2), "derived copy collapses to <header> in both");
+        var stale = N(Make("0,15,0", "0,15,0", "stale", "two", "", "1"));
+        Assert.AreNotEqual(Strip(h2), Strip(stale));
+        Assert.IsTrue(CraftComparator.Compare(h1, stale, new ComparatorOptions { Registry = reg }).Differences.Any(d => d.Kind == "header_derived_mismatch"));
+        // Genuine differences still show in both, and an empty registry separates both.
+        var real = N(Make("5,15,0", "9,15,0", "hello", "hello", "", "1"));
+        Assert.IsFalse(CraftComparator.Compare(a, real, new ComparatorOptions { Registry = reg }).Equal);
+        Assert.AreNotEqual(CraftFingerprint.Compute(a, reg), CraftFingerprint.Compute(real, reg));
+        var empty = RoundtripVolatileKeys.Empty();
+        Assert.IsFalse(CraftComparator.Compare(a, b, new ComparatorOptions { Registry = empty }).Equal);
+        Assert.AreNotEqual(CraftFingerprint.Compute(a, empty), CraftFingerprint.Compute(b, empty));
+    }
+    [TestMethod] public void FingerprintTreatsOppositeQuaternionsAsOneRotationButKeepsDistinctOnes()
+    {
+        string With(string rot) => Mini().Replace("\trot = 0,0,0,1\n\tattRot0 = 0,0,0,1\n\tistg = {ISTG}", "x").Replace("\tattPos0 = 0,-1,0\n\trot = 0,0,0,1", "\tattPos0 = 0,-1,0\n\trot = " + rot);
+        var half = "0,0.70710678,0,0.70710678"; var neg = "0,-0.70710678,0,-0.70710678"; var other = "0,0.70710678,0,-0.70710678";
+        Assert.AreEqual(CraftFingerprint.Compute(N(With(half))), CraftFingerprint.Compute(N(With(neg))));
+        Assert.AreNotEqual(CraftFingerprint.Compute(N(With(half))), CraftFingerprint.Compute(N(With(other))), "Ry(90) and Ry(-90) must not collide");
+    }
     [TestMethod] public void DefaultRegistryHoldsEvidencedEntries()
     {
         var r = RoundtripVolatileKeys.Default();
@@ -243,19 +323,28 @@ PART
         foreach (var f in new[] { "S0a-saved1.craft", "S0a2-saved.craft" })
         {
             var c = CraftComparator.Compare(twin, Fx.Node(f), new ComparatorOptions { TwinMode = true });
-            Assert.IsTrue(c.Equal, f + "\n" + string.Join("\n", c.Differences));
+            // rot (0,0,0,0 vs 0,0,0,1) and description are real header differences; nothing else may differ.
+            CollectionAssert.AreEquivalent(new[] { "description", "rot" }, c.Differences.Select(d => d.Path).ToArray(), f + "\n" + string.Join("\n", c.Differences));
+            Assert.IsTrue(c.Differences.All(d => d.PartRef == "HEADER"), f);
             Assert.IsTrue(c.ExclusionsApplied.Any(e => e.KeyPath == "LastUpdateTime"), f);
             Assert.IsTrue(c.ExclusionsApplied.Any(e => e.Rule == "HeaderDerived"), f);
         }
         var s2 = CraftComparator.Compare(twin, Fx.Node("S0a2-saved.craft"), new ComparatorOptions { TwinMode = true });
         Assert.IsTrue(s2.ExclusionsApplied.Any(e => e.KeyPath == "AutostrutOff/active"), "absent active=False is explained");
-        // Without the registry the same pair differs, so the entries are doing real work.
-        Assert.IsFalse(CraftComparator.Compare(twin, Fx.Node("S0a2-saved.craft"), new ComparatorOptions { TwinMode = true, Registry = RoundtripVolatileKeys.Empty() }).Equal);
-        // And a genuinely changed twin is caught.
+        // Without the registry the same pair has more differences, so the entries do real work.
+        var bare = CraftComparator.Compare(twin, Fx.Node("S0a2-saved.craft"), new ComparatorOptions { TwinMode = true, Registry = RoundtripVolatileKeys.Empty() });
+        Assert.IsTrue(bare.TotalDifferences > s2.TotalDifferences);
+        // A header made to match leaves a genuinely equal craft.
+        var aligned = Fx.Node("S0a2-saved.craft");
+        aligned.Entries.RemoveAll(e => e.IsValue && (e.Key == "rot" || e.Key == "description"));
+        aligned.Entries.Insert(0, new ConfigEntry("rot", "0,0,0,0")); aligned.Entries.Insert(0, new ConfigEntry("description", twin.First("description")));
+        var t2 = Fx.Node("S0a-manual.craft");
+        var eq = CraftComparator.Compare(t2, aligned, new ComparatorOptions { TwinMode = true });
+        Assert.IsTrue(eq.Differences.All(d => d.Path != "rot" && d.Path != "description"), string.Join("\n", eq.Differences));
         var changed = Fx.Node("S0a2-saved.craft");
         changed.Children("PART").Last().Entries.RemoveAll(e => e.IsValue && e.Key == "istg");
         changed.Children("PART").Last().AddValue("istg", "3");
-        Assert.IsFalse(CraftComparator.Compare(twin, changed, new ComparatorOptions { TwinMode = true }).Equal);
+        Assert.IsTrue(CraftComparator.Compare(twin, changed, new ComparatorOptions { TwinMode = true }).Differences.Any(d => d.Path == "istg"));
     }
     [TestMethod] public void SameFileWithCidMappingIsEqualAndHeaderMattersOutsideTwinMode()
     {

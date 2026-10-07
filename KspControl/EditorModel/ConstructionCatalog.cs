@@ -77,7 +77,7 @@ namespace KspControl.EditorModel
                 sb.Append(r.Stack).Append(r.Srf).Append(r.AllowStack).Append(r.AllowSrf).Append(r.AllowCollision).Append(r.AllowDock).Append('|');
                 var nodes = new List<ConstructionNode>(p.StackNodes ?? new List<ConstructionNode>());
                 nodes.Sort((a, b) => string.CompareOrdinal(a.Id, b.Id));
-                foreach (var node in nodes) sb.Append(node.Id).Append(':').Append(V(node.Position)).Append(':').Append(V(node.Orientation)).Append(':').Append(node.Size).Append(';');
+                foreach (var node in nodes) sb.Append(node.Id).Append(':').Append(V(node.Position)).Append(':').Append(V(node.Orientation)).Append(':').Append(node.Size.ToString(CultureInfo.InvariantCulture)).Append(';');
                 if (p.SurfaceNode != null) sb.Append("srf:").Append(V(p.SurfaceNode.Position)).Append(':').Append(V(p.SurfaceNode.Orientation));
                 sb.Append('\n');
             }
@@ -89,6 +89,6 @@ namespace KspControl.EditorModel
                 return hex.ToString();
             }
         }
-        private static string V(Vector v) { return v.X.ToString("R", CultureInfo.InvariantCulture) + "," + v.Y.ToString("R", CultureInfo.InvariantCulture) + "," + v.Z.ToString("R", CultureInfo.InvariantCulture); }
+        private static string V(Vector v) { return RotationMath.Format(v); }
     }
 }

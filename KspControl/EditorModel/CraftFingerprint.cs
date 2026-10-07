@@ -30,8 +30,7 @@ namespace KspControl.EditorModel
             if (uiName != null || uiDescription != null || flagUrl != null)
                 sb.Append("ui:").Append(uiName).Append('\u0001').Append(uiDescription).Append('\u0001').Append(flagUrl).Append('\n');
             var m = CraftModel.Build(craft);
-            var desc = craft.First("description") ?? "";
-            var headerLines = new List<string>();
+                        var headerLines = new List<string>();
             foreach (var kv in craft.Values())
             {
                 if (IgnoredHeader.Contains(kv.Key)) continue;
@@ -52,7 +51,7 @@ namespace KspControl.EditorModel
                 if (rank.ContainsKey(i)) continue;
                 rank[i] = order.Count; order.Add(i);
                 var kids = m.Parts[i].Children.OrderBy(c => CraftComparator.ChildKey(m, i, c), StringComparer.Ordinal)
-                    .ThenBy(c => CraftComparator.GeometryKey(m, c, root), StringComparer.Ordinal).ThenBy(c => c).ToList();
+                    .ThenBy(c => Math.Round(CraftComparator.AngleAbout(m, c, root), 3)).ThenBy(c => c).ToList();
                 for (int k = kids.Count - 1; k >= 0; k--) stack.Push(kids[k]);
             }
             for (int i = 0; i < m.Parts.Count; i++) if (!rank.ContainsKey(i)) { rank[i] = order.Count; order.Add(i); }
@@ -72,7 +71,7 @@ namespace KspControl.EditorModel
                     var e = registry.Find("PART", k);
                     if (e != null && e.Rule == VolatileRule.Ignore) continue;
                     if (k == "pos") { Vector pv; if (CraftModel.TryVector(v, out pv)) { var rel = CraftComparator.SafeInverse(RotationMath.Sub(pv, rp), rr); v = Round3(rel.X) + "," + Round3(rel.Y) + "," + Round3(rel.Z); } lines.Add("pos=" + v); continue; }
-                    if (k == "rot") { Rotation q; if (CraftModel.TryRotation(v, out q)) { try { var rel = RotationMath.Multiply(RotationMath.Conjugate(rr), q); v = Round3(rel.X) + "," + Round3(rel.Y) + "," + Round3(rel.Z) + "," + Round3(Math.Abs(rel.W)); } catch (ArgumentException) { } } lines.Add("rot=" + v); continue; }
+                    if (k == "rot") { Rotation q; if (CraftModel.TryRotation(v, out q)) { try { v = CanonRotation(RotationMath.Multiply(RotationMath.Conjugate(rr), q)); } catch (ArgumentException) { } } lines.Add("rot=" + v); continue; }
                     if (k == "link" || k == "sym") { lines.Add(k + "=" + id(CraftModel.ParseRef(v))); continue; }
                     if (k == "srfN") { lines.Add("srfN=" + id(p.Srf)); continue; }
                     if (k == "attN")
@@ -85,11 +84,11 @@ namespace KspControl.EditorModel
                 }
                 lines.Sort(StringComparer.Ordinal);
                 foreach (var l in lines) sb.Append(' ').Append(l).Append('\n');
-                foreach (var child in p.Node.Children()) Node(sb, child, child.Name == "MODULE" ? (child.First("name") ?? "") : child.Name, "", 1, registry, desc);
+                foreach (var child in p.Node.Children()) Node(sb, child, child.Name == "MODULE" ? (child.First("name") ?? "") : child.Name, "", 1, registry, craft, rp, rr);
             }
             return sb.ToString();
         }
-        private static void Node(StringBuilder sb, ConfigNode n, string module, string path, int depth, RoundtripVolatileKeys registry, string desc)
+        private static void Node(StringBuilder sb, ConfigNode n, string module, string path, int depth, RoundtripVolatileKeys registry, ConfigNode header, Vector rootPos, Rotation rootRot)
         {
             var indent = new string(' ', depth * 2);
             sb.Append(indent).Append('[').Append(n.Name).Append(']').Append('\n');
@@ -101,15 +100,33 @@ namespace KspControl.EditorModel
                 {
                     if (e.Rule == VolatileRule.Ignore) continue;
                     if (e.Rule == VolatileRule.AbsentEqualsDefault && ValueRule.Equal(kv.Value, e.DefaultValue)) continue;
-                    if (e.Rule == VolatileRule.HeaderDerived) { lines.Add(kv.Key + "=" + (kv.Value.Replace("\\n", "\n") == desc.Replace("\\n", "\n") ? "<header>" : Canon(kv.Value))); continue; }
+                    if (e.Rule == VolatileRule.HeaderDerived)
+                    {
+                        var hv = header.First(e.HeaderKey ?? "description") ?? "";
+                        lines.Add(kv.Key + "=" + (Norm(kv.Value) == Norm(hv) ? "<header>" : Canon(kv.Value))); continue;
+                    }
+                    if (e.Rule == VolatileRule.RootRelativeVector)
+                    {
+                        Vector v; Rotation q;
+                        if (CraftModel.TryVector(kv.Value, out v)) { var rel = CraftComparator.SafeInverse(RotationMath.Sub(v, rootPos), rootRot); lines.Add(kv.Key + "=" + Round3(rel.X) + "," + Round3(rel.Y) + "," + Round3(rel.Z)); continue; }
+                        if (CraftModel.TryRotation(kv.Value, out q)) { try { lines.Add(kv.Key + "=" + CanonRotation(RotationMath.Multiply(RotationMath.Conjugate(rootRot), q))); continue; } catch (ArgumentException) { } }
+                    }
                 }
                 lines.Add(kv.Key + "=" + Canon(kv.Value));
             }
-            // Order within a node is semantically irrelevant for keys; child nodes keep file order.
             lines.Sort(StringComparer.Ordinal);
             foreach (var l in lines) sb.Append(indent).Append(' ').Append(l).Append('\n');
-            foreach (var c in n.Children()) Node(sb, c, module, path + c.Name + "/", depth + 1, registry, desc);
+            foreach (var c in n.Children()) Node(sb, c, module, path + c.Name + "/", depth + 1, registry, header, rootPos, rootRot);
         }
+        /// <summary>q and -q are the same rotation: flip the whole quaternion so w is positive (first non-zero component when w is zero).</summary>
+        private static string CanonRotation(Rotation q)
+        {
+            double x = q.X, y = q.Y, z = q.Z, w = q.W;
+            double lead = Math.Abs(w) > 1e-9 ? w : (Math.Abs(x) > 1e-9 ? x : (Math.Abs(y) > 1e-9 ? y : z));
+            if (lead < 0) { x = -x; y = -y; z = -z; w = -w; }
+            return Round3(x) + "," + Round3(y) + "," + Round3(z) + "," + Round3(w);
+        }
+        private static string Norm(string s) { return s.Replace("\r\n", "\n").Replace("\\n", "\n").Replace("\r", "\n").Replace("\u00A8", "\n"); }
         private static string Round3(double v) { var r = Math.Round(v, 3); if (r == 0) r = 0; return r.ToString("0.###", CultureInfo.InvariantCulture); }
         /// <summary>Numeric tokens are normalised to 9 significant digits; other tokens are kept.</summary>
         private static string Canon(string value)

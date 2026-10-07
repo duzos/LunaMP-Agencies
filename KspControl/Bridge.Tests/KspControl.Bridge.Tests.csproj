@@ -40,13 +40,16 @@
     <Compile Include="../Bridge/ConstructionCatalogMapper.cs" Link="ConstructionCatalogMapper.cs" />
     <Compile Include="../Bridge/OperationFiles.cs" Link="OperationFiles.cs" />
     <Compile Include="../Bridge/OperationJob.cs" Link="OperationJob.cs" />
+    <Compile Include="../Bridge/OperationJob.Save.cs" Link="OperationJob.Save.cs" />
     <Compile Include="../Bridge/SnapshotStore.cs" Link="SnapshotStore.cs" />
     <Compile Include="../Bridge/CraftLedger.cs" Link="CraftLedger.cs" />
     <Compile Include="../Bridge/ThumbnailHousekeeper.cs" Link="ThumbnailHousekeeper.cs" />
     <Compile Include="../Bridge/PlanVerifier.cs" Link="PlanVerifier.cs" />
     <Compile Include="../Bridge/ApplyPlanner.cs" Link="ApplyPlanner.cs" />
     <Compile Include="../Bridge/EditorOperationRunner.cs" Link="EditorOperationRunner.cs" />
+    <Compile Include="../Bridge/EditorOperationRunner.Save.cs" Link="EditorOperationRunner.Save.cs" />
     <Compile Include="../Bridge/EditorOperationService.cs" Link="EditorOperationService.cs" />
+    <Compile Include="../Bridge/EditorOperationService.Save.cs" Link="EditorOperationService.Save.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
     <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />

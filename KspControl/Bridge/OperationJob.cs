@@ -8,7 +8,7 @@ using Pure = KspControl.EditorModel;
 
 namespace KspControl.Bridge
 {
-    internal enum OperationKind { Apply, Restore }
+    internal enum OperationKind { Apply, Restore, Save }
 
     /// <summary>
     /// The runner's phases (plan R4-section 6.4). Restore* phases are the snapshot reload: the automatic recovery after a failed apply
@@ -18,7 +18,9 @@ namespace KspControl.Bridge
     {
         Locking, Snapshot, Staging, Dispatch, Settle, Verify,
         RestoreStaging, RestoreDispatch, RestoreSettle, RestoreVerify,
-        GraceStart, Grace, Thumbnails, Finalize, Done
+        GraceStart, Grace, Thumbnails, Finalize, Done,
+        /// <summary>The single synchronous step of editor_save_craft: capture, write, verify, record, sync the save-name fields.</summary>
+        SaveWrite
     }
 
     internal sealed class DeclaredOutput
@@ -46,7 +48,7 @@ namespace KspControl.Bridge
     /// One mutation job. Created at admission, advanced once per frame by the runner, and read by editor.operation_status.
     /// Everything the envelope reports is a plain property; the runner-only state is internal.
     /// </summary>
-    internal sealed class OperationJob
+    internal sealed partial class OperationJob
     {
         public string RequestId { get; set; }
         public OperationKind Kind { get; set; }
@@ -120,6 +122,7 @@ namespace KspControl.Bridge
                 case OperationPhase.RestoreVerify: return "restore_verify";
                 case OperationPhase.GraceStart: case OperationPhase.Grace: return "post_unlock_grace";
                 case OperationPhase.Thumbnails: return "thumbnail_settle";
+                case OperationPhase.SaveWrite: return "save";
                 case OperationPhase.Finalize: return "finalizing";
                 default: return "done";
             }
@@ -131,7 +134,7 @@ namespace KspControl.Bridge
             var cleaned = new JArray(Declared.Where(d => d.Action == "deleted" || d.Action == "restored").Select(d => (JToken)d.ToJson()));
             var envelope = new JObject
             {
-                ["operation"] = Kind == OperationKind.Apply ? "apply_craft" : "restore_snapshot",
+                ["operation"] = OperationName(Kind),
                 ["requestId"] = RequestId,
                 ["phase"] = PhaseName(Phase),
                 ["notDispatched"] = Terminal && !Dispatched,
@@ -165,6 +168,7 @@ namespace KspControl.Bridge
                 ["completedUtc"] = CompletedUtc.HasValue ? (JToken)Format(CompletedUtc.Value) : JValue.CreateNull()
             };
             if (Plan != null && Plan.PlanHash != null) envelope["planHash"] = Plan.PlanHash;
+            AddSaveEnvelope(envelope);
             if (Detail != null) envelope["detail"] = Detail;
             return envelope;
         }

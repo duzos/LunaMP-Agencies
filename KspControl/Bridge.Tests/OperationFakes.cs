@@ -18,6 +18,8 @@ namespace KspControl.BridgeTests
         public readonly HashSet<string> Reparse = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public readonly List<string> Writes = new List<string>(), Deletes = new List<string>(), Copies = new List<string>();
         public Func<string, bool> FailWrite = p => false, CorruptWrite = p => false, FailDelete = p => false;
+        /// <summary>Runs after every successful write, so a test can make a sidecar appear the way another mod would.</summary>
+        public Action<string> OnWrite;
         private long now = 100;
 
         public string Text(string path) { return new UTF8Encoding(false).GetString(Data[path]); }
@@ -40,6 +42,7 @@ namespace KspControl.BridgeTests
             var stored = (byte[])bytes.Clone();
             if (CorruptWrite(path) && stored.Length > 0) stored[stored.Length / 2] ^= 0x55;
             Put(path, stored);
+            OnWrite?.Invoke(path);
         }
         public void CreateNew(string path, byte[] bytes)
         {
@@ -172,7 +175,7 @@ namespace KspControl.BridgeTests
             Authority.UpdateContext(Context.CurrentContext(), Context.CurrentBinding(), status);
             if (operations == null) Authority.ProvisionGrant(AuthorityHelpers.Grant(1, "grant", 1000));
             else Authority.ProvisionGrant(new TrustedExecutionGrant("grant", 1, AuthorityHelpers.Bind(), AuthorityHelpers.Utc0.AddHours(1000),
-                operations.Select(o => new EffectPermission(o, "editor:VAB")), new[] { "editor:VAB" }));
+                operations.Select(o => new EffectPermission(o, (o.StartsWith("craft.") ? "ships:" : "editor:") + "VAB")), new[] { "editor:VAB" }));
             if (lease) AcquireLease();
         }
 
@@ -225,6 +228,18 @@ namespace KspControl.BridgeTests
                 Arguments = new JObject { ["requestId"] = requestId, ["snapshotId"] = snapshotId, ["expectedRevision"] = token ?? Token() }
             };
         }
+
+        public BridgeRequest SaveRequest(string fileName = "Probe Saved", string requestId = "save-00001", string token = null, string replace = null, string lease = null)
+        {
+            var args = new JObject { ["requestId"] = requestId, ["fileName"] = fileName, ["expectedRevision"] = token ?? Token() };
+            if (replace != null) args["replaceExpectedSha256"] = replace;
+            return new BridgeRequest { RequestId = "wire-" + requestId, Operation = EditorOperations.SaveCraft, LeaseId = lease ?? Lease, Arguments = args };
+        }
+
+        public BridgeResponse Save(string fileName = "Probe Saved", string requestId = "save-00001", string replace = null) { return Service.Handle(SaveRequest(fileName, requestId, null, replace)); }
+
+        /// <summary>The ship file path a save of this base name would write.</summary>
+        public string ShipFile(string name) { return Paths.ResolveNewShip("VAB", name).FullPath; }
 
         public BridgeRequest StatusRequest(string requestId)
         {

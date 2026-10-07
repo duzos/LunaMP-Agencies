@@ -28,7 +28,7 @@ namespace KspControl.Bridge
     /// loss after dispatch cancels without restoring; a scene change or human input inside the lock is indeterminate.
     /// Every Unity call goes through <see cref="IEditorPort"/>, so the machine is tested end to end with a fake.
     /// </summary>
-    internal sealed class EditorOperationRunner
+    internal sealed partial class EditorOperationRunner
     {
         private static readonly string[] AuthorityCodes =
         {
@@ -124,6 +124,7 @@ namespace KspControl.Bridge
                 case OperationPhase.GraceStart: DoGraceStart(job, now); break;
                 case OperationPhase.Grace: DoGrace(job, now); break;
                 case OperationPhase.Thumbnails: DoThumbnails(job, now); break;
+                case OperationPhase.SaveWrite: DoSave(job, now); break;
                 case OperationPhase.Finalize: Finalize(job, now); break;
             }
         }
@@ -155,6 +156,7 @@ namespace KspControl.Bridge
             tracker.BeginOperation(); job.TrackerOperation = true;
             port.SetOperationLock(); job.LockSet = true;
             job.OldShip = port.ShipIdentity;
+            if (job.Kind == OperationKind.Save) { SetPhase(job, OperationPhase.SaveWrite, now); return; }
             if (job.Kind == OperationKind.Restore) { job.ExpectedParts = job.RestoreSource.PartCount; SetPhase(job, OperationPhase.RestoreStaging, now); }
             else SetPhase(job, port.PartCount > 0 ? OperationPhase.Snapshot : OperationPhase.Staging, now);
         }
@@ -466,6 +468,7 @@ namespace KspControl.Bridge
         private void OnUnexpected(OperationJob job, Exception error, long now)
         {
             var detail = error.GetType().Name;
+            if (job.Kind == OperationKind.Save) { OnSaveUnexpected(job, detail); return; }
             if (!job.Dispatched) { Fail(job, OperationReasons.OperationError, detail); return; }
             if (job.Phase == OperationPhase.Finalize || job.Phase == OperationPhase.Thumbnails || job.Phase == OperationPhase.Grace || job.Phase == OperationPhase.GraceStart)
             {
@@ -511,6 +514,7 @@ namespace KspControl.Bridge
                 try { job.Thumbs.Finish(job.Declared); job.ThumbnailResult = "not_settled"; } catch (Exception) { job.ThumbnailResult = "housekeeping_failed"; }
             }
             CleanStaging(job);
+            ReportShipsSidecars(job);
             job.EditorRevision = null;
             try
             {
@@ -519,7 +523,8 @@ namespace KspControl.Bridge
                     var observed = tracker.Observe(true);
                     job.EditorRevision = tracker.Token(worldEpoch(), observed);
                     // Only the craft an apply left untouched by any human is "ours": a restored craft or a human edit during grace is not.
-                    jobs.LastOperationFingerprint = job.Kind == OperationKind.Apply && job.PendingStatus == null && !job.TakeoverDuringGrace ? observed.Fingerprint : null;
+                    if (job.Kind != OperationKind.Save) // a save changes neither the craft nor who made it
+                        jobs.LastOperationFingerprint = job.Kind == OperationKind.Apply && job.PendingStatus == null && !job.TakeoverDuringGrace ? observed.Fingerprint : null;
                 }
             }
             catch (Exception) { job.EditorRevision = null; }

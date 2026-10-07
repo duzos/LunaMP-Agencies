@@ -21,7 +21,7 @@ namespace KspControl.Bridge
     /// observation drain, in one frame: it either refuses with a reason and a no-effect envelope, or registers a job, hands it to the
     /// runner and answers <c>running</c>. The long work happens in <see cref="EditorOperationRunner"/>, one step per frame.
     /// </summary>
-    internal sealed class EditorOperationService : IOperationSummary
+    internal sealed partial class EditorOperationService : IOperationSummary
     {
         private readonly IEditorPort port;
         private readonly EditorRevisionTracker tracker;
@@ -49,6 +49,7 @@ namespace KspControl.Bridge
             {
                 case EditorOperations.ApplyCraft: return Apply(request);
                 case EditorOperations.RestoreSnapshot: return Restore(request);
+                case EditorOperations.SaveCraft: return Save(request);
                 case EditorOperations.OperationStatus: return Status(request);
                 default: return Refuse(request, ControlReasons.OperationUnavailable, null);
             }
@@ -182,14 +183,14 @@ namespace KspControl.Bridge
         }
 
         /// <summary>Authority, token, busy and context checks common to both mutations. Returns a refusal, or null with the ticket.</summary>
-        private BridgeResponse AdmitCommon(BridgeRequest request, string effectName, string leaseId, string revisionText, out ExecutionTicket ticket, out ClassifiedEffect[] effects)
+        private BridgeResponse AdmitCommon(BridgeRequest request, string effectName, string leaseId, string revisionText, out ExecutionTicket ticket, out ClassifiedEffect[] effects, string recipientPrefix = "editor:")
         {
             ticket = null; effects = null;
             if (runner.Busy) return Refuse(request, OperationReasons.EditorBusy, "another operation is running", new JObject { ["busy"] = new JArray("operation_running") });
             if (!port.InEditor) return Refuse(request, ControlReasons.EditorUnavailable, null);
             Pure.EditorRevisionToken token;
             if (!Pure.EditorRevisionToken.TryParse(revisionText, out token)) return Refuse(request, ControlReasons.InvalidArgument, "expectedRevision is not a token from editor_state");
-            effects = new[] { new ClassifiedEffect(effectName, "editor:" + port.Facility, 0) };
+            effects = new[] { new ClassifiedEffect(effectName, recipientPrefix + port.Facility, 0) };
             try { ticket = authority.Admit(leaseId, token.EditRevision, effects); }
             catch (InvalidOperationException error) { return Refuse(request, MapAdmission(error.Message, leaseId), error.Message == "authority_unavailable" ? null : error.Message); }
             var check = tracker.CheckToken(revisionText, worldEpoch());
@@ -315,7 +316,7 @@ namespace KspControl.Bridge
             if (shown == null) return JValue.CreateNull();
             return new JObject
             {
-                ["requestId"] = shown.RequestId, ["operation"] = shown.Kind == OperationKind.Apply ? "apply_craft" : "restore_snapshot",
+                ["requestId"] = shown.RequestId, ["operation"] = OperationJob.OperationName(shown.Kind),
                 ["status"] = shown.Status, ["phase"] = OperationJob.PhaseName(shown.Phase),
                 ["reasonCode"] = shown.ReasonCode == null ? JValue.CreateNull() : (JToken)shown.ReasonCode,
                 ["completedUtc"] = shown.CompletedUtc.HasValue ? (JToken)shown.CompletedUtc.Value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture) : JValue.CreateNull()

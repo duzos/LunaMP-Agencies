@@ -20,9 +20,9 @@ namespace LmpClient.Windows.Agency
         {
             if (commNetText == null)
             {
-                commNetText = new GUIStyle(GUI.skin.label) { wordWrap = true };
+                commNetText = new GUIStyle(GUI.skin.label) { wordWrap = true, fixedWidth = 0, fixedHeight = 0, stretchWidth = true, richText = false };
                 commNetButton = new GUIStyle(GUI.skin.button) { wordWrap = true };
-                commNetToggle = new GUIStyle(GUI.skin.toggle) { wordWrap = true };
+                commNetToggle = new GUIStyle(GUI.skin.toggle) { wordWrap = false };
             }
             var settings = SettingsSystem.ServerSettings;
             if (!settings.AgencyCommNetPerAgency || !settings.AgencyCommNetOptIn)
@@ -80,7 +80,10 @@ namespace LmpClient.Windows.Agency
                 var otherAgrees = other != null && other.Source.OwnerAgencyId == target.OwnerAgencyId && other.Source.OwnershipRevision == target.OwnershipRevision &&
                     (other.AcceptAll || other.Targets.Any(t => t.VesselId == source.VesselId && t.OwnerAgencyId == source.OwnerAgencyId && t.OwnershipRevision == source.OwnershipRevision));
                 GUILayout.BeginVertical(GUI.skin.box);
-                var next = GUILayout.Toggle(selected, new GUIContent(label, label), commNetToggle, GUILayout.Width(targetWidth));
+                GUILayout.BeginHorizontal(GUILayout.Width(targetWidth));
+                var next = GUILayout.Toggle(selected, new GUIContent(string.Empty, label), commNetToggle, GUILayout.Width(24), GUILayout.Height(24));
+                GUILayout.Label(new GUIContent(label, label), commNetText, GUILayout.Width(targetWidth - 32));
+                GUILayout.EndHorizontal();
                 if (next != selected) system.MessageSender.SendCommNetCommand(CommNetOperation.SetTarget, commNetSelected, target.VesselId, next);
                 GUILayout.Label((acceptAll || selected) && otherAgrees ? "Agreed · links available when in antenna range" : otherAgrees ? "They agree · enable your side to connect" : acceptAll || selected ? "Waiting for their agreement" : "No agreement", commNetText);
                 GUILayout.EndVertical();

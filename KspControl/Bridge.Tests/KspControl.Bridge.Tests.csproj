@@ -56,6 +56,12 @@
     <Compile Include="../Bridge/EditorOperationRunner.Load.cs" Link="EditorOperationRunner.Load.cs" />
     <Compile Include="../Bridge/OperationJob.Load.cs" Link="OperationJob.Load.cs" />
     <Compile Include="../Bridge/LoadValidator.cs" Link="LoadValidator.cs" />
+    <Compile Include="../Bridge/FlightPort.cs" Link="FlightPort.cs" />
+    <Compile Include="../Bridge/FlightEffectClassifier.cs" Link="FlightEffectClassifier.cs" />
+    <Compile Include="../Bridge/FlightControlGuard.cs" Link="FlightControlGuard.cs" />
+    <Compile Include="../Bridge/FlightStateService.cs" Link="FlightStateService.cs" />
+    <Compile Include="../Bridge/FlightOperationService.cs" Link="FlightOperationService.cs" />
+    <Compile Include="../Bridge/FlightTakeoverWatcher.cs" Link="FlightTakeoverWatcher.cs" />
     <Compile Include="../Contracts/Fixtures/GrantFixture.cs" Link="Fixtures/GrantFixture.cs" />
     <None Include="../EditorModel.Tests/Fixtures/S0a-manual.craft" Link="Fixtures/S0a-manual.craft" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Contracts/Fixtures/grant-fixture.json" Link="Fixtures/grant-fixture.json" CopyToOutputDirectory="PreserveNewest" />

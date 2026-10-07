@@ -48,7 +48,7 @@ installation, game lifecycle and client configuration are orchestrator tasks, no
 MCP tools. An absent credential produces `credential_not_configured`.
 
 Current tools are `editor_state`, `editor_engineering`, `craft_plan`, `editor_apply_craft`, `editor_restore_snapshot`, `editor_save_craft`, `craft_list`, `job_status`, `control_status`, `control_acquire_lease`, `control_renew_lease`, `control_release_lease`, `capabilities`, `context`, `parts`, `editor`, `vessel`,
-`part_controls`, `science`, `part_definition` and `editor_snapshot`. The latter two provide bounded configured-part and native editor snapshots; they do not import or create craft. Part and vessel pages are bounded. Part controls
+`part_controls`, `science`, `part_definition`, `editor_snapshot` and the six flight tools (see Flight). `part_definition` and `editor_snapshot` provide bounded configured-part and native editor snapshots; they do not import or create craft. Part and vessel pages are bounded. Part controls
 and science require a part ID from an accessible craft observation. Controls are
 descriptors only; field values/invocation are not available. Flight inspection
 requires a ready LunaMP ownership record belonging to the current agency. No
@@ -273,6 +273,42 @@ own `SaveShip`; reported, never a failure), locked grace, thumbnail settle. Afte
 are hashed again: a change to the source or `.original` fails the job `source_changed_during_load` (the editor keeps the loaded copy and
 the snapshot stays); a changed `.loadmeta` is reported. An overwrite guard (sentinel save name and unsaved marker) is written after every load, so KSP prompts before a human Save overwrites the source.
 `scriptsApplied` is `"unavailable"` unless the game reports it.
+## Flight (flight_state, flight_set_controls, flight_stage, flight_action_group, flight_abort, flight_warp)
+
+`flight_state` is read-only and needs no lease. It answers only for an active vessel the agency owns (facade v1; otherwise
+`owned_active_vessel_unavailable`) and reports situation, body, UT, altitude, vertical/surface/orbital speed, the orbit
+(`referenceBody` is the sphere of influence the vessel is in now, the proof for a Mun encounter; `predictedNextBody` is a forecast only),
+stage number with per-stage delta-V from the stock `VesselDeltaV`, resource totals, throttle, SAS/RCS/gear/lights/brakes, warp, crew count and
+MechJeb presence. Units are in the field names; stages and resources are capped at 32.
+
+The other five tools mutate. They need a held lease and a grant that lists the `flight.control` family on the `FLIGHT` facility
+(`grant issue ... --ops flight.control --facilities FLIGHT`; add `VAB` for an editor grant in the same file). The lease binds to
+`vessel:<guid>` of the active vessel, so a vessel switch or scene change revokes it. Each request runs in one main-thread drain: parse, lease,
+classify every effect, admit, check preconditions, then revalidate (`ValidateForDispatch`) immediately before each callback, dispatch, and read
+the state back. The envelope reports `applied`, `consequential`, `observed` and `notDispatched`; a callback whose effect the game does not
+confirm is `indeterminate` and the request id stays reserved (the bridge and the host journal both answer a retry without acting again).
+
+- `flight_set_controls`: `throttle` 0..1, `throttleDelta` -1..1, and desired states for `sas`, `rcs`, `gear`, `lights`, `brakes` (setters, never blind toggles; a matching state is not touched).
+- `flight_stage(expectedStage)`: activates the next stage only when the vessel is at `expectedStage`; the modules on that stage's parts are classified first.
+- `flight_action_group(group, state?)`: Gear, Light, Brakes, SAS, RCS, Custom01..10. With `state` the group is reconciled to it; without, it is toggled once and read back.
+- `flight_abort`: fires the Abort group; classified like a group, throttle untouched.
+- `flight_warp(rateIndex)`: through the stock `TimeWarp.SetRate`, so LunaMP's Harmony prefix still applies the server's warp rules (`warp_denied` when it refuses). Capped at an effective 1000x (rails) and 1x (physics), by the altitude limit, and refused while the throttle is above zero.
+
+Classification: every part action a stage or group would trigger is named by its module. Known benign modules (lights, gear, brakes, panels,
+animations) and known consequential ones (engines, RCS, decouplers, fairings, docking, parachutes, clamps, science, robotics; reported in
+`consequential[]`) pass. A module in neither table, including any mod action, makes the whole request `unclassified_effect` before any callback
+runs, and its effect (`flight.unclassified`) is not in the authority's effect map either. Add modules to `FlightEffectClassifier` deliberately.
+
+Control ownership: `FlightControlGuard` owns the one fly-by-wire callback (`Vessel.OnFlyByWire`) only while a lease is held. Stop (hotkey or
+panel), expiry, the heartbeat watchdog, a context change, a failed grant and `OnDestroy` all end it: the throttle is zeroed first, then the
+callback removed, and a warp the bridge raised returns to real time. An agent `control_release_lease` and a human takeover only remove the
+callback and keep the throttle (the human's controls are preserved). A player holding a stick, throttle or stage key for three frames takes
+the lease over. The authority raises `LeaseEnded` on whatever thread ended the lease; the guard only sets a flag there and does the work on the
+main thread the same frame (Stop does it immediately).
+
+Not live-verified: the `Vessel.OnFlyByWire` throttle write persisting across physics ticks, `ActionGroupList.SetGroup` firing the part actions for
+Gear/Light/Brakes/RCS/Abort (versus toggling only), `StageManager.CurrentStage` advancing within the frame of `ActivateNextStage`, the stage
+mass unit of `DeltaVStageInfo.stageMass`, `GameSettings` key polling, and LunaMP's veto of `TimeWarp.SetRate` against a real server.
 
 ## Offline preview packaging
 

@@ -89,6 +89,25 @@ namespace KspControl.HostTests;
    var badWait=await Request(new { jsonrpc="2.0",id=10,method="tools/call",@params=new { name="job_status",arguments=new { requestId="never-seen-1",waitSeconds=99 } } },10);
    using var badWaitResult=JsonDocument.Parse(badWait.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
    Assert.AreEqual("invalid_argument",badWaitResult.RootElement.GetProperty("ReasonCode").GetString());
+   // Flight: the telemetry tool is read-only (no arguments); every flight mutation carries a request id and a lease and nothing that could hold grant content.
+   foreach(var expected in new[]{"flight_state","flight_set_controls","flight_stage","flight_action_group","flight_abort","flight_warp"}) CollectionAssert.Contains(names,expected);
+   Assert.IsFalse(Schema("flight_state").TryGetProperty("properties",out var flightStateProperties) && flightStateProperties.EnumerateObject().Any());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","throttle","throttleDelta","sas","rcs","gear","lights","brakes"},Schema("flight_set_controls").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId"},Schema("flight_set_controls").GetProperty("required").EnumerateArray().Select(p=>p.GetString()).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedStage"},Schema("flight_stage").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","group","state"},Schema("flight_action_group").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId"},Schema("flight_abort").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","rateIndex"},Schema("flight_warp").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   Assert.AreEqual(7,Schema("flight_warp").GetProperty("properties").GetProperty("rateIndex").GetProperty("maximum").GetInt32());
+   var flightState=await Request(new { jsonrpc="2.0",id=11,method="tools/call",@params=new { name="flight_state",arguments=new {} } },11);
+   using var flightStateResult=JsonDocument.Parse(flightState.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("credential_not_configured",flightStateResult.RootElement.GetProperty("ReasonCode").GetString());
+   var flightNoLease=await Request(new { jsonrpc="2.0",id=12,method="tools/call",@params=new { name="flight_stage",arguments=new { requestId="flight-stage-1",leaseId="0123456789abcdef0123456789abcdef",expectedStage=2 } } },12);
+   using var flightNoLeaseResult=JsonDocument.Parse(flightNoLease.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("lease_required",flightNoLeaseResult.RootElement.GetProperty("ReasonCode").GetString());
+   var flightBad=await Request(new { jsonrpc="2.0",id=13,method="tools/call",@params=new { name="flight_set_controls",arguments=new { requestId="flight-ctl-1",leaseId="0123456789abcdef0123456789abcdef",throttle=2 } } },13);
+   using var flightBadResult=JsonDocument.Parse(flightBad.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("invalid_argument",flightBadResult.RootElement.GetProperty("ReasonCode").GetString());
   } finally { process.StandardInput.Close(); if(!process.WaitForExit(1000)) process.Kill(true); await errors; }
  }
 }

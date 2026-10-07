@@ -32,6 +32,9 @@ namespace KspControl.Bridge
         internal EditorOperationService Operations { get; set; }
         /// <summary>craft.list. Null leaves it unavailable.</summary>
         internal CraftListService CraftList { get; set; }
+        /// <summary>Flight telemetry and mutations. Null leaves the flight operations unavailable.</summary>
+        internal FlightStateService FlightState { get; set; }
+        internal FlightOperationService FlightMutations { get; set; }
         public void RefreshContext()
         {
             var currentAgency = Agency();
@@ -44,7 +47,7 @@ namespace KspControl.Bridge
             try { return FacadeCompatible ? (Guid)(facade.GetProperty("AgencyId", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) ?? Guid.Empty) : Guid.Empty; }
             catch { return Guid.Empty; }
         }
-        private bool MayInspect(Vessel vessel)
+        internal bool MayInspect(Vessel vessel)
         {
             try { return FacadeCompatible && vessel != null && agency != Guid.Empty && (bool)(facade.GetMethod("MayInspectActiveVessel")?.Invoke(null, new object[] { vessel.id }) ?? false); }
             catch { return false; }
@@ -94,6 +97,18 @@ namespace KspControl.Bridge
                     var operation = Operations.Handle(request);
                     operation.WorldEpoch = epoch; operation.Revision = ++revision;
                     return operation;
+                case KspControl.Contracts.FlightOperations.State:
+                    if (FlightState == null) return Fail(request, "operation_unavailable");
+                    var flightResult = FlightState.State();
+                    if (flightResult.Reason != null) return Fail(request, flightResult.Reason);
+                    data = flightResult.Data; break;
+                case KspControl.Contracts.FlightOperations.SetControls: case KspControl.Contracts.FlightOperations.Stage: case KspControl.Contracts.FlightOperations.ActionGroup:
+                case KspControl.Contracts.FlightOperations.Abort: case KspControl.Contracts.FlightOperations.Warp:
+                    // Flight mutations answer with their own envelope: not an observation, so no readOnly marker and no size cap.
+                    if (FlightMutations == null) return Fail(request, "operation_unavailable");
+                    var flight = FlightMutations.Handle(request);
+                    flight.WorldEpoch = epoch; flight.Revision = ++revision;
+                    return flight;
                 case "editor.snapshot":
                     if (!HighLogic.LoadedSceneIsEditor || EditorLogic.fetch?.ship == null) return Fail(request, "editor_unavailable");
                     data = EditorSnapshot(EditorLogic.fetch.ship, request.Arguments); break;
@@ -144,8 +159,8 @@ namespace KspControl.Bridge
         {
             ["bridgeVersion"] = BridgeVersion,
             ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", ConstructionOperations.Catalog, "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect",
-                EditorOperations.OperationStatus, CraftOperations.List),
-            ["mutations"] = new JArray(Operations == null ? new string[0] : EditorOperations.Mutations),
+                EditorOperations.OperationStatus, CraftOperations.List, KspControl.Contracts.FlightOperations.State),
+            ["mutations"] = new JArray((Operations == null ? new string[0] : EditorOperations.Mutations).Concat(FlightMutations == null ? new string[0] : KspControl.Contracts.FlightOperations.Mutations)),
             ["inline"] = new JArray(ControlOperations.All),
             ["unavailable"] = new JObject { ["mutations"] = Operations == null ? "operation_layer_not_wired" : "none", ["screenshots"] = "disclosure_validation_not_implemented",
                 ["foreignContacts"] = "contact_adapter_not_implemented", ["mechjeb"] = "adapter_not_implemented" },

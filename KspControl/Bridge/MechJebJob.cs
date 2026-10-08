@@ -36,6 +36,8 @@ namespace KspControl.Bridge
         public int WarpCeilingResetFrames = 600;
         /// <summary>A rate is used only while it needs at least this much real time to cover what is left, so the step down never overshoots.</summary>
         public double WarpMarginRealSeconds = 3;
+        /// <summary>Consecutive refused drops to real time on arrival before the job fails with warp_drop_refused.</summary>
+        public int WarpDropRefusals = 5;
     }
 
     /// <summary>
@@ -92,7 +94,7 @@ namespace KspControl.Bridge
         /// <summary>The node executor's Autowarp before we forced it off, restored on release.</summary>
         internal bool? SavedAutowarp;
         /// <summary>warp_to: the rate index last requested and the frame of the request, the ceiling a refusal set, and whether a raised rate ever took.</summary>
-        internal int WarpRequested = -1, WarpRequestedFrame, WarpCeiling = int.MaxValue, WarpCeilingFrame, WarpChanges;
+        internal int WarpRequested = -1, WarpRequestedFrame, WarpCeiling = int.MaxValue, WarpCeilingFrame, WarpChanges, DropAttempts;
         internal bool WarpAchieved;
 
         public static string OperationName(AutopilotKind kind)

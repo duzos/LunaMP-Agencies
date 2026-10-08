@@ -345,14 +345,15 @@ runner and job registry, so a warp can never race a MechJeb burn (`autopilot_bus
 - Node edits finish inside admission and answer completed with `plan.node` and `plan.prediction` (the same report as `flight_orbit_prediction`). Refusals:
   `no_maneuver_node`, `node_not_found`, `too_many_nodes`, `time_unavailable` (apoapsis of an open orbit), `plan_unavailable` (no solver),
   `flight_planning_locked` (`GameVariables.UnlockedFlightPlanning` for the Mission Control level; level 1 outside career). A game exception during the
-  edit is `indeterminate` (`node_edit_failed`).
+  edit is `indeterminate` (`node_edit_failed`). After `all=true` the response also carries `plan.predictionStale: true` and a note: re-read
+  `flight_orbit_prediction` next frame.
 - `flight_warp_to(target, timeSeconds?, leadSeconds?, nodeIndex?)`: `target` is `node` (nodeIndex, default 0), `soi` (the end of the first patch of the
   current coast that ends in ENCOUNTER or ESCAPE), `absolute`, `in_seconds`, `apoapsis` or `periapsis`. The warp ends at target minus `leadSeconds`
-  (0..3600, default 60). A job: each frame the runner revalidates the authority and the vessel, then picks the highest rails index whose rate is within
+  (0..3600, default 60); before a node burn use half the burn time plus 30 s. A job: each frame the runner revalidates the authority and the vessel, then picks the highest rails index whose rate is within
   the cap, the altitude limit (`TimeWarp.GetMaxRateForAltitude`) and any refused rate, and that needs at least 3 real seconds to use up what is left (so
   stepping down never overshoots), and requests it through `TimeWarp.SetRate` (lower rates instantly). It completes at the stop time back at real time
   (`overshootSeconds` reported); fails on a rising throttle (`warp_while_thrusting`), physics mode, a refused rate that leaves real time
-  (`warp_denied`) or 30 minutes of real time; is cancelled by a person dropping warp to real time (`warp_stopped_externally`), Stop, lease loss, a vessel
+  (`warp_denied`) 30 minutes of real time or a drop to real time refused 5 times in a row (`warp_drop_refused`); is cancelled by a person dropping warp to real time (`warp_stopped_externally`), Stop, lease loss, a vessel
   switch or flight-control input (takeover). Every ending returns warp to real time. Admission refuses `warp_mode_physics`, `warp_while_thrusting`,
   `warp_not_allowed_here` (in the atmosphere while flying, or altitude limit index 0), `no_soi_change` and `warp_target_reached`.
 

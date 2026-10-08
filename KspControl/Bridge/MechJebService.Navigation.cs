@@ -111,6 +111,11 @@ namespace KspControl.Bridge
                 ["source"] = "stock_flight_plan", ["node"] = node,
                 ["prediction"] = after == null || !after.Owned ? JValue.CreateNull() : (JToken)OrbitPrediction.Build(after)
             };
+            if (job.Kind == AutopilotKind.NodeDelete && nav.All)
+            {
+                // KSP re-plans after the removal on a later frame: the withoutNodes chain read now can still be the old one.
+                job.Plan["predictionStale"] = true; job.Plan["predictionNote"] = "re-read flight_orbit_prediction next frame";
+            }
             try { job.Last = flight.Read() ?? job.Last; } catch (Exception) { }
             return Envelope(request, job);
         }

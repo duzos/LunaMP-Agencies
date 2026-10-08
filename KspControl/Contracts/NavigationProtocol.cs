@@ -78,6 +78,7 @@ namespace KspControl.Contracts
         public const string NodeEditFailed = "node_edit_failed";
         public const string NoSoiChange = "no_soi_change";
         public const string WarpModePhysics = "warp_mode_physics";
+        public const string WarpDropRefused = "warp_drop_refused";
         public const string WarpNotAllowedHere = "warp_not_allowed_here";
         public const string WarpTargetReached = "warp_target_reached";
     }

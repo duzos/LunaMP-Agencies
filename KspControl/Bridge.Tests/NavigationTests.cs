@@ -132,6 +132,29 @@ namespace KspControl.BridgeTests
             Assert.AreEqual("ESCAPE", (string)mun["endTransition"]); Assert.AreEqual(41000.0, (double)mun["endUniversalTimeSeconds"]);
         }
 
+        [TestMethod] public void ANodeInsideTheMunSoiUsesThePostBurnPatch()
+        {
+            var plan = new List<OrbitPatch>
+            {
+                P("Kerbin", 1000, 21000, 99000, "ENCOUNTER", 0.96, 11500000, "INITIAL", 70000),
+                P("Mun", 21000, 25000, 30000, "MANEUVER", 1.4, 0, "ENCOUNTER"),
+                P("Mun", 25000, 40000, -50000, "IMPACT", 1.4, 0, "MANEUVER")
+            };
+            var data = OrbitPrediction.Build(Reading(plan.Take(1).ToList(), plan, new ManeuverNodeInfo { UniversalTime = 25000 }));
+            var a = data["assessment"];
+            Assert.AreEqual(true, (bool)a["munImpact"]); Assert.AreEqual(-50000.0, (double)a["munClosestApproachAltitudeMetres"]);
+            Assert.AreEqual(2, (int)a["encounterPatchIndex"]); Assert.AreEqual(21000.0, (double)a["encounterEntryUniversalTimeSeconds"]);
+        }
+
+        [TestMethod] public void ACorrectionNodeOnTheReturnUsesThePostBurnKerbinPatch()
+        {
+            var plan = FreeReturn(1000);
+            plan[3].EndTransition = "MANEUVER";
+            plan.Add(P("Kerbin", 60000, 90000, 28000, "FINAL", 0.97, 11000000, "MANEUVER", 70000));
+            var data = OrbitPrediction.Build(Reading(plan.Take(1).ToList(), plan, new ManeuverNodeInfo { UniversalTime = 2000 }, new ManeuverNodeInfo { UniversalTime = 60000 }));
+            Assert.AreEqual(28000.0, (double)data["assessment"]["returnPeriapsisKerbin"]); Assert.AreEqual(4, (int)data["assessment"]["returnPatchIndex"]);
+        }
+
         [TestMethod] public void WithoutNodesTheCoastIsTheBasis()
         {
             var coast = new List<OrbitPatch> { P("Kerbin", 1000, 50000, 99000, "ENCOUNTER", 0.96), P("Mun", 50000, 60000, -5000, "FINAL", 1.3) };
@@ -303,6 +326,8 @@ namespace KspControl.BridgeTests
             var all = rig.Service.Handle(Delete("node-d-0002", all: true));
             Assert.AreEqual("completed", all.Status); Assert.AreEqual(0, nav.Nodes.Count);
             Assert.AreEqual(JTokenType.Null, all.Data["plan"]["prediction"]["withNodes"].Type);
+            Assert.AreEqual(true, (bool)all.Data["plan"]["predictionStale"]); StringAssert.Contains((string)all.Data["plan"]["predictionNote"], "next frame");
+            Assert.IsNull(one.Data["plan"]["predictionStale"]);
             Refused(rig.Service.Handle(Delete("node-d-0003", all: true)), AutopilotReasons.NoManeuverNode);
         }
 
@@ -513,6 +538,28 @@ namespace KspControl.BridgeTests
             Assert.AreEqual(JobStatuses.Failed, job.Status); Assert.AreEqual(FlightReasons.WarpDenied, job.ReasonCode);
             Assert.AreEqual(0, nav.Index);
             Assert.IsTrue(nav.RateCalls.Count <= 2, "the refused rate was not spammed: " + string.Join(",", nav.RateCalls));
+        }
+
+        [TestMethod] public void ARefusedDropToRealTimeOnArrivalFailsFast()
+        {
+            Node(20000);
+            rig.Service.Handle(Warp());
+            rig.Options.WarpTimeoutMs = long.MaxValue;
+            rig.Run(3, 100);
+            Assert.IsTrue(nav.Index > 0);
+            nav.VetoAll = true;
+            var job = rig.RunToEnd(100, 5000);
+            Assert.AreEqual(JobStatuses.Failed, job.Status); Assert.AreEqual(NavigationReasons.WarpDropRefused, job.ReasonCode);
+        }
+
+        [TestMethod] public void AWarpJobEndsWithRealTimeEvenIfItNeverRequestedARate()
+        {
+            Node(100000);
+            rig.Service.Handle(Warp());
+            nav.VetoAll = true; nav.Index = 3;
+            rig.Runner.Abort(AutopilotReasons.StoppedByRequest);
+            nav.VetoAll = false;
+            Assert.AreEqual("0:instant", nav.RateCalls.Last());
         }
 
         [TestMethod] public void AClampedRateBecomesTheCeilingAndTheWarpStillArrives()

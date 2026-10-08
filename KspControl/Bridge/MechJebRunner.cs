@@ -17,11 +17,12 @@ namespace KspControl.Bridge
         private readonly Func<long> clock;
         private readonly Func<DateTime> utcNow;
         private readonly AutopilotOptions options;
+        private readonly INavigationPort navigation;
 
         public AutopilotJob Current { get; private set; }
         public bool Busy { get { return Current != null && !Current.Terminal; } }
 
-        public AutopilotRunner(ExecutionAuthority authority, IEditorContextSource source, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<long> clock, Func<DateTime> utcNow = null, AutopilotOptions options = null)
+        public AutopilotRunner(ExecutionAuthority authority, IEditorContextSource source, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<long> clock, Func<DateTime> utcNow = null, AutopilotOptions options = null, INavigationPort navigation = null)
         {
             this.authority = authority ?? throw new ArgumentNullException(nameof(authority));
             this.source = source ?? throw new ArgumentNullException(nameof(source));
@@ -30,6 +31,7 @@ namespace KspControl.Bridge
             this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
             this.utcNow = utcNow ?? (() => DateTime.UtcNow);
             this.options = options ?? new AutopilotOptions();
+            this.navigation = navigation;
         }
 
         /// <summary>Configures and engages MechJeb for an admitted ascent or node job. A failure ends the job and releases whatever was engaged.</summary>
@@ -38,7 +40,13 @@ namespace KspControl.Bridge
             Current = job; job.StartedAt = clock(); job.Phase = "engaging";
             try
             {
-                if (job.Kind == AutopilotKind.Ascent)
+                if (job.Kind == AutopilotKind.WarpTo)
+                {
+                    // Nothing changes yet: the first step picks the rate. The warp is the runner's from here until the job ends.
+                    if (navigation == null) throw new MechJebException(ControlReasons.OperationUnavailable, "the navigation layer is not wired");
+                    job.Phase = "warping";
+                }
+                else if (job.Kind == AutopilotKind.Ascent)
                 {
                     job.Settings = mechjeb.ConfigureAscent(job.VesselId, job.TargetAltitudeMeters, job.InclinationDegrees, job.Autostage);
                     job.Dispatched = true; job.EffectsApplied.Add("ascent_settings_written");
@@ -104,14 +112,17 @@ namespace KspControl.Bridge
             }
             else job.HumanFrames = 0;
 
-            // 4. Someone else engaged a controller (a person in the MechJeb window, AtmosphereAutopilot).
-            if (options.ScanEveryFrames > 0 && job.Frames % options.ScanEveryFrames == 0)
+            // 4. Someone else engaged a controller (a person in the MechJeb window, AtmosphereAutopilot). A warp drives no control, so it is not scanned:
+            // a controller that starts burning raises the throttle, which ends the warp.
+            if (job.Kind != AutopilotKind.WarpTo && options.ScanEveryFrames > 0 && job.Frames % options.ScanEveryFrames == 0)
             {
                 var others = mechjeb.FindCompetitors(job.VesselId, job.User, job.Kind == AutopilotKind.Ascent);
                 if (others.Count > 0) { Takeover(job, "another controller engaged: " + string.Join(",", others)); return; }
             }
 
-            if (job.Kind == AutopilotKind.Ascent) StepAscent(job, telemetry); else StepNode(job, telemetry);
+            if (job.Kind == AutopilotKind.Ascent) StepAscent(job, telemetry);
+            else if (job.Kind == AutopilotKind.WarpTo) StepWarp(job);
+            else StepNode(job, telemetry);
         }
 
         private void StepAscent(AutopilotJob job, FlightTelemetry t)
@@ -167,6 +178,51 @@ namespace KspControl.Bridge
             job.Phase = string.IsNullOrEmpty(reading.State) ? "executing_node" : reading.State.ToLowerInvariant();
         }
 
+        /// <summary>
+        /// One warp step: stop at the target minus the lead, or when the throttle rises, the mode leaves rails or a person drops the warp to real time.
+        /// Otherwise pick the highest rate that cannot overshoot (within the cap, the altitude limit and any refused rate) and request it through the stock setter.
+        /// </summary>
+        private void StepWarp(AutopilotJob job)
+        {
+            var w = navigation.ReadWarp();
+            if (w == null) { Finish(job, JobStatuses.Failed, AutopilotReasons.FlightUnavailable, "the vessel is gone"); return; }
+            if (!string.Equals(w.VesselId, job.VesselId, StringComparison.Ordinal)) { Finish(job, JobStatuses.Failed, AutopilotReasons.VesselChanged, "the active vessel changed"); return; }
+            job.LastWarp = w;
+            var remaining = job.StopUniversalTime - w.UniversalTime;
+            if (w.Throttle > 0.001) { Finish(job, JobStatuses.Failed, FlightReasons.WarpThrottleActive, "the throttle rose above zero during the warp; the warp was stopped"); return; }
+            if (!w.Rails) { Finish(job, JobStatuses.Failed, NavigationReasons.WarpModePhysics, "time warp left rails mode; the warp was stopped"); return; }
+            if (!(remaining > 0))
+            {
+                if (w.Index > 0) { Request(job, 0, true); job.Phase = "arriving"; return; }
+                job.OvershootSeconds = -remaining;
+                Finish(job, JobStatuses.Completed, null, "arrived: the warp stopped at the target minus the lead");
+                return;
+            }
+            var sinceRequest = job.Frames - job.WarpRequestedFrame;
+            // A person (or the game) dropped the warp to real time after a raised rate took: theirs to decide, so the job ends without raising it again.
+            if (job.WarpAchieved && w.Index == 0 && job.WarpRequested > 0 && sinceRequest > options.WarpVetoFrames)
+            { Finish(job, JobStatuses.Cancelled, "warp_stopped_externally", "time warp was returned to real time by someone else; the job ended"); return; }
+            if (job.WarpRequested > w.Index && sinceRequest >= options.WarpVetoFrames)
+            {
+                // The rate did not take: LunaMP's warp rules or the stock limits refused it. Remember the ceiling and retry later.
+                job.WarpCeiling = w.Index; job.WarpCeilingFrame = job.Frames; job.WarpRequested = w.Index;
+                if (w.Index == 0 && !job.WarpAchieved) { Finish(job, JobStatuses.Failed, FlightReasons.WarpDenied, "the game refused rails warp (LunaMP applies the server's warp rules to the stock setter); real time is unchanged"); return; }
+            }
+            if (job.WarpCeiling != int.MaxValue && job.Frames - job.WarpCeilingFrame >= options.WarpCeilingResetFrames) job.WarpCeiling = int.MaxValue;
+            if (w.Index > 0 && w.Index == job.WarpRequested) job.WarpAchieved = true;
+            var wanted = NavigationMath.ChooseWarpIndex(w.Rates, remaining, job.WarpCeiling, NavigationLimits.MaxWarpToRate, w.AltitudeLimitIndex, options.WarpMarginRealSeconds);
+            if (wanted != w.Index && (wanted != job.WarpRequested || sinceRequest >= options.WarpVetoFrames)) Request(job, wanted, wanted < w.Index);
+            if (clock() - job.StartedAt > options.WarpTimeoutMs) { Finish(job, JobStatuses.Failed, AutopilotReasons.Timeout, "the target was not reached within the time allowed"); return; }
+            job.Phase = "warping";
+        }
+
+        private void Request(AutopilotJob job, int index, bool instant)
+        {
+            job.Dispatched = true; job.WarpRequested = index; job.WarpRequestedFrame = job.Frames; job.WarpChanges++;
+            if (job.WarpChanges == 1) job.EffectsApplied.Add("warp_started");
+            navigation.SetWarpRate(index, instant);
+        }
+
         private void Takeover(AutopilotJob job, string detail)
         {
             try { authority.HumanTakeover(); } catch (Exception) { /* the release below must still happen */ }
@@ -184,6 +240,19 @@ namespace KspControl.Bridge
 
         private void Release(AutopilotJob job, bool cutThrottle)
         {
+            if (job.Kind == AutopilotKind.WarpTo)
+            {
+                // The warp was the runner's: whatever ended the job, return to real time. The throttle was never the runner's to cut.
+                if (!job.Dispatched || navigation == null) return;
+                try
+                {
+                    var w = navigation.ReadWarp();
+                    if (w == null || w.Index > 0) navigation.SetWarpRate(0, true);
+                    job.EffectsApplied.Add("warp_stopped");
+                }
+                catch (Exception) { job.EffectsApplied.Add("warp_stop_failed"); }
+                return;
+            }
             if (job.Kind != AutopilotKind.Ascent && job.Kind != AutopilotKind.ExecuteNode) return;
             if (job.Engaged || job.Dispatched)
             {

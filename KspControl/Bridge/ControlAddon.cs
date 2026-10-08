@@ -73,8 +73,11 @@ namespace KspControl.Bridge
                 var autopilotJobs = new AutopilotJobs();
                 var autopilotPort = new UnityAutopilotFlightPort();
                 var mechjeb = new MechJebAdapter(MechJebSources.Core, MechJebSources.Vessel);
-                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, autopilotPort, () => MonotonicClock.Milliseconds);
-                observations.Autopilot = new MechJebService(authority, autopilotRunner, autopilotJobs, mechjeb, autopilotPort, () => observations.WorldEpoch);
+                // Navigation (orbit prediction, stock maneuver nodes, rails warp to a time): the same runner and job registry as MechJeb, so one job at a time.
+                var navigationPort = new UnityNavigationPort(observations.MayInspect);
+                observations.OrbitPrediction = new OrbitPredictionService(navigationPort, () => observations.WorldEpoch);
+                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, autopilotPort, () => MonotonicClock.Milliseconds, null, null, navigationPort);
+                observations.Autopilot = new MechJebService(authority, autopilotRunner, autopilotJobs, mechjeb, autopilotPort, () => observations.WorldEpoch, null, navigationPort);
                 observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");

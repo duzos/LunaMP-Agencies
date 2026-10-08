@@ -141,6 +141,7 @@ namespace KspControl.BridgeTests
         public readonly ControlPump Pump;
         public readonly FakeMechJebPort MechJeb = new FakeMechJebPort();
         public readonly FakeFlightPort Flight = new FakeFlightPort();
+        public readonly FakeNavigationPort Navigation = new FakeNavigationPort();
         public readonly AutopilotJobs Jobs = new AutopilotJobs();
         public readonly AutopilotOptions Options = new AutopilotOptions();
         public readonly AutopilotRunner Runner;
@@ -154,8 +155,8 @@ namespace KspControl.BridgeTests
         {
             Authority = new ExecutionAuthority(() => Clock.Milliseconds, GrantMapping.KnownEffects, 2000, Store, () => Utc);
             Pump = new ControlPump(Authority, null, Context);
-            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options);
-            Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc);
+            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options, Navigation);
+            Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc, Navigation);
             Authority.UpdateContext(Context.CurrentContext(), Context.CurrentBinding(), AuthorityHelpers.ValidStatus());
             Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect }, facilities ?? new[] { FlightEffects.Facility })));
             if (lease) AcquireLease();
@@ -176,6 +177,7 @@ namespace KspControl.BridgeTests
         public void Frame(long milliseconds = 16)
         {
             Clock.Milliseconds += milliseconds;
+            Navigation.Advance(milliseconds / 1000.0);
             if (Lease != null && Heartbeats) Authority.Heartbeat(Lease);
             Pump.Update();
             Runner.Update();

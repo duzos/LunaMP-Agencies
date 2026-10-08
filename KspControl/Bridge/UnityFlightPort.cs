@@ -50,9 +50,11 @@ namespace KspControl.Bridge
                     ApoapsisAltitude = orbit.ApA, PeriapsisAltitude = orbit.PeA, InclinationDegrees = orbit.inclination, Eccentricity = orbit.eccentricity,
                     SemiMajorAxis = orbit.semiMajorAxis, PeriodSeconds = orbit.period, TimeToApoapsis = orbit.timeToAp, TimeToPeriapsis = orbit.timeToPe,
                     PatchEndTransition = orbit.patchEndTransition.ToString(),
-                    PredictedNextBody = encounter && orbit.nextPatch != null && orbit.nextPatch.referenceBody != null ? orbit.nextPatch.referenceBody.bodyName : null
+                    PredictedNextBody = encounter && orbit.nextPatch != null && orbit.nextPatch.referenceBody != null ? orbit.nextPatch.referenceBody.bodyName : null,
+                    TimeToSoiChange = encounter ? orbit.EndUT - snapshot.UniversalTime : double.NaN
                 };
             }
+            ReadNextNode(vessel, snapshot);
             var groups = vessel.ActionGroups;
             snapshot.Controls = new FlightControlStates
             {
@@ -83,6 +85,20 @@ namespace KspControl.Bridge
                     });
             }
             catch (Exception) { snapshot.DeltaVReady = false; snapshot.Stages.Clear(); }
+        }
+
+        private static void ReadNextNode(Vessel vessel, FlightSnapshot snapshot)
+        {
+            try
+            {
+                var solver = vessel.patchedConicSolver;
+                if (solver == null || solver.maneuverNodes == null || solver.maneuverNodes.Count == 0) return;
+                snapshot.NodeCount = solver.maneuverNodes.Count;
+                ManeuverNode next = null;
+                foreach (var node in solver.maneuverNodes) if (node != null && (next == null || node.UT < next.UT)) next = node;
+                if (next != null) snapshot.NextNode = UnityNavigationPort.Describe(next);
+            }
+            catch (Exception) { snapshot.NextNode = null; }
         }
 
         private static void ReadResources(Vessel vessel, FlightSnapshot snapshot)

@@ -23,11 +23,17 @@ namespace KspControl.Contracts
         public const string PlanHohmann = "flight.autopilot_plan_hohmann";
         /// <summary>Crew recovery: deorbit, separation, reentry, parachutes, touchdown. A long job like the ascent.</summary>
         public const string Recover = "flight.autopilot_recover";
+        // Stock flight-plan editing and rails warp (P3 navigation). Same family: a grant that may have MechJeb burn the engines may also edit the
+        // flight plan and warp to the burn, and one runner serialises a warp with any MechJeb job, so the two can never race.
+        public const string NodeCreate = "flight.node_create";
+        public const string NodeUpdate = "flight.node_update";
+        public const string NodeDelete = "flight.node_delete";
+        public const string WarpTo = "flight.warp_to";
 
         /// <summary>Reads on the queued observation path.</summary>
         public static readonly string[] Reads = { MechJebStatus, Status };
         /// <summary>Operations that change the game. Reachable only through the host journal.</summary>
-        public static readonly string[] Mutations = { Ascent, ExecuteNode, PlanCircularize, PlanHohmann, Recover };
+        public static readonly string[] Mutations = { Ascent, ExecuteNode, PlanCircularize, PlanHohmann, Recover, NodeCreate, NodeUpdate, NodeDelete, WarpTo };
     }
 
     public static class AutopilotLimits

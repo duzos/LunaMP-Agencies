@@ -11,6 +11,8 @@ namespace KspControl.Contracts
         public const string ActionGroup = "flight.action_group";
         public const string Abort = "flight.abort";
         public const string Warp = "flight.warp";
+        /// <summary>Read-only: the patched-conic trajectory with and without the maneuver nodes. No lease.</summary>
+        public const string OrbitPrediction = "flight.orbit_prediction";
         /// <summary>Operations that change the game. They are reachable only through the host journal.</summary>
         public static readonly string[] Mutations = { SetControls, Stage, ActionGroup, Abort, Warp };
         public static bool IsMutation(string operation) { return Array.IndexOf(Mutations, operation) >= 0; }

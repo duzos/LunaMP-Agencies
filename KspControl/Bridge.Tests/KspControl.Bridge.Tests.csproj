@@ -70,6 +70,10 @@
     <Compile Include="../Bridge/RecoveryPorts.cs" Link="RecoveryPorts.cs" />
     <Compile Include="../Bridge/RecoveryMachine.cs" Link="RecoveryMachine.cs" />
     <Compile Include="../Bridge/ManeuverMath.cs" Link="ManeuverMath.cs" />
+    <Compile Include="../Bridge/NavigationPorts.cs" Link="NavigationPorts.cs" />
+    <Compile Include="../Bridge/NavigationJob.cs" Link="NavigationJob.cs" />
+    <Compile Include="../Bridge/OrbitPrediction.cs" Link="OrbitPrediction.cs" />
+    <Compile Include="../Bridge/MechJebService.Navigation.cs" Link="MechJebService.Navigation.cs" />
     <Compile Include="../Bridge/LaunchPort.cs" Link="LaunchPort.cs" />
     <Compile Include="../Bridge/SpendCapStore.cs" Link="SpendCapStore.cs" />
     <Compile Include="../Bridge/LaunchJob.cs" Link="LaunchJob.cs" />

@@ -10,7 +10,7 @@ namespace KspControl.Bridge
     /// drain. A mutation either refuses with a reason and a no-effect envelope, or registers a job and answers its envelope. The long work is
     /// <see cref="AutopilotRunner"/>'s, one step per frame. Plans finish inside admission and answer a terminal envelope.
     /// </summary>
-    internal sealed class MechJebService
+    internal sealed partial class MechJebService
     {
         private readonly ExecutionAuthority authority;
         private readonly AutopilotRunner runner;
@@ -20,11 +20,13 @@ namespace KspControl.Bridge
         private readonly Func<string> worldEpoch;
         private readonly Func<DateTime> utcNow;
         private readonly IRecoveryVesselPort recovery;
+        /// <summary>The stock node and warp side. Null leaves the node and warp operations unavailable.</summary>
+        private readonly INavigationPort navigation;
 
-        public MechJebService(ExecutionAuthority authority, AutopilotRunner runner, AutopilotJobs jobs, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<string> worldEpoch, Func<DateTime> utcNow = null, IRecoveryVesselPort recovery = null)
+        public MechJebService(ExecutionAuthority authority, AutopilotRunner runner, AutopilotJobs jobs, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<string> worldEpoch, Func<DateTime> utcNow = null, IRecoveryVesselPort recovery = null, INavigationPort navigation = null)
         {
             this.authority = authority; this.runner = runner; this.jobs = jobs; this.mechjeb = mechjeb; this.flight = flight;
-            this.worldEpoch = worldEpoch; this.utcNow = utcNow ?? (() => DateTime.UtcNow); this.recovery = recovery;
+            this.worldEpoch = worldEpoch; this.utcNow = utcNow ?? (() => DateTime.UtcNow); this.recovery = recovery; this.navigation = navigation;
         }
 
         public bool Running { get { return runner.Busy; } }
@@ -40,6 +42,10 @@ namespace KspControl.Bridge
                 case AutopilotOperations.PlanCircularize: return Mutate(request, AutopilotKind.PlanCircularize);
                 case AutopilotOperations.PlanHohmann: return Mutate(request, AutopilotKind.PlanHohmann);
                 case AutopilotOperations.Recover: return Mutate(request, AutopilotKind.Recover);
+                case AutopilotOperations.NodeCreate: return Navigating(request, AutopilotKind.NodeCreate);
+                case AutopilotOperations.NodeUpdate: return Navigating(request, AutopilotKind.NodeUpdate);
+                case AutopilotOperations.NodeDelete: return Navigating(request, AutopilotKind.NodeDelete);
+                case AutopilotOperations.WarpTo: return Navigating(request, AutopilotKind.WarpTo);
                 default: return Refuse(request, ControlReasons.OperationUnavailable, null);
             }
         }
@@ -92,10 +98,13 @@ namespace KspControl.Bridge
             if (problem == null && !OperationLimits.IsRequestId(requestId)) problem = "requestId must match [A-Za-z0-9_-]{8,128}";
             double altitude = 0, inclination = 0; bool autostage = false, all = false, ignite = true; string body = null;
             RecoveryRequest recover = null;
+            NavigationRequest nav = null;
             if (problem == null)
             {
                 switch (kind)
                 {
+                    case AutopilotKind.NodeCreate: case AutopilotKind.NodeUpdate: case AutopilotKind.NodeDelete: case AutopilotKind.WarpTo:
+                        problem = NavigationRequest.Parse(kind, args, out nav); break;
                     case AutopilotKind.Ascent:
                         problem = ReadAscentArguments(args, out altitude, out inclination, out autostage);
                         if (problem == null) problem = OptionalBool(args, "ignite", true, out ignite);
@@ -120,7 +129,8 @@ namespace KspControl.Bridge
 
             var fingerprint = OperationHash.Sha256Hex(request.Operation + "|" + leaseId + "|" + altitude.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" + inclination.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
                 + "|" + autostage + "|" + all + "|" + body + (ignite ? "" : "|noignite")
-                + (recover == null ? "" : "|recover:" + recover.TargetPeriapsisMeters.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":" + recover.BurnAtApoapsis + ":" + recover.ArmAltitudeMeters.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+                + (recover == null ? "" : "|recover:" + recover.TargetPeriapsisMeters.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":" + recover.BurnAtApoapsis + ":" + recover.ArmAltitudeMeters.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+                + (nav == null ? "" : "|" + nav.Canonical));
             var existing = jobs.Get(requestId);
             if (existing != null)
             {
@@ -147,10 +157,19 @@ namespace KspControl.Bridge
             {
                 RequestId = requestId, Kind = kind, Fingerprint = fingerprint, LeaseId = leaseId, Ticket = ticket, Effects = effects, VesselId = telemetry.VesselId,
                 TargetAltitudeMeters = altitude, InclinationDegrees = inclination, Autostage = autostage, Ignite = ignite, All = all, TargetBodyName = body, RecoveryRequest = recover, Last = telemetry,
-                CreatedUtc = utcNow(), UpdatedUtc = utcNow()
+                Navigation = nav, CreatedUtc = utcNow(), UpdatedUtc = utcNow()
             };
 
             if (kind == AutopilotKind.PlanCircularize || kind == AutopilotKind.PlanHohmann) return Plan(request, job);
+            if (kind == AutopilotKind.NodeCreate || kind == AutopilotKind.NodeUpdate || kind == AutopilotKind.NodeDelete) return EditNodes(request, job);
+            if (kind == AutopilotKind.WarpTo)
+            {
+                var warpRefusal = AdmitWarp(request, job);
+                if (warpRefusal != null) return warpRefusal;
+                jobs.Add(job);
+                runner.Start(job);
+                return Envelope(request, job);
+            }
 
             var refusal = CheckMechJeb(request, job, telemetry);
             if (refusal != null) return refusal;

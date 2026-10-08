@@ -284,7 +284,8 @@ the snapshot stays); a changed `.loadmeta` is reported. An overwrite guard (sent
 `owned_active_vessel_unavailable`) and reports situation, body, UT, altitude, vertical/surface/orbital speed, the orbit
 (`referenceBody` is the sphere of influence the vessel is in now, the proof for a Mun encounter; `predictedNextBody` is a forecast only),
 stage number with per-stage delta-V from the stock `VesselDeltaV`, resource totals, throttle, SAS/RCS/gear/lights/brakes, warp, crew count and
-MechJeb presence. Units are in the field names; stages and resources are capped at 32.
+MechJeb presence, `orbit.timeToSoiChangeSeconds` (null unless the current patch ends in an encounter or escape) and `maneuver` (`nodeCount` and
+`nextNode`: time, seconds from now, prograde/normal/radial delta-V and magnitude of the earliest node). Units are in the field names; stages and resources are capped at 32.
 
 The other five tools mutate. They need a held lease and a grant that lists the `flight.control` family on the `FLIGHT` facility
 (`grant issue ... --ops flight.control --facilities FLIGHT`; add `VAB` for an editor grant in the same file). The lease binds to
@@ -314,6 +315,57 @@ main thread the same frame (Stop does it immediately).
 Not live-verified: the `Vessel.OnFlyByWire` throttle write persisting across physics ticks, `ActionGroupList.SetGroup` firing the part actions for
 Gear/Light/Brakes/RCS/Abort (versus toggling only), `StageManager.CurrentStage` advancing within the frame of `ActivateNextStage`, the stage
 mass unit of `DeltaVStageInfo.stageMass`, `GameSettings` key polling, and LunaMP's veto of `TimeWarp.SetRate` against a real server.
+
+## Navigation (flight_orbit_prediction, flight_node_create, flight_node_update, flight_node_delete, flight_warp_to)
+
+For a crewed Mun free return: read the patched-conic prediction, place and iterate a stock maneuver node until the prediction shows a Mun
+encounter and a return periapsis of about 20..40 km at Kerbin, warp on rails to the burn, then burn (`mechjeb_execute_node` or `flight_set_controls`).
+
+`flight_orbit_prediction` is read-only and needs no lease; it answers only for an owned active vessel. It reports `nodes[]` (index sorted by time,
+the index the node tools take; UT, seconds from now, prograde/normal/radial delta-V, magnitude), `withoutNodes` (the vessel's own `vessel.orbit`
+chain following `nextPatch` while a patch ends in ENCOUNTER or ESCAPE; KSP ends it at the first node, `endsAtFirstNode`) and `withNodes` (the solver's
+`flightPlan` with every node applied; null without nodes). Each holds up to 6 patches (reference body, start/end UT, apoapsis (null when open) and
+periapsis altitude, inclination, eccentricity, start/end transition: INITIAL, ENCOUNTER, ESCAPE, MANEUVER, FINAL, IMPACT) and an assessment. The top-level
+`assessment` uses `withNodes` when there are nodes (`basis`): `munEncounter`, `munClosestApproachAltitudeMetres` (periapsis of the first Mun patch,
+negative is `munImpact`), `returnPeriapsisKerbin` (periapsis of the first Kerbin patch after the Mun), `returnsIntoAtmosphere`, `timeToSoiChangeSeconds`
+and `finalTransition`. The patch count is also limited by the game's conic patch limit setting.
+
+The four mutations belong to the existing `flight.autopilot` family (no new grant family): a grant that may have MechJeb burn the engines may also edit
+the flight plan and warp to the burn, the planning helpers that already create nodes live there, and the node edits and the warp share the autopilot
+runner and job registry, so a warp can never race a MechJeb burn (`autopilot_busy`). Same lease model, journal entity (`flight:vessel`) and
+`job_status` polling (`flight.autopilot_status`).
+
+- `flight_node_create(timeReference, timeSeconds?, prograde?, normal?, radial?)`: `timeReference` is `absolute` (timeSeconds is a UT), `in_seconds`,
+  `apoapsis` or `periapsis` (the next apsis of the current orbit; timeSeconds is an optional offset, at most 86400 s). The time must be 1 s to 10^7 s ahead.
+  Each delta-V component is -3000..3000 m/s and the magnitude at most 3000; at most 16 nodes. Uses `PatchedConicSolver.AddManeuverNode` then
+  `ManeuverNode.OnGizmoUpdated` (sets `DeltaV` (radial, normal, prograde) and `UT`, runs `UpdateFlightPlan`, refreshes a gizmo), so it takes effect at once.
+- `flight_node_update(nodeIndex, timeReference?, timeSeconds?, prograde?, normal?, radial?)`: given components replace, omitted ones are kept; the merged
+  node is bounded again. Without `timeReference` the node keeps its time, which must still be in the future.
+- `flight_node_delete(nodeIndex | all=true)`: `ManeuverNode.RemoveSelf` (gizmo and map target removed, then the solver re-plans).
+- Node edits finish inside admission and answer completed with `plan.node` and `plan.prediction` (the same report as `flight_orbit_prediction`). Refusals:
+  `no_maneuver_node`, `node_not_found`, `too_many_nodes`, `time_unavailable` (apoapsis of an open orbit), `plan_unavailable` (no solver),
+  `flight_planning_locked` (`GameVariables.UnlockedFlightPlanning` for the Mission Control level; level 1 outside career). A game exception during the
+  edit is `indeterminate` (`node_edit_failed`).
+- `flight_warp_to(target, timeSeconds?, leadSeconds?, nodeIndex?)`: `target` is `node` (nodeIndex, default 0), `soi` (the end of the first patch of the
+  current coast that ends in ENCOUNTER or ESCAPE), `absolute`, `in_seconds`, `apoapsis` or `periapsis`. The warp ends at target minus `leadSeconds`
+  (0..3600, default 60). A job: each frame the runner revalidates the authority and the vessel, then picks the highest rails index whose rate is within
+  the cap, the altitude limit (`TimeWarp.GetMaxRateForAltitude`) and any refused rate, and that needs at least 3 real seconds to use up what is left (so
+  stepping down never overshoots), and requests it through `TimeWarp.SetRate` (lower rates instantly). It completes at the stop time back at real time
+  (`overshootSeconds` reported); fails on a rising throttle (`warp_while_thrusting`), physics mode, a refused rate that leaves real time
+  (`warp_denied`) or 30 minutes of real time; is cancelled by a person dropping warp to real time (`warp_stopped_externally`), Stop, lease loss, a vessel
+  switch or flight-control input (takeover). Every ending returns warp to real time. Admission refuses `warp_mode_physics`, `warp_while_thrusting`,
+  `warp_not_allowed_here` (in the atmosphere while flying, or altitude limit index 0), `no_soi_change` and `warp_target_reached`.
+
+**Warp cap.** `flight_warp_to` goes up to 100000x, the top of the stock rails table (`NavigationLimits.MaxWarpToRate`); a Mun transfer of about 1.5
+game days takes over two minutes of real time at 1000x. LunaMP's server warp rules are not a rate cap: the server's `WarpMode` is `Subspace` or `None`,
+and the client's Harmony prefix on `TimeWarp.SetRate` refuses every rate change when warp is disabled, while waiting for a subspace id, or while
+spectating. Because every step goes through that setter, those rules still gate the warp, and the stock setter itself clamps by altitude and
+atmosphere. `flight_warp` keeps its 1000x cap: a manually set rate has no stop condition, `flight_warp_to` stops itself.
+
+Not live-verified: that `OnGizmoUpdated` without an attached gizmo is safe and immediate, the node delta-V frame (radial, normal, prograde), that the
+`vessel.orbit` chain and `flightPlan` are fresh in the frame after an edit (the solver re-plans in `UpdateFlightPlan`; the coast chain is rebuilt in the
+solver's `Update`), `RemoveSelf` on a node with no map target, that `TimeWarp.CurrentRateIndex` changes in the frame of `SetRate` (the veto window is 30
+frames), rails warp across a sphere-of-influence change, how LunaMP's subspace sync behaves after a long warp, and `GetFacilityLevel` in a career save.
 
 ## Launch (editor_launch)
 

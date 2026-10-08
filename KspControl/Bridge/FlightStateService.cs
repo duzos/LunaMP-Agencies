@@ -69,6 +69,12 @@ namespace KspControl.Bridge
                     ["altitudeLimitIndex"] = s.Warp.AltitudeLimitIndex < 0 ? JValue.CreateNull() : new JValue(s.Warp.AltitudeLimitIndex)
                 },
                 ["crew"] = new JObject { ["count"] = s.CrewCount },
+                ["maneuver"] = new JObject
+                {
+                    ["nodeCount"] = s.NodeCount,
+                    ["nextNode"] = s.NextNode == null ? JValue.CreateNull() : (JToken)OrbitPrediction.Node(s.NextNode, 0, s.UniversalTime),
+                    ["detail"] = "flight_orbit_prediction reports every node and the trajectory with and without them"
+                },
                 ["controlState"] = new JObject { ["mechJebPresent"] = s.MechJebPresent, ["detail"] = "presence only; no MechJeb state is read or controlled" },
                 ["epoch"] = worldEpoch()
             };
@@ -86,6 +92,7 @@ namespace KspControl.Bridge
                 ["periodSeconds"] = Finite(o.PeriodSeconds), ["timeToApoapsisSeconds"] = Finite(o.TimeToApoapsis), ["timeToPeriapsisSeconds"] = Finite(o.TimeToPeriapsis),
                 ["predictedNextBody"] = o.PredictedNextBody == null ? JValue.CreateNull() : new JValue(Text(o.PredictedNextBody)),
                 ["patchEndTransition"] = o.PatchEndTransition,
+                ["timeToSoiChangeSeconds"] = Finite(o.TimeToSoiChange),
                 ["predictedNote"] = "referenceBody is the sphere of influence the vessel is in now; predictedNextBody is a forecast, never proof of an encounter"
             };
         }

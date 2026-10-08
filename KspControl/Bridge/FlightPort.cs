@@ -41,6 +41,8 @@ namespace KspControl.Bridge
         /// <summary>The predicted next patch, never an achieved encounter. Null when the orbit has no next patch.</summary>
         public string PredictedNextBody { get; set; }
         public string PatchEndTransition { get; set; }
+        /// <summary>Seconds until the current patch ends in an ENCOUNTER or ESCAPE; NaN when it does not.</summary>
+        public double TimeToSoiChange { get; set; } = double.NaN;
     }
 
     /// <summary>The binary controls the vessel reports. Null when unknown.</summary>
@@ -94,6 +96,9 @@ namespace KspControl.Bridge
         public int PartCount { get; set; }
         /// <summary>True when the MechJeb flight computer is present on this vessel. Presence only: nothing is read from it.</summary>
         public bool MechJebPresent { get; set; }
+        /// <summary>The earliest maneuver node, or null when there is none.</summary>
+        public ManeuverNodeInfo NextNode { get; set; }
+        public int NodeCount { get; set; }
     }
 
     /// <summary>A part module that a stage or an action group would trigger.</summary>

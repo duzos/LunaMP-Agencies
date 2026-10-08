@@ -165,6 +165,7 @@ namespace KspControl.BridgeTests
         public readonly FakeFlight Staging = new FakeFlight();
         /// <summary>The recovered vessel: a crewed capsule in a 80 km orbit with a service stage below a decoupler (see <see cref="FakeRecoveryPort"/>).</summary>
         public readonly FakeRecoveryPort Recovery = FakeRecoveryPort.Capsule("vessel-1");
+        public readonly FakeNavigationPort Navigation = new FakeNavigationPort();
         public readonly AutopilotJobs Jobs = new AutopilotJobs();
         public readonly AutopilotOptions Options = new AutopilotOptions();
         public readonly AutopilotRunner Runner;
@@ -179,8 +180,8 @@ namespace KspControl.BridgeTests
             Authority = new ExecutionAuthority(() => Clock.Milliseconds, GrantMapping.KnownEffects, 2000, Store, () => Utc);
             Pump = new ControlPump(Authority, null, Context);
             Staging.Snap.VesselId = "vessel-1"; Staging.Snap.Situation = "PRELAUNCH"; Staging.Snap.Controls.CurrentStage = 2; Staging.Snap.Controls.StageCount = 2;
-            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options, Staging, Recovery);
-            Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc, Recovery);
+            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options, Staging, Recovery, Navigation);
+            Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc, Recovery, Navigation);
             Authority.UpdateContext(Context.CurrentContext(), Context.CurrentBinding(), AuthorityHelpers.ValidStatus());
             Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect }, facilities ?? new[] { FlightEffects.Facility })));
             if (lease) AcquireLease();
@@ -201,6 +202,7 @@ namespace KspControl.BridgeTests
         public void Frame(long milliseconds = 16)
         {
             Clock.Milliseconds += milliseconds;
+            Navigation.Advance(milliseconds / 1000.0);
             if (Lease != null && Heartbeats) Authority.Heartbeat(Lease);
             Pump.Update();
             Runner.Update();

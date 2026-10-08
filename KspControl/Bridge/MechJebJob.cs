@@ -7,7 +7,7 @@ using Newtonsoft.Json.Linq;
 
 namespace KspControl.Bridge
 {
-    internal enum AutopilotKind { Ascent, ExecuteNode, PlanCircularize, PlanHohmann, Recover }
+    internal enum AutopilotKind { Ascent, ExecuteNode, PlanCircularize, PlanHohmann, Recover, NodeCreate, NodeUpdate, NodeDelete, WarpTo }
 
     /// <summary>The user object this bridge puts in MechJeb's user pools. Its identity is how the adapter tells our hold from anyone else's.</summary>
     internal sealed class BridgeUser
@@ -32,6 +32,14 @@ namespace KspControl.Bridge
         public long IgniteDelayMs = 1000;
         /// <summary>Phase machine timing of flight.autopilot_recover.</summary>
         public RecoveryOptions Recovery = new RecoveryOptions();
+        /// <summary>The longest real time a warp_to job may run.</summary>
+        public long WarpTimeoutMs = NavigationLimits.WarpTimeoutMs;
+        /// <summary>Frames after a rate request before an unchanged rate counts as refused (the game or LunaMP's warp rules vetoed it).</summary>
+        public int WarpVetoFrames = 30;
+        /// <summary>Frames after which a refused rate is tried again (the altitude limit rises as the vessel climbs).</summary>
+        public int WarpCeilingResetFrames = 600;
+        /// <summary>A rate is used only while it needs at least this much real time to cover what is left, so the step down never overshoots.</summary>
+        public double WarpMarginRealSeconds = 3;
     }
 
     /// <summary>
@@ -76,6 +84,13 @@ namespace KspControl.Bridge
         public RecoveryRequest RecoveryRequest { get; set; }
         /// <summary>The admission preview of a recovery: separation candidates and topology warnings.</summary>
         public JObject RecoveryPreview { get; set; }
+        /// <summary>The parsed arguments of a node or warp job.</summary>
+        public NavigationRequest Navigation { get; set; }
+        /// <summary>warp_to: the target time, and the time the warp ends (target minus lead).</summary>
+        public double TargetUniversalTime { get; set; } = double.NaN;
+        public double StopUniversalTime { get; set; } = double.NaN;
+        public WarpReading LastWarp { get; set; }
+        public double OvershootSeconds { get; set; } = double.NaN;
         public DateTime CreatedUtc { get; set; }
         public DateTime UpdatedUtc { get; set; }
         public DateTime? CompletedUtc { get; set; }
@@ -90,6 +105,9 @@ namespace KspControl.Bridge
         internal bool? SavedAutowarp;
         internal bool IgniteAttempted;
         internal RecoveryMachine Recovery;
+        /// <summary>warp_to: the rate index last requested and the frame of the request, the ceiling a refusal set, and whether a raised rate ever took.</summary>
+        internal int WarpRequested = -1, WarpRequestedFrame, WarpCeiling = int.MaxValue, WarpCeilingFrame, WarpChanges;
+        internal bool WarpAchieved;
 
         public static string OperationName(AutopilotKind kind)
         {
@@ -99,6 +117,10 @@ namespace KspControl.Bridge
                 case AutopilotKind.ExecuteNode: return "autopilot_execute_node";
                 case AutopilotKind.PlanCircularize: return "autopilot_plan_circularize";
                 case AutopilotKind.Recover: return "autopilot_recover";
+                case AutopilotKind.NodeCreate: return "node_create";
+                case AutopilotKind.NodeUpdate: return "node_update";
+                case AutopilotKind.NodeDelete: return "node_delete";
+                case AutopilotKind.WarpTo: return "warp_to";
                 default: return "autopilot_plan_hohmann";
             }
         }
@@ -144,7 +166,25 @@ namespace KspControl.Bridge
                 envelope["executorState"] = NodeState;
                 envelope["nodesAtStart"] = StartNodes;
             }
-            else if (Plan != null) envelope["plan"] = Plan;
+            else if (Kind == AutopilotKind.WarpTo)
+            {
+                if (Navigation != null) envelope["request"] = Navigation.Requested;
+                var w = LastWarp;
+                envelope["warp"] = new JObject
+                {
+                    ["targetUniversalTimeSeconds"] = Finite(TargetUniversalTime), ["stopUniversalTimeSeconds"] = Finite(StopUniversalTime),
+                    ["universalTimeSeconds"] = w == null ? JValue.CreateNull() : Finite(w.UniversalTime),
+                    ["remainingSeconds"] = w == null ? JValue.CreateNull() : Finite(StopUniversalTime - w.UniversalTime),
+                    ["rateIndex"] = w == null ? JValue.CreateNull() : new JValue(w.Index), ["effectiveRate"] = w == null ? JValue.CreateNull() : Finite(w.Rate),
+                    ["ceilingIndex"] = WarpCeiling == int.MaxValue ? JValue.CreateNull() : new JValue(WarpCeiling), ["rateChanges"] = WarpChanges,
+                    ["capEffectiveRate"] = NavigationLimits.MaxWarpToRate, ["overshootSeconds"] = Finite(OvershootSeconds)
+                };
+            }
+            else
+            {
+                if (Navigation != null) envelope["request"] = Navigation.Requested;
+                if (Plan != null) envelope["plan"] = Plan;
+            }
             if (Detail != null) envelope["detail"] = Detail;
             return envelope;
         }

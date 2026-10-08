@@ -37,6 +37,8 @@ namespace KspControl.Bridge
         internal FlightOperationService FlightMutations { get; set; }
         /// <summary>MechJeb autopilot status and jobs. Null leaves them unavailable.</summary>
         internal MechJebService Autopilot { get; set; }
+        /// <summary>flight.orbit_prediction. Null leaves it unavailable.</summary>
+        internal OrbitPredictionService OrbitPrediction { get; set; }
         /// <summary>Admission and status for editor.launch. Null leaves it unavailable.</summary>
         internal LaunchService Launches { get; set; }
         public void RefreshContext()
@@ -106,6 +108,11 @@ namespace KspControl.Bridge
                     var flightResult = FlightState.State();
                     if (flightResult.Reason != null) return Fail(request, flightResult.Reason);
                     data = flightResult.Data; break;
+                case KspControl.Contracts.FlightOperations.OrbitPrediction:
+                    if (OrbitPrediction == null) return Fail(request, "operation_unavailable");
+                    var predicted = OrbitPrediction.Predict();
+                    if (predicted.Reason != null) return Fail(request, predicted.Reason);
+                    data = predicted.Data; break;
                 case KspControl.Contracts.FlightOperations.SetControls: case KspControl.Contracts.FlightOperations.Stage: case KspControl.Contracts.FlightOperations.ActionGroup:
                 case KspControl.Contracts.FlightOperations.Abort: case KspControl.Contracts.FlightOperations.Warp:
                     // Flight mutations answer with their own envelope: not an observation, so no readOnly marker and no size cap.
@@ -115,6 +122,7 @@ namespace KspControl.Bridge
                     return flight;
                 case AutopilotOperations.MechJebStatus: case AutopilotOperations.Status:
                 case AutopilotOperations.Ascent: case AutopilotOperations.ExecuteNode: case AutopilotOperations.PlanCircularize: case AutopilotOperations.PlanHohmann: case AutopilotOperations.Recover:
+                case AutopilotOperations.NodeCreate: case AutopilotOperations.NodeUpdate: case AutopilotOperations.NodeDelete: case AutopilotOperations.WarpTo:
                     // Autopilot operations answer with their own envelope, like the editor mutations.
                     if (Autopilot == null) return Fail(request, "operation_unavailable");
                     var autopilot = Autopilot.Handle(request);
@@ -175,7 +183,7 @@ namespace KspControl.Bridge
         {
             ["bridgeVersion"] = BridgeVersion,
             ["supported"] = new JArray("bridge.capabilities", "game.context", "parts.list", ConstructionOperations.Catalog, "parts.definition", "editor.snapshot", EditorOperations.State, EditorOperations.Engineering, "editor.inspect", "vessel.inspect", "part.controls", "science.inspect",
-                EditorOperations.OperationStatus, CraftOperations.List, KspControl.Contracts.FlightOperations.State,
+                EditorOperations.OperationStatus, CraftOperations.List, KspControl.Contracts.FlightOperations.State, KspControl.Contracts.FlightOperations.OrbitPrediction,
                 AutopilotOperations.MechJebStatus, AutopilotOperations.Status),
             ["mutations"] = new JArray((Operations == null ? new string[0] : EditorOperations.Mutations).Concat(FlightMutations == null ? new string[0] : KspControl.Contracts.FlightOperations.Mutations)
                 .Concat(Autopilot == null ? new string[0] : AutopilotOperations.Mutations)),

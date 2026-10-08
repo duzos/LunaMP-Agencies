@@ -134,7 +134,7 @@ namespace KspControl.HostTests;
   foreach(var tool in Tools()) foreach(var parameter in tool.GetParameters())
   {
    if(parameter.ParameterType!=typeof(CancellationToken)) foreach(var word in Forbidden) Assert.IsFalse(parameter.Name!.Contains(word,StringComparison.OrdinalIgnoreCase),$"{tool.Name}({parameter.Name}) looks like grant input"); // the SDK injects CancellationToken; it is not model-facing
-   Assert.IsTrue(parameter.ParameterType==typeof(string)||parameter.ParameterType==typeof(int)||parameter.ParameterType==typeof(double)||parameter.ParameterType==typeof(bool)||parameter.ParameterType==typeof(bool?)||parameter.ParameterType==typeof(double?)||parameter.ParameterType==typeof(CancellationToken),$"{tool.Name}({parameter.Name}) has an unexpected type {parameter.ParameterType}");
+   Assert.IsTrue(parameter.ParameterType==typeof(string)||parameter.ParameterType==typeof(int)||parameter.ParameterType==typeof(int?)||parameter.ParameterType==typeof(double)||parameter.ParameterType==typeof(bool)||parameter.ParameterType==typeof(bool?)||parameter.ParameterType==typeof(double?)||parameter.ParameterType==typeof(CancellationToken),$"{tool.Name}({parameter.Name}) has an unexpected type {parameter.ParameterType}");
   }
   foreach(var tool in Tools()) Assert.AreEqual(typeof(Task<string>),tool.ReturnType,tool.Name+" returns a JSON string only");
  }

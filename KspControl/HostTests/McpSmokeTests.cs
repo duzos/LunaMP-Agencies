@@ -106,6 +106,19 @@ namespace KspControl.HostTests;
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId"},Schema("flight_abort").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","rateIndex"},Schema("flight_warp").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
    Assert.AreEqual(7,Schema("flight_warp").GetProperty("properties").GetProperty("rateIndex").GetProperty("maximum").GetInt32());
+   // Navigation: the prediction is read-only (no arguments); the node and warp tools carry a request id and a lease and are bounded.
+   foreach(var expected in new[]{"flight_orbit_prediction","flight_node_create","flight_node_update","flight_node_delete","flight_warp_to"}) CollectionAssert.Contains(names,expected);
+   Assert.IsFalse(Schema("flight_orbit_prediction").TryGetProperty("properties",out var predictionProperties) && predictionProperties.EnumerateObject().Any());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","timeReference","timeSeconds","prograde","normal","radial"},Schema("flight_node_create").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","timeReference"},Schema("flight_node_create").GetProperty("required").EnumerateArray().Select(p=>p.GetString()).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","nodeIndex","timeReference","timeSeconds","prograde","normal","radial"},Schema("flight_node_update").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","nodeIndex"},Schema("flight_node_update").GetProperty("required").EnumerateArray().Select(p=>p.GetString()).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","nodeIndex","all"},Schema("flight_node_delete").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","target","timeSeconds","leadSeconds","nodeIndex"},Schema("flight_warp_to").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","target"},Schema("flight_warp_to").GetProperty("required").EnumerateArray().Select(p=>p.GetString()).ToArray());
+   Assert.AreEqual(3000,Schema("flight_node_create").GetProperty("properties").GetProperty("prograde").GetProperty("maximum").GetInt32());
+   Assert.AreEqual(15,Schema("flight_node_update").GetProperty("properties").GetProperty("nodeIndex").GetProperty("maximum").GetInt32());
+   Assert.AreEqual(3600,Schema("flight_warp_to").GetProperty("properties").GetProperty("leadSeconds").GetProperty("maximum").GetInt32());
    var flightState=await Request(new { jsonrpc="2.0",id=11,method="tools/call",@params=new { name="flight_state",arguments=new {} } },11);
    using var flightStateResult=JsonDocument.Parse(flightState.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
    Assert.AreEqual("credential_not_configured",flightStateResult.RootElement.GetProperty("ReasonCode").GetString());
@@ -115,6 +128,15 @@ namespace KspControl.HostTests;
    var flightBad=await Request(new { jsonrpc="2.0",id=13,method="tools/call",@params=new { name="flight_set_controls",arguments=new { requestId="flight-ctl-1",leaseId="0123456789abcdef0123456789abcdef",throttle=2 } } },13);
    using var flightBadResult=JsonDocument.Parse(flightBad.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
    Assert.AreEqual("invalid_argument",flightBadResult.RootElement.GetProperty("ReasonCode").GetString());
+   var prediction=await Request(new { jsonrpc="2.0",id=14,method="tools/call",@params=new { name="flight_orbit_prediction",arguments=new {} } },14);
+   using var predictionResult=JsonDocument.Parse(prediction.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("credential_not_configured",predictionResult.RootElement.GetProperty("ReasonCode").GetString());
+   var warpNoLease=await Request(new { jsonrpc="2.0",id=15,method="tools/call",@params=new { name="flight_warp_to",arguments=new { requestId="warp-smoke-1",leaseId="0123456789abcdef0123456789abcdef",target="node" } } },15);
+   using var warpNoLeaseResult=JsonDocument.Parse(warpNoLease.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("lease_required",warpNoLeaseResult.RootElement.GetProperty("ReasonCode").GetString());
+   var nodeBad=await Request(new { jsonrpc="2.0",id=16,method="tools/call",@params=new { name="flight_node_create",arguments=new { requestId="node-smoke-1",leaseId="0123456789abcdef0123456789abcdef",timeReference="whenever" } } },16);
+   using var nodeBadResult=JsonDocument.Parse(nodeBad.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+   Assert.AreEqual("invalid_argument",nodeBadResult.RootElement.GetProperty("ReasonCode").GetString());
   } finally { process.StandardInput.Close(); if(!process.WaitForExit(1000)) process.Kill(true); await errors; }
  }
 }

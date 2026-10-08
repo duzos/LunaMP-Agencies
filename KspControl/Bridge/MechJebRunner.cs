@@ -283,7 +283,12 @@ namespace KspControl.Bridge
             if (!w.Rails) { Finish(job, JobStatuses.Failed, NavigationReasons.WarpModePhysics, "time warp left rails mode; the warp was stopped"); return; }
             if (!(remaining > 0))
             {
-                if (w.Index > 0) { Request(job, 0, true); job.Phase = "arriving"; return; }
+                if (w.Index > 0)
+                {
+                    // The drop to real time is refused (LunaMP's warp rules or the stock setter): fail fast instead of waiting out the timeout.
+                    if (job.DropAttempts >= options.WarpDropRefusals) { Finish(job, JobStatuses.Failed, NavigationReasons.WarpDropRefused, "the game refused to return time warp to real time " + job.DropAttempts + " times in a row"); return; }
+                    job.DropAttempts++; Request(job, 0, true); job.Phase = "arriving"; return;
+                }
                 job.OvershootSeconds = -remaining;
                 Finish(job, JobStatuses.Completed, null, "arrived: the warp stopped at the target minus the lead");
                 return;
@@ -344,11 +349,11 @@ namespace KspControl.Bridge
             if (job.Kind == AutopilotKind.WarpTo)
             {
                 // The warp was the runner's: whatever ended the job, return to real time. The throttle was never the runner's to cut.
-                if (!job.Dispatched || navigation == null) return;
+                if (navigation == null) return;
                 try
                 {
-                    var w = navigation.ReadWarp();
-                    if (w == null || w.Index > 0) navigation.SetWarpRate(0, true);
+                    // Always, even if this job never requested a rate: it must not leave a warp somebody else started running.
+                    navigation.SetWarpRate(0, true);
                     job.EffectsApplied.Add("warp_stopped");
                 }
                 catch (Exception) { job.EffectsApplied.Add("warp_stop_failed"); }

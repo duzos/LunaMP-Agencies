@@ -85,10 +85,10 @@ namespace KspControl.Bridge
         public bool Encounter;
         public int EncounterPatchIndex = -1;
         public double EncounterEntryUniversalTime = double.NaN;
-        /// <summary>The periapsis altitude of the first patch around the target: the closest approach of the flyby.</summary>
+        /// <summary>The periapsis altitude of the last (post-burn) patch around the target: the closest approach of the flyby.</summary>
         public double EncounterPeriapsisAltitude = double.NaN;
         public int ReturnPatchIndex = -1;
-        /// <summary>The periapsis altitude of the first home-body patch after the encounter: what a free return needs (about 20..40 km for Kerbin).</summary>
+        /// <summary>The periapsis altitude of the last patch of the first home-body run after the encounter (the post-burn patch when a correction node sits on the return): what a free return needs (about 20..40 km for Kerbin).</summary>
         public double ReturnPeriapsisAltitude = double.NaN;
         public double ReturnAtmosphereTop = double.NaN;
         /// <summary>Seconds from now to the first sphere-of-influence change (ENCOUNTER or ESCAPE) on the trajectory.</summary>
@@ -99,14 +99,38 @@ namespace KspControl.Bridge
         {
             var a = new TrajectoryAssessment { TargetBody = targetBody, HomeBody = homeBody };
             if (patches == null) return a;
+            // A node inside a body's sphere of influence splits the body into before/after-node patches, so the answer is the LAST patch of the final
+            // unbroken run of target patches (the post-burn one), and the last patch of the first home run after it.
+            var runStart = -1; var runEnd = -1;
             for (var i = 0; i < patches.Count; i++)
             {
                 var p = patches[i];
                 if (p == null) continue;
-                if (!a.Encounter && string.Equals(p.ReferenceBody, targetBody, StringComparison.Ordinal))
-                { a.Encounter = true; a.EncounterPatchIndex = i; a.EncounterEntryUniversalTime = p.StartUniversalTime; a.EncounterPeriapsisAltitude = p.PeriapsisAltitude; }
-                else if (a.Encounter && a.ReturnPatchIndex < 0 && string.Equals(p.ReferenceBody, homeBody, StringComparison.Ordinal))
-                { a.ReturnPatchIndex = i; a.ReturnPeriapsisAltitude = p.PeriapsisAltitude; a.ReturnAtmosphereTop = p.AtmosphereTopMeters; }
+                if (string.Equals(p.ReferenceBody, targetBody, StringComparison.Ordinal))
+                {
+                    if (runEnd != i - 1 || runStart < 0 || runEnd < 0) runStart = i;
+                    runEnd = i;
+                }
+            }
+            if (runEnd >= 0)
+            {
+                var last = patches[runEnd];
+                a.Encounter = true; a.EncounterPatchIndex = runEnd; a.EncounterEntryUniversalTime = patches[runStart].StartUniversalTime;
+                a.EncounterPeriapsisAltitude = last.PeriapsisAltitude;
+                var inReturn = false;
+                for (var i = runEnd + 1; i < patches.Count; i++)
+                {
+                    var p = patches[i];
+                    if (p == null) continue;
+                    if (string.Equals(p.ReferenceBody, homeBody, StringComparison.Ordinal))
+                    { inReturn = true; a.ReturnPatchIndex = i; a.ReturnPeriapsisAltitude = p.PeriapsisAltitude; a.ReturnAtmosphereTop = p.AtmosphereTopMeters; }
+                    else if (inReturn) break;
+                }
+            }
+            for (var i = 0; i < patches.Count; i++)
+            {
+                var p = patches[i];
+                if (p == null) continue;
                 if (double.IsNaN(a.TimeToSoiChange) && (p.EndTransition == "ENCOUNTER" || p.EndTransition == "ESCAPE")) a.TimeToSoiChange = p.EndUniversalTime - now;
                 a.FinalTransition = p.EndTransition;
             }

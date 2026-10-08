@@ -218,5 +218,11 @@ namespace KspControl.BridgeTests
             ConstructionCatalogMapper.Build(new[] { "mk1pod.v2", "fuelTankSmall" }, reader, null);
             CollectionAssert.AreEqual(new[] { "mk1pod.v2", "fuelTankSmall" }, reader.Reads);
         }
+        [TestMethod] public void AReStockHeatShieldWithAStageableJettisonIsStillAHeatShield()
+        {
+            var mods = new[] { "ModuleAblator", "ModuleDecouple", "ModuleJettison" };
+            Assert.AreEqual("heatshield", ConstructionCatalogMapper.MapCategory(mods, new[] { "Ablator" }, "Thermal", stageable: true, decouplerStageable: false));
+            Assert.AreEqual("decoupler", ConstructionCatalogMapper.MapCategory(mods, new[] { "Ablator" }, "Thermal", stageable: true, decouplerStageable: true));
+        }
     }
 }

@@ -36,6 +36,8 @@ namespace KspControl.Bridge
         public bool Buildable { get; set; }
         /// <summary>True when any prefab module reports IsStageable() (respects stagingEnabled).</summary>
         public bool Stageable { get; set; }
+        /// <summary>True when a decoupler module (ModuleDecouple/ModuleAnchoredDecoupler) itself is stageable. A ReStock heat shield has a stageable ModuleJettison but an unstaged decoupler.</summary>
+        public bool DecouplerStageable { get; set; }
         /// <summary>Null when ResearchAndDevelopment is absent (sandbox).</summary>
         public bool? TechAvailable { get; set; }
         /// <summary>Null when ResearchAndDevelopment is absent (sandbox).</summary>
@@ -112,13 +114,14 @@ namespace KspControl.Bridge
         /// Role from modules first, then propellant resources, then the KSP editor category. The KSP category fallback matters with fuel-switch mods
         /// (CryoTanks/B9PartSwitch): they remove the RESOURCE nodes from stock tanks, so a prefab FL-T200 carries no LiquidFuel/Oxidizer but is still category FuelTank.
         /// </summary>
-        public static string MapCategory(IEnumerable<string> modules, IEnumerable<string> resources, string kspCategory = null, bool stageable = false)
+        public static string MapCategory(IEnumerable<string> modules, IEnumerable<string> resources, string kspCategory = null, bool stageable = false, bool? decouplerStageable = null)
         {
             var m = new HashSet<string>(modules ?? new string[0], StringComparer.Ordinal);
             var r = new HashSet<string>(resources ?? new string[0], StringComparer.Ordinal);
             if (m.Contains("ModuleCommand")) return Command;
             // A heat shield is an ablator whose decoupler is unstaged; a stageable one is a staged decoupler.
-            if (m.Contains("ModuleAblator") && m.Contains("ModuleDecouple") && !stageable) return HeatShield;
+            // Live 2026-10-08: ReStock HeatShield1 carries a stageable ModuleJettison, so only the decoupler's own staging decides (falls back to the part flag when unknown).
+            if (m.Contains("ModuleAblator") && m.Contains("ModuleDecouple") && !(decouplerStageable ?? stageable)) return HeatShield;
             if (m.Contains("ModuleDecouple") || m.Contains("ModuleAnchoredDecoupler")) return Decoupler;
             if (m.Contains("ModuleEngines") || m.Contains("ModuleEnginesFX")) return Engine;
             if (m.Contains("ModuleParachute")) return Parachute;
@@ -213,7 +216,7 @@ namespace KspControl.Bridge
             {
                 ["name"] = part.Name,
                 ["found"] = true,
-                ["category"] = MapCategory(part.ModuleNames, part.ResourceNames, part.KspCategory, part.Stageable),
+                ["category"] = MapCategory(part.ModuleNames, part.ResourceNames, part.KspCategory, part.Stageable, part.DecouplerStageable),
                 ["stageable"] = part.Stageable,
                 ["kspCategory"] = part.KspCategory,
                 ["buildable"] = part.Buildable,

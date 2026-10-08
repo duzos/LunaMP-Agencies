@@ -36,6 +36,7 @@ namespace KspControl.Bridge
             }
             foreach (PartModule module in prefab.Modules) if (module != null && source.ModuleNames.Count < 128) source.ModuleNames.Add(module.moduleName);
             foreach (PartModule module in prefab.Modules) if (module != null && module.IsStageable()) { source.Stageable = true; break; }
+            foreach (PartModule module in prefab.Modules) if ((module is ModuleDecouple || module is ModuleAnchoredDecoupler) && module.IsStageable()) { source.DecouplerStageable = true; break; }
             foreach (PartResource resource in prefab.Resources) if (resource != null && source.ResourceNames.Count < 32) source.ResourceNames.Add(resource.resourceName);
             // Prefab nodes are the base layer. The default variant's list is an override (possibly empty), overlaid by id in the mapper.
             AddStackNodes(source.StackNodes, prefab.attachNodes);

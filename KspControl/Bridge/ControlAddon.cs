@@ -73,7 +73,7 @@ namespace KspControl.Bridge
                 var autopilotJobs = new AutopilotJobs();
                 var autopilotPort = new UnityAutopilotFlightPort();
                 var mechjeb = new MechJebAdapter(MechJebSources.Core, MechJebSources.Vessel);
-                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, autopilotPort, () => MonotonicClock.Milliseconds);
+                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, autopilotPort, () => MonotonicClock.Milliseconds, staging: flightPort);
                 observations.Autopilot = new MechJebService(authority, autopilotRunner, autopilotJobs, mechjeb, autopilotPort, () => observations.WorldEpoch);
                 observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.

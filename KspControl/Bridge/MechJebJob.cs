@@ -28,6 +28,8 @@ namespace KspControl.Bridge
         public int HumanDebounceFrames = 2;
         /// <summary>The competitor scan reflects over a dozen modules, so it runs on every Nth frame.</summary>
         public int ScanEveryFrames = 5;
+        /// <summary>How long after engaging the ascent the bridge waits before firing the first stage of a vessel still on the pad.</summary>
+        public long IgniteDelayMs = 1000;
     }
 
     /// <summary>
@@ -53,6 +55,11 @@ namespace KspControl.Bridge
         public double TargetAltitudeMeters { get; set; }
         public double InclinationDegrees { get; set; }
         public bool Autostage { get; set; }
+        /// <summary>Ascent: fire the first stage once if MechJeb waits on the pad for a launch (autostage only).</summary>
+        public bool Ignite { get; set; } = true;
+        /// <summary>Null until the bridge tried to fire the first stage; then whether the stage number advanced.</summary>
+        public bool? IgnitedByBridge { get; set; }
+        public JObject Ignition { get; set; }
         public bool All { get; set; }
         public string TargetBodyName { get; set; }
         public AscentSettingsView Settings { get; set; }
@@ -76,6 +83,7 @@ namespace KspControl.Bridge
         internal bool Engaged;
         /// <summary>The node executor's Autowarp before we forced it off, restored on release.</summary>
         internal bool? SavedAutowarp;
+        internal bool IgniteAttempted;
 
         public static string OperationName(AutopilotKind kind)
         {
@@ -107,12 +115,14 @@ namespace KspControl.Bridge
                 };
             if (Kind == AutopilotKind.Ascent)
             {
-                envelope["request"] = new JObject { ["targetAltitudeMeters"] = TargetAltitudeMeters, ["inclinationDegrees"] = InclinationDegrees, ["autostage"] = Autostage };
+                envelope["request"] = new JObject { ["targetAltitudeMeters"] = TargetAltitudeMeters, ["inclinationDegrees"] = InclinationDegrees, ["autostage"] = Autostage, ["ignite"] = Ignite };
                 if (Settings != null)
                     envelope["configured"] = new JObject { ["ascentType"] = Settings.AscentType, ["targetAltitudeMeters"] = Settings.TargetAltitudeMeters, ["inclinationDegrees"] = Settings.InclinationDegrees, ["autostage"] = Settings.Autostage };
                 envelope["mechjebStatus"] = ModuleStatus;
                 envelope["orbitReached"] = OrbitReached;
                 envelope["ascentFinished"] = AscentFinished.HasValue ? (JToken)AscentFinished.Value : JValue.CreateNull();
+                envelope["ignitedByBridge"] = IgnitedByBridge.HasValue ? (JToken)IgnitedByBridge.Value : JValue.CreateNull();
+                if (Ignition != null) envelope["ignition"] = Ignition;
             }
             else if (Kind == AutopilotKind.ExecuteNode)
             {

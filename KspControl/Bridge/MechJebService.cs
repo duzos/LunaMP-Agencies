@@ -88,12 +88,15 @@ namespace KspControl.Bridge
             string requestId;
             var problem = Text(args, "requestId", out requestId);
             if (problem == null && !OperationLimits.IsRequestId(requestId)) problem = "requestId must match [A-Za-z0-9_-]{8,128}";
-            double altitude = 0, inclination = 0; bool autostage = false, all = false; string body = null;
+            double altitude = 0, inclination = 0; bool autostage = false, all = false, ignite = true; string body = null;
             if (problem == null)
             {
                 switch (kind)
                 {
-                    case AutopilotKind.Ascent: problem = ReadAscentArguments(args, out altitude, out inclination, out autostage); break;
+                    case AutopilotKind.Ascent:
+                        problem = ReadAscentArguments(args, out altitude, out inclination, out autostage);
+                        if (problem == null) problem = OptionalBool(args, "ignite", true, out ignite);
+                        break;
                     case AutopilotKind.ExecuteNode: problem = Bool(args, "all", out all); break;
                     case AutopilotKind.PlanHohmann:
                         problem = Text(args, "targetBodyName", out body);
@@ -112,7 +115,7 @@ namespace KspControl.Bridge
             var leaseId = request.LeaseId.ToLowerInvariant();
 
             var fingerprint = OperationHash.Sha256Hex(request.Operation + "|" + leaseId + "|" + altitude.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" + inclination.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
-                + "|" + autostage + "|" + all + "|" + body);
+                + "|" + autostage + "|" + all + "|" + body + (ignite ? "" : "|noignite"));
             var existing = jobs.Get(requestId);
             if (existing != null)
             {
@@ -138,7 +141,7 @@ namespace KspControl.Bridge
             var job = new AutopilotJob
             {
                 RequestId = requestId, Kind = kind, Fingerprint = fingerprint, LeaseId = leaseId, Ticket = ticket, Effects = effects, VesselId = telemetry.VesselId,
-                TargetAltitudeMeters = altitude, InclinationDegrees = inclination, Autostage = autostage, All = all, TargetBodyName = body, Last = telemetry,
+                TargetAltitudeMeters = altitude, InclinationDegrees = inclination, Autostage = autostage, Ignite = ignite, All = all, TargetBodyName = body, Last = telemetry,
                 CreatedUtc = utcNow(), UpdatedUtc = utcNow()
             };
 
@@ -212,6 +215,16 @@ namespace KspControl.Bridge
             value = false;
             var token = args[name];
             if (token == null || token.Type != JTokenType.Boolean) return name + " is required and must be a boolean";
+            value = (bool)token;
+            return null;
+        }
+
+        private static string OptionalBool(JObject args, string name, bool fallback, out bool value)
+        {
+            value = fallback;
+            var token = args[name];
+            if (token == null || token.Type == JTokenType.Null) return null;
+            if (token.Type != JTokenType.Boolean) return name + " must be a boolean";
             value = (bool)token;
             return null;
         }

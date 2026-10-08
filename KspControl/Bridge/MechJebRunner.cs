@@ -1,5 +1,7 @@
 using System;
+using System.Linq;
 using KspControl.Contracts;
+using Newtonsoft.Json.Linq;
 
 namespace KspControl.Bridge
 {
@@ -17,11 +19,13 @@ namespace KspControl.Bridge
         private readonly Func<long> clock;
         private readonly Func<DateTime> utcNow;
         private readonly AutopilotOptions options;
+        /// <summary>The flight_stage staging path (classifier, stock ActivateNextStage). Null: the ascent never fires a stage itself.</summary>
+        private readonly IFlightPort staging;
 
         public AutopilotJob Current { get; private set; }
         public bool Busy { get { return Current != null && !Current.Terminal; } }
 
-        public AutopilotRunner(ExecutionAuthority authority, IEditorContextSource source, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<long> clock, Func<DateTime> utcNow = null, AutopilotOptions options = null)
+        public AutopilotRunner(ExecutionAuthority authority, IEditorContextSource source, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<long> clock, Func<DateTime> utcNow = null, AutopilotOptions options = null, IFlightPort staging = null)
         {
             this.authority = authority ?? throw new ArgumentNullException(nameof(authority));
             this.source = source ?? throw new ArgumentNullException(nameof(source));
@@ -30,6 +34,7 @@ namespace KspControl.Bridge
             this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
             this.utcNow = utcNow ?? (() => DateTime.UtcNow);
             this.options = options ?? new AutopilotOptions();
+            this.staging = staging;
         }
 
         /// <summary>Configures and engages MechJeb for an admitted ascent or node job. A failure ends the job and releases whatever was engaged.</summary>
@@ -120,6 +125,7 @@ namespace KspControl.Bridge
             job.ModuleStatus = reading.Status;
             if (reading.OtherUsers > 0) { Takeover(job, "another user engaged the ascent module"); return; }
             var now = clock();
+            if (ShouldIgnite(job, t, reading, now)) Ignite(job);
             var ended = !reading.Enabled || !reading.OwnUserPresent;
             var inOrbit = t.Orbiting && t.PeriapsisMeters > t.OrbitFloorMeters;
             if (!job.OrbitReached)
@@ -149,6 +155,47 @@ namespace KspControl.Bridge
             }
             if (now - job.StartedAt > options.AscentTimeoutMs) { Finish(job, JobStatuses.Failed, AutopilotReasons.Timeout, "no orbit within the time allowed"); return; }
             job.Phase = t.AltitudeMeters < 1000 ? "launch" : t.AltitudeMeters < t.OrbitFloorMeters ? "ascending" : "coasting_to_circularize";
+        }
+
+        /// <summary>
+        /// MechJeb's staging controller waits for the first staging while the vessel is PRELAUNCH ("Awaiting liftoff"), so an agent ascent would sit on
+        /// the pad. With autostage requested the bridge fires the first stage once, after MechJeb has had a moment to take the controls.
+        /// </summary>
+        private bool ShouldIgnite(AutopilotJob job, FlightTelemetry t, AscentReading reading, long now)
+        {
+            if (job.IgniteAttempted || !job.Ignite || !job.Autostage || !reading.Enabled || !reading.OwnUserPresent) return false;
+            var waiting = string.Equals(t.Situation, "PRELAUNCH", StringComparison.Ordinal)
+                || (reading.Status != null && reading.Status.IndexOf("liftoff", StringComparison.OrdinalIgnoreCase) >= 0 && t.AltitudeMeters < 1000);
+            return waiting && now - job.StartedAt >= options.IgniteDelayMs;
+        }
+
+        /// <summary>Fires the next stage through the same port and classifier as flight_stage. Unknown modules are reported, never a refusal.</summary>
+        private void Ignite(AutopilotJob job)
+        {
+            var info = new JObject();
+            job.Ignition = info;
+            if (staging == null) { job.IgniteAttempted = true; job.IgnitedByBridge = false; info["detail"] = "staging_unavailable"; return; }
+            var before = staging.Read();
+            if (before == null || !before.Owned || !string.Equals(before.VesselId, job.VesselId, StringComparison.Ordinal))
+            { job.IgniteAttempted = true; job.IgnitedByBridge = false; info["detail"] = "the vessel could not be read for staging"; return; }
+            // A staging lock can be momentary (scene settling): try again next frame, the job keeps reporting why.
+            if (staging.StagingLocked) { info["detail"] = "staging_locked; retrying"; return; }
+            job.IgniteAttempted = true;
+            var stage = before.Controls.CurrentStage;
+            info["stageBefore"] = stage;
+            if (stage <= 0) { job.IgnitedByBridge = false; info["detail"] = "no_stage_to_activate"; return; }
+            var plan = FlightEffectClassifier.Merge(FlightEffectClassifier.Plan(job.VesselId, staging.PartsInStage(stage - 1), true),
+                FlightEffectClassifier.Plan(job.VesselId, staging.GroupBindings("Stage"), false));
+            info["consequential"] = new JArray(plan.Consequential.Take(32));
+            info["unclassified"] = new JArray(plan.Unclassified.Take(32));
+            if (!plan.Allowed) { job.IgnitedByBridge = false; info["detail"] = "too_many_effects"; return; }
+            staging.ActivateNextStage();
+            job.EffectsApplied.Add("first_stage_fired_by_bridge");
+            var after = staging.Read();
+            var stageAfter = after == null ? stage : after.Controls.CurrentStage;
+            info["stageAfter"] = stageAfter;
+            job.IgnitedByBridge = stageAfter < stage;
+            if (stageAfter >= stage) info["detail"] = "the stage number did not advance";
         }
 
         private void StepNode(AutopilotJob job, FlightTelemetry t)

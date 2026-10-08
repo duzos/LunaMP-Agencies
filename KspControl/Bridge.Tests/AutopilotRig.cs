@@ -141,6 +141,8 @@ namespace KspControl.BridgeTests
         public readonly ControlPump Pump;
         public readonly FakeMechJebPort MechJeb = new FakeMechJebPort();
         public readonly FakeFlightPort Flight = new FakeFlightPort();
+        /// <summary>The flight_stage port the ascent fires the first stage through. Its vessel is the job vessel and it starts on the pad at stage 2.</summary>
+        public readonly FakeFlight Staging = new FakeFlight();
         public readonly AutopilotJobs Jobs = new AutopilotJobs();
         public readonly AutopilotOptions Options = new AutopilotOptions();
         public readonly AutopilotRunner Runner;
@@ -154,7 +156,8 @@ namespace KspControl.BridgeTests
         {
             Authority = new ExecutionAuthority(() => Clock.Milliseconds, GrantMapping.KnownEffects, 2000, Store, () => Utc);
             Pump = new ControlPump(Authority, null, Context);
-            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options);
+            Staging.Snap.VesselId = "vessel-1"; Staging.Snap.Situation = "PRELAUNCH"; Staging.Snap.Controls.CurrentStage = 2; Staging.Snap.Controls.StageCount = 2;
+            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options, Staging);
             Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc);
             Authority.UpdateContext(Context.CurrentContext(), Context.CurrentBinding(), AuthorityHelpers.ValidStatus());
             Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect }, facilities ?? new[] { FlightEffects.Facility })));

@@ -11,13 +11,13 @@ namespace KspControl.Host;
 /// </summary>
 public sealed class AutopilotService(MutationService mutations)
 {
- public Task<string> AscentAsync(string requestId,string leaseId,int targetAltitudeMeters,double inclinationDegrees,bool autostage,bool autoWarp,CancellationToken cancellationToken)
+ public Task<string> AscentAsync(string requestId,string leaseId,int targetAltitudeMeters,double inclinationDegrees,bool autostage,bool autoWarp,CancellationToken cancellationToken,bool ignite=true)
  {
   var bad=MutationArguments.RequestId(requestId) ?? MutationArguments.Lease(leaseId);
   if(bad==null && (targetAltitudeMeters<AutopilotLimits.AltitudeMinMeters || targetAltitudeMeters>AutopilotLimits.AltitudeMaxMeters)) bad=$"targetAltitudeMeters must be {AutopilotLimits.AltitudeMinMeters}..{AutopilotLimits.AltitudeMaxMeters}";
   if(bad==null && (double.IsNaN(inclinationDegrees) || inclinationDegrees<AutopilotLimits.InclinationMinDegrees || inclinationDegrees>AutopilotLimits.InclinationMaxDegrees)) bad=$"inclinationDegrees must be {AutopilotLimits.InclinationMinDegrees}..{AutopilotLimits.InclinationMaxDegrees}";
   if(bad!=null) return Task.FromResult(CraftPlanService.Invalid(bad));
-  var args=new JObject { ["requestId"]=requestId,["targetAltitudeMeters"]=targetAltitudeMeters,["inclinationDegrees"]=inclinationDegrees,["autostage"]=autostage,["autoWarp"]=autoWarp };
+  var args=new JObject { ["requestId"]=requestId,["targetAltitudeMeters"]=targetAltitudeMeters,["inclinationDegrees"]=inclinationDegrees,["autostage"]=autostage,["autoWarp"]=autoWarp,["ignite"]=ignite };
   return Run(AutopilotOperations.Ascent,requestId,leaseId,args,cancellationToken);
  }
 
@@ -67,7 +67,8 @@ public sealed class AutopilotTools(BridgeClient bridge,AutopilotService service)
   [Description("Target inclination in degrees, -180..180. 0 is equatorial.")] [Range(AutopilotLimits.InclinationMinDegrees,AutopilotLimits.InclinationMaxDegrees)] double inclinationDegrees,
   [Description("Let MechJeb stage automatically when a stage burns out.")] bool autostage,
   [Description("Must be false (the default): MechJeb 2.15 has no warp setting for the ascent autopilot.")] bool autoWarp=false,
-  CancellationToken cancellationToken=default) => service.AscentAsync(requestId,leaseId,targetAltitudeMeters,inclinationDegrees,autostage,autoWarp,cancellationToken);
+  [Description("With autostage, fire the first stage once if the vessel is still on the pad (default true). False leaves the launch to a person.")] bool ignite=true,
+  CancellationToken cancellationToken=default) => service.AscentAsync(requestId,leaseId,targetAltitudeMeters,inclinationDegrees,autostage,autoWarp,cancellationToken,ignite);
 
  [McpServerTool, Description("Execute the active vessel's next maneuver node (all=false) or every node (all=true) with MechJeb's node executor, engaged with a bridge-owned user. The executor's own auto-warp is forced off: it waits in real time. Ends when the node is consumed, or fails with node_execution_ended_early or a timeout (60 minutes). Refuses with no_maneuver_node when there is none and competing_controller when another controller is engaged."+Lifecycle)]
  public Task<string> MechjebExecuteNode(

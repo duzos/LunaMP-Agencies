@@ -370,7 +370,13 @@ and each module's `Enabled` and `Users` (`UserPool.Add`/`Remove`). The user is a
 **Ascent job.** Writes the settings and reads them back (a value that did not take fails with `engage_failed`), adds the user, and reports phase, MechJeb's status
 text and altitude, apoapsis and periapsis each frame. Orbit means periapsis above the atmosphere top of the current body for one second; the job then waits for
 MechJeb to end its own circularization (up to 2 minutes) and completes with `ascentFinished` true or false. Timeout is 20 minutes; `autoWarp=true` is refused
-(`unsupported_option`): MechJeb 2.15 has no warp setting for the ascent. **Node job.** `Autowarp` is forced off; ends when the node is consumed (60 minute timeout).
+(`unsupported_option`): MechJeb 2.15 has no warp setting for the ascent. **Ignition.** MechJeb's staging controller waits for the first staging while the
+vessel is PRELAUNCH (status "Awaiting liftoff"), so with `autostage` and `ignite` (default true) the job fires the first stage once, 1 s after engaging, while the
+vessel is PRELAUNCH or on the ground with that status. It uses the flight_stage path (`IFlightPort.PartsInStage`/`GroupBindings("Stage")` through
+`FlightEffectClassifier`, then `StageManager.ActivateNextStage`); unknown modules are reported in `ignition.unclassified`, only an oversized plan is refused.
+The envelope reports `ignitedByBridge` (null: not tried; false: no stage, staging unavailable, or the stage number did not advance) and `ignition`
+{stageBefore, stageAfter, consequential, unclassified, detail}. A staging lock is retried each frame. The stage is authorised by `flight.autopilot` (as MechJeb's own
+autostage is), not `flight.control`. **Node job.** `Autowarp` is forced off; ends when the node is consumed (60 minute timeout).
 
 **Safety.** Admission refuses with `competing_controller` if any other MechJeb autopilot or support module has a user or AtmosphereAutopilot has an active
 module (an unreadable AtmosphereAutopilot fails closed). Each frame the runner revalidates the authority, the vessel id and the controls before it reads MechJeb:

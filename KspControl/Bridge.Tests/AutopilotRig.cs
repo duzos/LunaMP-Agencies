@@ -101,7 +101,7 @@ namespace KspControl.BridgeTests
 
         // attitude controller (recovery)
         public bool AttitudeEnabled, AttitudeOwn; public int AttitudeOthers; public double AttitudeAngle = 45; public string AttitudeHeld;
-        public Func<MechJebException> HoldFails;
+        public Func<MechJebException> HoldFails, ReadAttitudeFails;
         public void HoldAttitude(string vesselId, object user, string direction)
         {
             Vessels.Add(vesselId);
@@ -111,6 +111,7 @@ namespace KspControl.BridgeTests
         public AttitudeReading ReadAttitude(string vesselId, object user)
         {
             Vessels.Add(vesselId);
+            if (ReadAttitudeFails != null) throw ReadAttitudeFails();
             return new AttitudeReading { Enabled = AttitudeEnabled, OwnUserPresent = AttitudeOwn, OtherUsers = AttitudeOthers, AngleFromTargetDegrees = AttitudeEnabled ? AttitudeAngle : 0 };
         }
         public void ReleaseAttitude(string vesselId, object user)

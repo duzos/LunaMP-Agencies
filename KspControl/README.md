@@ -401,29 +401,48 @@ coplanar orbits, and is labelled an ESTIMATE (`hohmann_phase_wait_estimate`). Me
 
 `flight_recover(requestId, leaseId, targetPeriapsisMeters=30000, burnAt="now", armAltitudeMeters=10000)` is an autopilot job under `flight.autopilot`
 (lease `vessel:<guid>`, FLIGHT facility, polled with `job_status`) that flies a crewed capsule from orbit or a suborbital arc to touchdown. Bounds:
-`targetPeriapsisMeters` -50000..60000 and below the current body's atmosphere top, `burnAt` `now` | `apoapsis`, `armAltitudeMeters` 1000..30000.
+`targetPeriapsisMeters` -50000..60000 and below the current body's atmosphere top, `burnAt` `now` | `apoapsis`, `armAltitudeMeters` 1000..30000 (still
+validated and echoed in the envelope, but it no longer delays arming: see Parachutes).
 Admission refuses `no_parachute` (no ModuleParachute that is not cut), `not_applicable` (LANDED, SPLASHED, PRELAUNCH, or an airless body),
 `mechjeb_module_unavailable` (the attitude controller's `attitudeTo`/`attitudeAngleFromTarget` were not resolved), `competing_controller` and `autopilot_busy`,
 and touches nothing: the envelope's `preview` lists `deorbitBurnNeeded`, `separationCandidates` (stages separation may fire, top down), `separationStopsAt`
 and warnings (`root_not_command`, `no_heat_shield`, `uncrewed`, `separation_unavailable`, `parachute_stage_decouples`). Warnings never refuse.
 
 The phase machine (`RecoveryMachine`, pure, stepped by the runner after the per-frame authority, vessel, human-input and competitor checks):
-1. **Deorbit** (`deorbit_align`, `deorbit_wait_apoapsis`, `deorbit_burn`), only when periapsis is above the target: holds retrograde with MechJeb's attitude
+1. **Deorbit** (`deorbit_align`, `deorbit_wait_apoapsis`, `deorbit_burn`), only when periapsis is above the target and the vessel is not already coming
+   back. Coming back (no burn, `deorbitSkipped`, straight to separation) means below the atmosphere top, or periapsis under the atmosphere top while the
+   situation is not ORBITING (KSP calls such an orbit SUB_ORBITAL, ESCAPING past the SOI): a Mun free return with a 35 km periapsis is not burned down to
+   30 km. The same check runs every deorbit frame before the burn has started; once it has, periapsis crossing the atmosphere top (which turns the orbit
+   SUB_ORBITAL) does not stop it short of the target, but dropping below the atmosphere top does (`deorbit_short`). It holds retrograde with MechJeb's attitude
    controller (`core.Attitude.attitudeTo(Vector3d.back, AttitudeReference.ORBIT, user, false)`, the call SmartASS makes for RETROGRADE; the controller is
    usable when ESA's tech locks the SmartASS window). The burn starts once `attitudeAngleFromTarget()` is at most 5 degrees (3 minute limit:
-   `attitude_not_reached`); `apoapsis` waits aligned until 20 s before the apoapsis. The throttle goes through the bridge's fly-by-wire guard (1.0, 0.25 within
+   `attitude_not_reached`, or `deorbit_short` and on to separation when periapsis is already under the atmosphere top); `apoapsis` waits aligned until 20 s before the apoapsis. The throttle goes through the bridge's fly-by-wire guard (1.0, 0.25 within
    5 km of the target) and is cut when periapsis is at or under the target. Drifting past 20 degrees pauses the burn; time warp cuts it; no periapsis progress
-   for 10 s ends the burn: inside the atmosphere with a `deorbit_short` warning, above it as `deorbit_failed` (the vessel stays in orbit).
+   for 10 s ends the burn: inside the atmosphere with a `deorbit_short` warning, above it as `deorbit_failed` (the vessel stays in orbit). The 15 minute burn
+   limit does the same: `deorbit_short` with periapsis under the atmosphere top, otherwise `autopilot_timeout`.
 2. **Separation**: fires the next stage while engines or fuel tanks (ModuleEngines, or LiquidFuel/Oxidizer/SolidFuel on a non-command part) are attached
-   and that stage has a `ModuleDecouplerBase` and no crewed, `ModuleCommand`, `ModuleParachute` or `ModuleAblator` part, through the flight_stage path
+   and that stage has a `ModuleDecouplerBase` and no crewed, `ModuleCommand`, `ModuleParachute` or `ModuleAblator` part, and what it can drop is safe: the
+   stage's separators are cut out of the part tree (`Part.parent`, both sides, since which side leaves is unknown before it fires) and the tree is walked
+   from the root; a crewed, command, parachute or heat-shield part that becomes unreachable refuses the stage (`stage_would_drop_<kind>:<partId>`), and so
+   does an engine or booster in the stage that stays reachable, which would ignite on the capsule (`next_stage_ignites_attached_engine`, warning
+   `separation_skipped_engine`). Fired through the flight_stage path
    (classifier for reporting, `StageManager.ActivateNextStage`), waiting 1.5 s between stages (8 at most). Skipped when the root part is not the command or a
    crewed part, because the crew would fly off as a new vessel. A stage that does not advance, or engines left attached, are warnings.
-3. **Reentry**: `coast` with the attitude released while above the atmosphere top + 5 km (saves the battery), then `reentry` holding surface retrograde
+3. **Reentry**: `coast` with the attitude released while above the atmosphere top + 25 km (saves the battery; 25 km leaves the reaction wheels time to turn
+   the shield forward before the interface), then `reentry` holding surface retrograde
    (`attitudeTo(Vector3d.back, SURFACE_VELOCITY, ...)`, heat shield into the airflow) until 20 km, where the hold is released so the capsule weathervanes.
-4. **Parachutes**: armed per part with `ModuleParachute.Deploy()` (their stage is never fired). Stock opens an armed chute only once
-   `deploymentSafeState` is within `automateSafeDeploy` (0 = SAFE only), so arming early is safe whenever stock will hold it. A STOWED chute is armed when it
-   reads SAFE inside the atmosphere, below `armAltitudeMeters` above the terrain (`Vessel.radarAltitude`, sea surface over water) when it reads RISKY or stock
-   holds it until safe, and below 2 km whatever it reads. A chute still STOWED is retried every 2 s, 3 times, then reported (`chute_not_arming`: shielded).
+4. **Parachutes**: armed per part with `ModuleParachute.Deploy()` (their stage is never fired). Stock opens an ACTIVE chute only while
+   `automateSafeDeploy >= (int)deploymentSafeState` (SAFE 0, RISKY 1, UNSAFE 2, NONE 3 in vacuum; the state is a heat check). Every normal arm first sets
+   `automateSafeDeploy` to 0, whatever the craft was set to (Risky or Immediate would open hypersonic), so arming is harmless as early as it gets: in
+   coast/reentry/descent every STOWED chute is armed as soon as the vessel is below the atmosphere top (`armReason` `safe` or `below_atmosphere_top`), and
+   the Mk16 then semi-deploys at its minimum pressure once SAFE and opens fully at its deploy altitude. Below 2 km above the terrain (`Vessel.radarAltitude`,
+   sea surface over water, any phase) every STOWED chute, and once every ACTIVE chute still waiting (armed by us or by a person), gets `automateSafeDeploy` 2
+   so it opens whatever its safety (`last_resort`). A chute still STOWED is retried every 2 s, 3 times, then reported (`chute_not_arming`: shielded); the
+   last resort ignores that limit and keeps retrying.
+   **Every other ending arms them too**: on stop, takeover keys, SmartASS switched off, a competing controller, a lost or expired lease, a MechJeb or
+   reflection exception, a failure or the timeout, the release arms every STOWED chute with `automateSafeDeploy` 0 when the vessel (read again by id) is
+   airborne over an atmosphere-bearing body and below the atmosphere top or with periapsis under it (effect `chutes_armed_on_release:<n>`). A vessel in a
+   stable orbit, a landed one or one that no longer exists is left alone.
 5. **Touchdown**: LANDED or SPLASHED completes with `impactSpeedMetersPerSecond` (surface speed of the last airborne frame) and `crewAlive`; fewer living crew
    than at the start is `crew_lost`; a vessel that no longer exists is `vessel_lost` (last altitude and speed in the detail). Overall limit 2 hours.
 
@@ -438,7 +457,8 @@ writes the throttle with more than one user. The staging and the burn are author
 
 Not live-verified for recovery: `attitudeTo`'s vector overload reached by reflection with a constructed `Vector3d` and parsed `AttitudeReference`, that
 `attitudeAngleFromTarget` settles under 5 degrees on a Mk1 pod, the fly-by-wire throttle alongside MechJeb's attitude `Drive`, `Vessel.radarAltitude` over
-the sea, `ModuleParachute.Deploy` arming a chute in flight and the safe-state readings during reentry, that the active vessel keeps its id after a
+the sea, `ModuleParachute.Deploy` arming a chute in flight, the safe-state readings during reentry and a written `automateSafeDeploy` taking effect on an
+already ACTIVE chute (decompiled `ModuleParachute` reads the field each update), that the active vessel keeps its id after a
 decoupler fires when the pod is the root, `Vessel.currentStage` for a non-active vessel, and the 30 km default periapsis giving a survivable Kerbin entry.
 
 Not live-verified: that `UserPool.Add` enables the module (the adapter sets `Enabled` itself if not), what `core.Ascent` returns for each `AscentType` (PVG is

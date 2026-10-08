@@ -122,7 +122,7 @@ namespace KspControl.BridgeTests
             var envelope = job.ToEnvelope();
             Assert.AreEqual("surface_retrograde", (string)envelope["recovery"]["attitude"]["held"]);
             Assert.AreEqual(60000, (double)envelope["recovery"]["telemetry"]["altitudeMeters"]);
-            Assert.AreEqual("STOWED", (string)envelope["recovery"]["chutes"][0]["state"]);
+            Assert.AreEqual("ACTIVE", (string)envelope["recovery"]["chutes"][0]["state"], "armed below the atmosphere top; stock opens it only when SAFE");
             rig.Recovery.Fly(8000, 25000, 230); rig.Frame();
             Assert.AreEqual("descent", job.Phase); Assert.AreEqual("ACTIVE", rig.Recovery.Chute().State);
             rig.Recovery.Fly(10, 25000, 7.2); rig.Frame();
@@ -216,6 +216,90 @@ namespace KspControl.BridgeTests
             rig.Frame();
             Assert.AreEqual("failed", job.Status); Assert.AreEqual("mechjeb_module_unavailable", job.ReasonCode);
             Assert.AreEqual(0, rig.Recovery.Count("throttle:"));
+        }
+
+        // ---- every ending in the air leaves the chutes armed ----
+
+        /// <summary>Sub-orbital at 90 km (periapsis 20 km), past separation and holding surface retrograde, chute still stowed (above the atmosphere top).</summary>
+        private AutopilotJob FallingAboveTheInterface()
+        {
+            var job = Start();
+            rig.Recovery.Fly(90000, 20000, 2400);
+            rig.Run(200);
+            Assert.AreEqual("reentry", job.Phase);
+            Assert.AreEqual(0, rig.Recovery.Count("arm:"));
+            return job;
+        }
+
+        private void ChutesArmedOnRelease(AutopilotJob job, string status, bool attitudeReleased = true)
+        {
+            Assert.AreEqual(status, job.Status, job.Detail);
+            Assert.AreEqual(1, rig.Recovery.Count("arm:2@0"), string.Join(",", rig.Recovery.Calls));
+            Assert.AreEqual("ACTIVE", rig.Recovery.Chute().State); Assert.AreEqual(0, rig.Recovery.Chute().AutomateSafeDeploy);
+            CollectionAssert.Contains(job.EffectsApplied, "chutes_armed_on_release:1");
+            if (attitudeReleased) Assert.IsNull(rig.MechJeb.AttitudeHeld);
+        }
+
+        [TestMethod] public void StopInTheAirArmsTheChutes()
+        {
+            var job = FallingAboveTheInterface();
+            rig.Runner.Abort(AutopilotReasons.StoppedByRequest);
+            ChutesArmedOnRelease(job, "cancelled");
+        }
+
+        [TestMethod] public void TakeoverKeysInTheAirArmTheChutes()
+        {
+            var job = FallingAboveTheInterface();
+            rig.Flight.Human = true; rig.Run(3);
+            ChutesArmedOnRelease(job, "cancelled");
+            Assert.AreEqual(OperationReasons.HumanInputDuringOperation, job.ReasonCode);
+        }
+
+        [TestMethod] public void ALeaseExpiringInTheAirArmsTheChutes()
+        {
+            var job = FallingAboveTheInterface();
+            rig.Heartbeats = false; rig.Run(400);
+            ChutesArmedOnRelease(job, "cancelled");
+        }
+
+        [TestMethod] public void SmartAssSwitchedOffInTheAirArmsTheChutes()
+        {
+            var job = FallingAboveTheInterface();
+            rig.MechJeb.AttitudeOwn = false; rig.Frame();
+            ChutesArmedOnRelease(job, "cancelled", attitudeReleased: false); // the hold is already gone; nothing of ours to release
+        }
+
+        [TestMethod] public void ACompetingControllerInTheAirArmsTheChutes()
+        {
+            var job = FallingAboveTheInterface();
+            rig.MechJeb.Competitors.Add("mechjeb.landing"); rig.Run(6);
+            ChutesArmedOnRelease(job, "cancelled");
+        }
+
+        [TestMethod] public void AMechJebExceptionInTheAirArmsTheChutes()
+        {
+            var job = FallingAboveTheInterface();
+            rig.MechJeb.ReadAttitudeFails = () => new MechJebException("mechjeb_module_unavailable", "reflection failed");
+            rig.Frame();
+            ChutesArmedOnRelease(job, "failed");
+        }
+
+        [TestMethod] public void TheOverallTimeoutInTheAirArmsTheChutes()
+        {
+            rig.Options.Recovery.TimeoutMs = 5000;
+            var job = FallingAboveTheInterface();
+            rig.Run(400);
+            ChutesArmedOnRelease(job, "failed");
+            Assert.AreEqual(AutopilotReasons.Timeout, job.ReasonCode);
+        }
+
+        [TestMethod] public void StopInAStableOrbitLeavesTheChutesStowed()
+        {
+            var job = Start();
+            rig.Frame();
+            rig.Runner.Abort(AutopilotReasons.StoppedByRequest);
+            Assert.AreEqual("cancelled", job.Status);
+            Assert.AreEqual(0, rig.Recovery.Count("arm:")); Assert.AreEqual("STOWED", rig.Recovery.Chute().State);
         }
 
         [TestMethod] public void AnotherAutopilotJobIsRefusedWhileTheRecoveryRuns()

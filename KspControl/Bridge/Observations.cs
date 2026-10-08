@@ -114,7 +114,7 @@ namespace KspControl.Bridge
                     flight.WorldEpoch = epoch; flight.Revision = ++revision;
                     return flight;
                 case AutopilotOperations.MechJebStatus: case AutopilotOperations.Status:
-                case AutopilotOperations.Ascent: case AutopilotOperations.ExecuteNode: case AutopilotOperations.PlanCircularize: case AutopilotOperations.PlanHohmann:
+                case AutopilotOperations.Ascent: case AutopilotOperations.ExecuteNode: case AutopilotOperations.PlanCircularize: case AutopilotOperations.PlanHohmann: case AutopilotOperations.Recover:
                     // Autopilot operations answer with their own envelope, like the editor mutations.
                     if (Autopilot == null) return Fail(request, "operation_unavailable");
                     var autopilot = Autopilot.Handle(request);

@@ -32,7 +32,7 @@ namespace KspControl.BridgeTests
 
         public FakeMechJebPort()
         {
-            foreach (var module in new[] { "ascent", "ascentSettings", "node", "landing", "thrust", "attitude" }) Caps.Modules[module] = true;
+            foreach (var module in new[] { "ascent", "ascentSettings", "node", "landing", "thrust", "attitude", "attitudeControl" }) Caps.Modules[module] = true;
         }
 
         public bool HasCore(string vesselId) { Vessels.Add(vesselId); return Core; }
@@ -98,6 +98,26 @@ namespace KspControl.BridgeTests
         }
 
         public void ThrustOff(string vesselId) { Vessels.Add(vesselId); Calls.Add("thrust_off"); }
+
+        // attitude controller (recovery)
+        public bool AttitudeEnabled, AttitudeOwn; public int AttitudeOthers; public double AttitudeAngle = 45; public string AttitudeHeld;
+        public Func<MechJebException> HoldFails;
+        public void HoldAttitude(string vesselId, object user, string direction)
+        {
+            Vessels.Add(vesselId);
+            if (HoldFails != null) throw HoldFails();
+            Calls.Add("hold:" + direction); AttitudeHeld = direction; AttitudeEnabled = true; AttitudeOwn = true;
+        }
+        public AttitudeReading ReadAttitude(string vesselId, object user)
+        {
+            Vessels.Add(vesselId);
+            return new AttitudeReading { Enabled = AttitudeEnabled, OwnUserPresent = AttitudeOwn, OtherUsers = AttitudeOthers, AngleFromTargetDegrees = AttitudeEnabled ? AttitudeAngle : 0 };
+        }
+        public void ReleaseAttitude(string vesselId, object user)
+        {
+            Vessels.Add(vesselId); Calls.Add("release_attitude");
+            AttitudeOwn = false; AttitudeHeld = null; AttitudeEnabled = AttitudeOthers > 0;
+        }
     }
 
     internal sealed class FakeFlightPort : IAutopilotFlightPort
@@ -143,6 +163,8 @@ namespace KspControl.BridgeTests
         public readonly FakeFlightPort Flight = new FakeFlightPort();
         /// <summary>The flight_stage port the ascent fires the first stage through. Its vessel is the job vessel and it starts on the pad at stage 2.</summary>
         public readonly FakeFlight Staging = new FakeFlight();
+        /// <summary>The recovered vessel: a crewed capsule in a 80 km orbit with a service stage below a decoupler (see <see cref="FakeRecoveryPort"/>).</summary>
+        public readonly FakeRecoveryPort Recovery = FakeRecoveryPort.Capsule("vessel-1");
         public readonly AutopilotJobs Jobs = new AutopilotJobs();
         public readonly AutopilotOptions Options = new AutopilotOptions();
         public readonly AutopilotRunner Runner;
@@ -157,8 +179,8 @@ namespace KspControl.BridgeTests
             Authority = new ExecutionAuthority(() => Clock.Milliseconds, GrantMapping.KnownEffects, 2000, Store, () => Utc);
             Pump = new ControlPump(Authority, null, Context);
             Staging.Snap.VesselId = "vessel-1"; Staging.Snap.Situation = "PRELAUNCH"; Staging.Snap.Controls.CurrentStage = 2; Staging.Snap.Controls.StageCount = 2;
-            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options, Staging);
-            Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc);
+            Runner = new AutopilotRunner(Authority, Context, MechJeb, Flight, () => Clock.Milliseconds, () => Utc, Options, Staging, Recovery);
+            Service = new MechJebService(Authority, Runner, Jobs, MechJeb, Flight, () => Context.Epoch, () => Utc, Recovery);
             Authority.UpdateContext(Context.CurrentContext(), Context.CurrentBinding(), AuthorityHelpers.ValidStatus());
             Authority.ProvisionGrant(GrantMapping.ToGrant(Payload(operations ?? new[] { AutopilotOperations.Effect }, facilities ?? new[] { FlightEffects.Facility })));
             if (lease) AcquireLease();
@@ -211,6 +233,13 @@ namespace KspControl.BridgeTests
 
         public BridgeRequest PlanHohmann(string requestId = "hohm-0001", string body = "Mun", string lease = "default")
         { return Request(AutopilotOperations.PlanHohmann, new JObject { ["requestId"] = requestId, ["targetBodyName"] = body }, lease); }
+
+        public BridgeRequest Recover(string requestId = "recover-0001", JObject extra = null, string lease = "default")
+        {
+            var args = new JObject { ["requestId"] = requestId };
+            if (extra != null) args.Merge(extra);
+            return Request(AutopilotOperations.Recover, args, lease);
+        }
 
         public BridgeRequest Request(string operation, JObject args, string lease = "default")
         {

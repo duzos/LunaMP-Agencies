@@ -122,7 +122,32 @@ namespace KspControl.HostTests;
   Assert.AreEqual("completed",(string?)JObject.Parse(await rig.Tools.MechjebPlanHohmannToTarget("hohm-0001",Lease,"Mun"))["Status"]);
   Assert.AreEqual(true,(bool)bridge.Requests.Single(r=>r.Operation==AutopilotOperations.ExecuteNode).Arguments["all"]!);
   Assert.AreEqual("Mun",(string?)bridge.Requests.Single(r=>r.Operation==AutopilotOperations.PlanHohmann).Arguments["targetBodyName"]);
-  Assert.AreEqual(1,bridge.Requests.Count(r=>r.Operation==AutopilotOperations.PlanCircularize)); rig.Journal.Dispose();
+  Assert.AreEqual(1,bridge.Requests.Count(r=>r.Operation==AutopilotOperations.PlanCircularize));
+  Assert.AreEqual("completed",(string?)JObject.Parse(await rig.Tools.FlightRecover("recover-0001",Lease))["Status"]);
+  var recover=bridge.Requests.Single(r=>r.Operation==AutopilotOperations.Recover);
+  Assert.AreEqual(30000,(int)recover.Arguments["targetPeriapsisMeters"]!); Assert.AreEqual("now",(string?)recover.Arguments["burnAt"]); Assert.AreEqual(10000,(int)recover.Arguments["armAltitudeMeters"]!);
+  Assert.AreEqual(AutopilotOperations.Effect,rig.Journal.TryGet()!.Get("recover-0001").Operation);
+  rig.Journal.Dispose();
+ }
+
+ [TestMethod] public async Task RecoverArgumentsOutOfBoundsAreInvalidWithoutASocket()
+ {
+  using var bridge=new FakeBridge(r=>FakeBridge.Ok(new JObject())); var rig=Make();
+  foreach(var result in new[]
+  {
+   JObject.Parse(await rig.Tools.FlightRecover("short",Lease)), JObject.Parse(await rig.Tools.FlightRecover("recover-0001","short")),
+   JObject.Parse(await rig.Tools.FlightRecover("recover-0001",Lease,targetPeriapsisMeters:-50001)), JObject.Parse(await rig.Tools.FlightRecover("recover-0001",Lease,targetPeriapsisMeters:60001)),
+   JObject.Parse(await rig.Tools.FlightRecover("recover-0001",Lease,burnAt:"periapsis")), JObject.Parse(await rig.Tools.FlightRecover("recover-0001",Lease,armAltitudeMeters:999)),
+   JObject.Parse(await rig.Tools.FlightRecover("recover-0001",Lease,armAltitudeMeters:30001))
+  }) Assert.AreEqual("invalid_argument",(string?)result["ReasonCode"]);
+  Assert.AreEqual(0,bridge.Connections); Assert.IsFalse(Directory.Exists(dir),"the journal was never opened");
+ }
+
+ [TestMethod] public async Task ARecoveryIsDeniedWithoutTheAutopilotFamily()
+ {
+  using var bridge=new FakeBridge(r=>ControlOrElse(r,_=>FakeBridge.Ok(new JObject()),FlightEffects.Family)); var rig=await Acquire(FlightEffects.Family); var before=bridge.Connections;
+  Assert.AreEqual("grant_operation_denied",(string?)JObject.Parse(await rig.Tools.FlightRecover("recover-0001",Lease,burnAt:"apoapsis"))["ReasonCode"]);
+  Assert.AreEqual(before,bridge.Connections); rig.Journal.Dispose();
  }
 
  [TestMethod] public async Task TheSameRequestAgainAnswersFromTheJournalAndADifferentOneConflicts()

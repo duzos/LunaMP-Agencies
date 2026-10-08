@@ -28,7 +28,7 @@ namespace KspControl.HostTests;
    var list=await Request(new { jsonrpc="2.0",id=2,method="tools/list",@params=new {} },2);
    var names=list.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t=>t.GetProperty("name").GetString()).ToArray();
    CollectionAssert.Contains(names,"context");
-   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease","editor_state","editor_engineering","craft_plan","editor_apply_craft","editor_restore_snapshot","editor_save_craft","craft_list","editor_load_craft","editor_launch","job_status","mechjeb_status","mechjeb_ascent","mechjeb_execute_node","mechjeb_plan_circularize","mechjeb_plan_hohmann_to_target"}) CollectionAssert.Contains(names,expected);
+   foreach(var expected in new[]{"control_status","control_acquire_lease","control_renew_lease","control_release_lease","editor_state","editor_engineering","craft_plan","editor_apply_craft","editor_restore_snapshot","editor_save_craft","craft_list","editor_load_craft","editor_launch","job_status","mechjeb_status","mechjeb_ascent","mechjeb_execute_node","mechjeb_plan_circularize","mechjeb_plan_hohmann_to_target","flight_recover"}) CollectionAssert.Contains(names,expected);
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","facility","fileName","expectedSha256","allowUpgrade"},Schema("editor_load_craft").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","facility","fileName","expectedSha256"},Schema("editor_load_craft").GetProperty("required").EnumerateArray().Select(p=>p.GetString()).ToArray());
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","targetAltitudeMeters","inclinationDegrees","autostage","autoWarp","ignite"},Schema("mechjeb_ascent").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
@@ -36,6 +36,8 @@ namespace KspControl.HostTests;
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","all"},Schema("mechjeb_execute_node").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","targetBodyName"},Schema("mechjeb_plan_hohmann_to_target").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
    Assert.AreEqual(0,Schema("mechjeb_status").GetProperty("properties").EnumerateObject().Count());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","targetPeriapsisMeters","burnAt","armAltitudeMeters"},Schema("flight_recover").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());
+   CollectionAssert.AreEquivalent(new[]{"requestId","leaseId"},Schema("flight_recover").GetProperty("required").EnumerateArray().Select(p=>p.GetString()).ToArray());
    // The mutation tools: exactly the documented arguments, bounded, and none that could carry grant content.
    JsonElement Schema(string tool)=>list.GetProperty("result").GetProperty("tools").EnumerateArray().Single(t=>t.GetProperty("name").GetString()==tool).GetProperty("inputSchema");
    CollectionAssert.AreEquivalent(new[]{"requestId","leaseId","expectedRevision","graph","expectedPlanHash"},Schema("editor_apply_craft").GetProperty("properties").EnumerateObject().Select(p=>p.Name).ToArray());

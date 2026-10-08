@@ -322,5 +322,66 @@ namespace KspControl.BridgeTests
             Assert.AreEqual("available", (string)status["mechjeb"]); Assert.AreEqual(false, (bool)status["vesselCore"]);
             Assert.AreEqual(true, (bool)status["modules"]["ascent"]["supported"]);
         }
-    }
+    
+        // ---- attitude controller (recovery) ----
+
+        [TestMethod] public void HoldingRetrogradeCallsTheVectorOverloadWithBackAndTheOrbitReference()
+        {
+            var adapter = Make(); var user = new object();
+            Assert.IsTrue(adapter.Capabilities.Has("attitudeControl"));
+            adapter.HoldAttitude(null, user, AttitudeDirections.OrbitRetrograde);
+            Assert.AreEqual(1, core.Attitude.VectorCalls); Assert.AreEqual(0, core.Attitude.OtherOverloadCalls, "never the quaternion or heading overloads");
+            Assert.AreEqual(0.0, core.Attitude.LastDirection.x); Assert.AreEqual(0.0, core.Attitude.LastDirection.y); Assert.AreEqual(-1.0, core.Attitude.LastDirection.z);
+            Assert.AreEqual(AttitudeReference.ORBIT, core.Attitude.LastReference); Assert.IsFalse(core.Attitude.LastKillRoll);
+            Assert.IsTrue(core.Attitude.Enabled); CollectionAssert.Contains(core.Attitude.Users, user);
+            adapter.HoldAttitude(null, user, AttitudeDirections.SurfaceRetrograde);
+            Assert.AreEqual(AttitudeReference.SURFACE_VELOCITY, core.Attitude.LastReference);
+            Assert.AreEqual(1, core.Attitude.Users.Count, "the user is added once");
+        }
+
+        [TestMethod] public void TheAttitudeReadingSeparatesOurHoldFromOthersAndReportsTheAngle()
+        {
+            var adapter = Make(); var user = new object();
+            adapter.HoldAttitude(null, user, AttitudeDirections.OrbitRetrograde);
+            core.Attitude.Angle = 3.5;
+            var reading = adapter.ReadAttitude(null, user);
+            Assert.IsTrue(reading.Enabled && reading.OwnUserPresent); Assert.AreEqual(0, reading.OtherUsers); Assert.AreEqual(3.5, reading.AngleFromTargetDegrees);
+            core.Attitude.Users.Add(new object());
+            Assert.AreEqual(1, adapter.ReadAttitude(null, user).OtherUsers);
+            CollectionAssert.AreEquivalent(new[] { "mechjeb.attitude" }, adapter.FindCompetitors(null, user, false).ToArray());
+        }
+
+        [TestMethod] public void OurAttitudeHoldIsNotACompetitorOfOurOwnJob()
+        {
+            var adapter = Make(); var user = new object();
+            adapter.HoldAttitude(null, user, AttitudeDirections.OrbitRetrograde);
+            Assert.AreEqual(0, adapter.FindCompetitors(null, user, false).Count);
+            CollectionAssert.Contains(adapter.FindCompetitors(null, null, false).ToArray(), "mechjeb.attitude", "a new caller sees the hold as someone else's");
+        }
+
+        [TestMethod] public void ReleasingTheAttitudeRemovesOnlyOurUser()
+        {
+            var adapter = Make(); var user = new object(); var person = new object();
+            adapter.HoldAttitude(null, user, AttitudeDirections.OrbitRetrograde);
+            adapter.ReleaseAttitude(null, user);
+            Assert.IsFalse(core.Attitude.Enabled); Assert.AreEqual(0, core.Attitude.Users.Count);
+            adapter.HoldAttitude(null, user, AttitudeDirections.OrbitRetrograde); core.Attitude.Users.Add(person);
+            adapter.ReleaseAttitude(null, user);
+            Assert.IsTrue(core.Attitude.Enabled, "a person's SmartASS hold stays"); CollectionAssert.AreEqual(new[] { person }, core.Attitude.Users);
+        }
+
+        [TestMethod] public void AnAttitudeControllerWithoutTheVectorOverloadIsFlagged()
+        {
+            var adapter = Make(coreType: typeof(LegacyAttitude.MechJebCore));
+            Assert.IsTrue(adapter.Capabilities.Has("attitude"), "the scan still works on Enabled and Users");
+            Assert.IsFalse(adapter.Capabilities.Has("attitudeControl"));
+        }
+}
+}
+
+namespace LegacyAttitude
+{
+    public class UserPool : System.Collections.Generic.List<object> { }
+    public class MechJebModuleAttitudeController { public UserPool Users = new UserPool(); public bool Enabled { get; set; } }
+    public class MechJebCore { public MechJebCore MasterMechJeb { get { return this; } } public MechJebModuleAttitudeController Attitude = new MechJebModuleAttitudeController(); }
 }

@@ -59,6 +59,24 @@ namespace KspControl.Bridge
         public bool Autowarp { get; set; }
     }
 
+    /// <summary>Directions the recovery job holds with MechJeb's attitude controller.</summary>
+    internal static class AttitudeDirections
+    {
+        /// <summary>attitudeTo(Vector3d.back, AttitudeReference.ORBIT): retrograde to the orbital velocity, for the deorbit burn.</summary>
+        public const string OrbitRetrograde = "orbit_retrograde";
+        /// <summary>attitudeTo(Vector3d.back, AttitudeReference.SURFACE_VELOCITY): heat shield into the airflow, for reentry.</summary>
+        public const string SurfaceRetrograde = "surface_retrograde";
+    }
+
+    internal sealed class AttitudeReading
+    {
+        public bool Enabled { get; set; }
+        public bool OwnUserPresent { get; set; }
+        public int OtherUsers { get; set; }
+        /// <summary>MechJeb's attitudeAngleFromTarget(): degrees between the vessel's forward and the target. 0 while the controller is disabled.</summary>
+        public double AngleFromTargetDegrees { get; set; }
+    }
+
     /// <summary>
     /// The MechJeb operations the autopilot job needs. Main thread only. Every call names the vessel (a vessel id, or null for the active vessel) and
     /// re-reads that vessel's live core: nothing is cached across calls, and a job never touches the core of whatever vessel is active now.
@@ -91,6 +109,11 @@ namespace KspControl.Bridge
         NodeReading ReadNode(string vesselId, object user);
         /// <summary>Asks that vessel's MechJeb thrust controller to stop. Never throws.</summary>
         void ThrustOff(string vesselId);
+        /// <summary>Points the vessel with MechJeb's attitude controller (core.Attitude.attitudeTo) with our user. See <see cref="AttitudeDirections"/>.</summary>
+        void HoldAttitude(string vesselId, object user, string direction);
+        AttitudeReading ReadAttitude(string vesselId, object user);
+        /// <summary>Removes our user from the attitude controller (MechJeb disables it once nobody holds it). Others' holds are left alone.</summary>
+        void ReleaseAttitude(string vesselId, object user);
     }
 
     internal sealed class MechJebException : Exception

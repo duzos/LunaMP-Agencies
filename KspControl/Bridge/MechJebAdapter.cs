@@ -131,6 +131,8 @@ namespace KspControl.Bridge
             new ModuleSpec { Name = "airplane", CoreMember = "Airplane", TypeName = "MechJebModuleAirplaneAutopilot", Members = new[] { "Enabled", "Users" }, Autopilot = true, Scanned = true },
             new ModuleSpec { Name = "ascentMenu", TypeName = "MechJebModuleAscentMenu", Members = new string[0], ViaGeneric = true },
             new ModuleSpec { Name = "attitude", CoreMember = "Attitude", TypeName = "MechJebModuleAttitudeController", Members = new[] { "Enabled", "Users" }, Scanned = true },
+            // The same module, resolved again for the members the recovery job drives. Not scanned: the "attitude" entry above already is.
+            new ModuleSpec { Name = "attitudeControl", CoreMember = "Attitude", TypeName = "MechJebModuleAttitudeController", Members = new[] { "Enabled", "Users", "attitudeTo", "attitudeAngleFromTarget" } },
             new ModuleSpec { Name = "rover", CoreMember = "Rover", TypeName = "MechJebModuleRoverController", Members = new[] { "Enabled", "Users" }, Scanned = true },
             new ModuleSpec { Name = "thrust", CoreMember = "Thrust", TypeName = "MechJebModuleThrustController", Members = new[] { "Enabled", "Users", "ThrustOff" }, Scanned = false }, // MechJeb's own limiters keep a standing user on it (live 2026-10-07): not a competitor
             new ModuleSpec { Name = "warp", CoreMember = "Warp", TypeName = "MechJebModuleWarpController", Members = new[] { "Enabled" } }
@@ -230,7 +232,11 @@ namespace KspControl.Bridge
         }
 
         /// <summary>Methods in the member lists take no parameter, except the node executor's two which take the controller object.</summary>
-        private static int MethodArity(string name) { return name == "ExecuteOneNode" || name == "ExecuteAllNodes" ? 1 : 0; }
+        private static int MethodArity(string name)
+        {
+            if (name == "attitudeTo") return 4; // attitudeTo(Vector3d direction, AttitudeReference reference, object controller, bool killRollRotation)
+            return name == "ExecuteOneNode" || name == "ExecuteAllNodes" ? 1 : 0;
+        }
 
         // ---------------------------------------------------------------- live objects (never cached)
 
@@ -482,6 +488,55 @@ namespace KspControl.Bridge
         public void ThrustOff(string vesselId)
         {
             try { var thrust = Require(vesselId, "thrust"); Reflect.Call(thrust, "ThrustOff"); } catch (Exception) { /* the stock throttle is cut separately */ }
+        }
+
+        // ---------------------------------------------------------------- attitude (recovery)
+
+        /// <summary>
+        /// MechJeb 2.15.2 has three attitudeTo overloads (quaternion: 6 parameters, vector: 4, heading/pitch/roll: 8). The vector one is picked by its
+        /// shape: a 3-component vector struct, the AttitudeReference enum, the controller object, a bool.
+        /// </summary>
+        private static MethodInfo AttitudeTo(Type type)
+        {
+            foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (method.Name != "attitudeTo") continue;
+                var p = method.GetParameters();
+                if (p.Length == 4 && p[0].ParameterType.IsValueType && p[1].ParameterType.IsEnum && p[2].ParameterType == typeof(object) && p[3].ParameterType == typeof(bool))
+                    return method;
+            }
+            throw new MechJebException(KspControl.Contracts.AutopilotReasons.MechJebModuleUnavailable, "attitudeTo(Vector3d, AttitudeReference, object, bool) was not found");
+        }
+
+        public void HoldAttitude(string vesselId, object user, string direction)
+        {
+            var attitude = Require(vesselId, "attitudeControl");
+            var method = AttitudeTo(attitude.GetType());
+            var p = method.GetParameters();
+            // Vector3d.back is (0, 0, -1): with the ORBIT reference that is retrograde, with SURFACE_VELOCITY surface retrograde (as MechJeb's SmartASS does).
+            var back = Activator.CreateInstance(p[0].ParameterType, 0.0, 0.0, -1.0);
+            var reference = Enum.Parse(p[1].ParameterType, direction == AttitudeDirections.SurfaceRetrograde ? "SURFACE_VELOCITY" : "ORBIT");
+            method.Invoke(attitude, new[] { back, reference, user, (object)false });
+            // UserPool.Add enables the module in 2.15.2; set it explicitly if that did not happen.
+            if (!Enabled(attitude)) Reflect.Set(attitude, "Enabled", true);
+            if (!Enabled(attitude)) throw new MechJebException(KspControl.Contracts.AutopilotReasons.EngageFailed, "the attitude controller did not enable");
+        }
+
+        public AttitudeReading ReadAttitude(string vesselId, object user)
+        {
+            var attitude = Require(vesselId, "attitudeControl");
+            bool direct; int ours, others; Users(attitude, user, null, out direct, out ours, out others);
+            var reading = new AttitudeReading { Enabled = Enabled(attitude), OwnUserPresent = direct, OtherUsers = others };
+            try { reading.AngleFromTargetDegrees = Reflect.Number(Reflect.Call(attitude, "attitudeAngleFromTarget")); } catch (Exception) { reading.AngleFromTargetDegrees = double.NaN; }
+            return reading;
+        }
+
+        public void ReleaseAttitude(string vesselId, object user)
+        {
+            var attitude = Require(vesselId, "attitudeControl");
+            // Never attitudeDeactivate(): it clears every user, including a person's SmartASS hold.
+            RemoveUsers(attitude, user);
+            DisableIfUnused(attitude);
         }
 
         // ---------------------------------------------------------------- status

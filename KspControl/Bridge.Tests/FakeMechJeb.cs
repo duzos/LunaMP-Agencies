@@ -8,6 +8,10 @@ namespace FakeMechJeb
 {
     public enum AscentType { CLASSIC, PVG }
     public enum States { WARPALIGN, LEAD, BURN, IDLE }
+    public enum AttitudeReference { INERTIAL, INERTIAL_COT, ORBIT, ORBIT_HORIZONTAL, SURFACE_NORTH, SURFACE_NORTH_COT, SURFACE_VELOCITY, TARGET }
+    /// <summary>KSP's Vector3d has a (double, double, double) constructor; the adapter builds Vector3d.back through it.</summary>
+    public struct Vector3d { public double x, y, z; public Vector3d(double x, double y, double z) { this.x = x; this.y = y; this.z = z; } }
+    public struct QuaternionD { public double x, y, z, w; }
 
     public class EditableDoubleMult { public virtual double Val { get; set; } }
     public class EditableDouble : EditableDoubleMult { }
@@ -67,7 +71,18 @@ namespace FakeMechJeb
     public class MechJebModuleDockingAutopilot : ComputerModule { }
     public class MechJebModuleSpaceplaneAutopilot : ComputerModule { }
     public class MechJebModuleAirplaneAutopilot : ComputerModule { }
-    public class MechJebModuleAttitudeController : ComputerModule { }
+    /// <summary>The three attitudeTo overloads of 2.15.2 (quaternion: 6 parameters, vector: 4, heading/pitch/roll: 8) and attitudeAngleFromTarget.</summary>
+    public class MechJebModuleAttitudeController : ComputerModule
+    {
+        public Vector3d LastDirection; public AttitudeReference LastReference; public bool LastKillRoll; public int VectorCalls, OtherOverloadCalls;
+        public double Angle = 42;
+        public void attitudeTo(QuaternionD attitude, AttitudeReference reference, object controller, bool p = true, bool y = true, bool r = true) { OtherOverloadCalls++; Users.Add(controller); }
+        public void attitudeTo(Vector3d direction, AttitudeReference reference, object controller, bool killRollRotation = false)
+        { VectorCalls++; LastDirection = direction; LastReference = reference; LastKillRoll = killRollRotation; Users.Add(controller); }
+        public void attitudeTo(double heading, double pitch, double roll, object controller, bool p = true, bool y = true, bool r = true, bool cot = false) { OtherOverloadCalls++; Users.Add(controller); }
+        public double attitudeAngleFromTarget() { return Enabled ? Angle : 0.0; }
+        public void attitudeDeactivate() { Users.Clear(); Enabled = false; }
+    }
     public class MechJebModuleRoverController : ComputerModule { }
     public class MechJebModuleWarpController : ComputerModule { }
     public class MechJebModuleThrustController : ComputerModule { public int Off; public void ThrustOff() { Off++; } }

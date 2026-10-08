@@ -73,8 +73,9 @@ namespace KspControl.Bridge
                 var autopilotJobs = new AutopilotJobs();
                 var autopilotPort = new UnityAutopilotFlightPort();
                 var mechjeb = new MechJebAdapter(MechJebSources.Core, MechJebSources.Vessel);
-                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, autopilotPort, () => MonotonicClock.Milliseconds, staging: flightPort);
-                observations.Autopilot = new MechJebService(authority, autopilotRunner, autopilotJobs, mechjeb, autopilotPort, () => observations.WorldEpoch);
+                var recoveryPort = new UnityRecoveryPort(flightPort, flightGuard);
+                autopilotRunner = new AutopilotRunner(authority, source, mechjeb, autopilotPort, () => MonotonicClock.Milliseconds, staging: flightPort, recovery: recoveryPort);
+                observations.Autopilot = new MechJebService(authority, autopilotRunner, autopilotJobs, mechjeb, autopilotPort, () => observations.WorldEpoch, recovery: recoveryPort);
                 observations.Editor.Operations = operations;
                 // These paths reach only KSP. The MCP host is never given the key path.
                 var grantFile = Environment.GetEnvironmentVariable("KSP_CONTROL_GRANT_FILE");

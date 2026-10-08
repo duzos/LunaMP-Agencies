@@ -21,11 +21,13 @@ namespace KspControl.Bridge
         private readonly AutopilotOptions options;
         /// <summary>The flight_stage staging path (classifier, stock ActivateNextStage). Null: the ascent never fires a stage itself.</summary>
         private readonly IFlightPort staging;
+        /// <summary>The recovered vessel's reads, staging, parachutes and throttle. Null: recovery jobs fail at start.</summary>
+        private readonly IRecoveryVesselPort recovery;
 
         public AutopilotJob Current { get; private set; }
         public bool Busy { get { return Current != null && !Current.Terminal; } }
 
-        public AutopilotRunner(ExecutionAuthority authority, IEditorContextSource source, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<long> clock, Func<DateTime> utcNow = null, AutopilotOptions options = null, IFlightPort staging = null)
+        public AutopilotRunner(ExecutionAuthority authority, IEditorContextSource source, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<long> clock, Func<DateTime> utcNow = null, AutopilotOptions options = null, IFlightPort staging = null, IRecoveryVesselPort recovery = null)
         {
             this.authority = authority ?? throw new ArgumentNullException(nameof(authority));
             this.source = source ?? throw new ArgumentNullException(nameof(source));
@@ -35,6 +37,7 @@ namespace KspControl.Bridge
             this.utcNow = utcNow ?? (() => DateTime.UtcNow);
             this.options = options ?? new AutopilotOptions();
             this.staging = staging;
+            this.recovery = recovery;
         }
 
         /// <summary>Configures and engages MechJeb for an admitted ascent or node job. A failure ends the job and releases whatever was engaged.</summary>
@@ -50,6 +53,14 @@ namespace KspControl.Bridge
                     mechjeb.EngageAscent(job.VesselId, job.User);
                     job.Engaged = true; job.EffectsApplied.Add("ascent_engaged");
                     job.Phase = "ascending";
+                }
+                else if (job.Kind == AutopilotKind.Recover)
+                {
+                    if (recovery == null) throw new MechJebException(AutopilotReasons.FlightUnavailable, "the recovery port is not available");
+                    // Nothing is touched here: the machine takes the attitude and the throttle on its first step, after the per-frame checks.
+                    job.Recovery = new RecoveryMachine(job.VesselId, job.User, job.RecoveryRequest, mechjeb, recovery, clock, options.Recovery, job.EffectsApplied);
+                    job.Dispatched = true; job.Engaged = true;
+                    job.Phase = "starting";
                 }
                 else
                 {
@@ -98,8 +109,13 @@ namespace KspControl.Bridge
 
             // 2. The vessel and the scene.
             var telemetry = flight.InFlight ? flight.Read() : null;
-            if (telemetry == null) { Finish(job, JobStatuses.Failed, AutopilotReasons.FlightUnavailable, "the flight scene or the vessel is gone"); return; }
-            if (!string.Equals(telemetry.VesselId, job.VesselId, StringComparison.Ordinal)) { Finish(job, JobStatuses.Failed, AutopilotReasons.VesselChanged, "the active vessel changed"); return; }
+            if (telemetry == null || !string.Equals(telemetry.VesselId, job.VesselId, StringComparison.Ordinal))
+            {
+                // A capsule destroyed in reentry or on impact makes KSP switch vessels: say so rather than "vessel changed".
+                if (job.Kind == AutopilotKind.Recover && VesselGone(job)) { Finish(job, JobStatuses.Failed, AutopilotReasons.VesselLost, LostDetail(job)); return; }
+                if (telemetry == null) { Finish(job, JobStatuses.Failed, AutopilotReasons.FlightUnavailable, "the flight scene or the vessel is gone"); return; }
+                Finish(job, JobStatuses.Failed, AutopilotReasons.VesselChanged, "the active vessel changed"); return;
+            }
             job.Last = telemetry; job.UpdatedUtc = utcNow();
 
             // 3. Never fight a person: a hand on the controls ends the job and starts the takeover cooldown.
@@ -116,7 +132,35 @@ namespace KspControl.Bridge
                 if (others.Count > 0) { Takeover(job, "another controller engaged: " + string.Join(",", others)); return; }
             }
 
-            if (job.Kind == AutopilotKind.Ascent) StepAscent(job, telemetry); else StepNode(job, telemetry);
+            if (job.Kind == AutopilotKind.Ascent) StepAscent(job, telemetry);
+            else if (job.Kind == AutopilotKind.Recover) StepRecover(job);
+            else StepNode(job, telemetry);
+        }
+
+        private void StepRecover(AutopilotJob job)
+        {
+            var reading = recovery.Read(job.VesselId);
+            if (reading == null) { Finish(job, JobStatuses.Failed, AutopilotReasons.VesselLost, LostDetail(job)); return; }
+            var outcome = job.Recovery.Step(reading);
+            job.Phase = job.Recovery.Phase;
+            switch (outcome.Verdict)
+            {
+                case RecoveryVerdict.Completed: Finish(job, JobStatuses.Completed, null, outcome.Detail); break;
+                case RecoveryVerdict.Failed: Finish(job, JobStatuses.Failed, outcome.Reason, outcome.Detail); break;
+                case RecoveryVerdict.Takeover: Takeover(job, outcome.Detail); break;
+            }
+        }
+
+        private bool VesselGone(AutopilotJob job)
+        {
+            try { return recovery != null && recovery.Read(job.VesselId) == null; } catch (Exception) { return true; }
+        }
+
+        private static string LostDetail(AutopilotJob job)
+        {
+            var last = job.Recovery == null ? null : job.Recovery.Last;
+            if (last == null) return "the recovered vessel no longer exists";
+            return "the recovered vessel no longer exists; last seen at " + Math.Round(last.AltitudeMeters) + " m, " + last.SurfaceSpeed.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " m/s surface speed";
         }
 
         private void StepAscent(AutopilotJob job, FlightTelemetry t)
@@ -231,6 +275,17 @@ namespace KspControl.Bridge
 
         private void Release(AutopilotJob job, bool cutThrottle)
         {
+            if (job.Kind == AutopilotKind.Recover)
+            {
+                // The machine owns its attitude hold and throttle: every ending (touchdown included) cuts the throttle and lets go of MechJeb.
+                var burning = job.Recovery != null && job.Recovery.Throttling;
+                if (job.Recovery != null) job.Recovery.Release();
+                // The flight guard leaves the throttle alone when it saw the takeover first, so a job ending mid-burn also cuts the stock throttle itself.
+                if (burning) { try { flight.CutThrottle(job.VesselId); job.EffectsApplied.Add("throttle_cut_stock"); } catch (Exception) { } }
+                if (job.Engaged) job.EffectsApplied.Add("released");
+                job.Engaged = false;
+                return;
+            }
             if (job.Kind != AutopilotKind.Ascent && job.Kind != AutopilotKind.ExecuteNode) return;
             if (job.Engaged || job.Dispatched)
             {

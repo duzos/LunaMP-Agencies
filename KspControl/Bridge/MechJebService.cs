@@ -19,11 +19,12 @@ namespace KspControl.Bridge
         private readonly IAutopilotFlightPort flight;
         private readonly Func<string> worldEpoch;
         private readonly Func<DateTime> utcNow;
+        private readonly IRecoveryVesselPort recovery;
 
-        public MechJebService(ExecutionAuthority authority, AutopilotRunner runner, AutopilotJobs jobs, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<string> worldEpoch, Func<DateTime> utcNow = null)
+        public MechJebService(ExecutionAuthority authority, AutopilotRunner runner, AutopilotJobs jobs, IMechJebPort mechjeb, IAutopilotFlightPort flight, Func<string> worldEpoch, Func<DateTime> utcNow = null, IRecoveryVesselPort recovery = null)
         {
             this.authority = authority; this.runner = runner; this.jobs = jobs; this.mechjeb = mechjeb; this.flight = flight;
-            this.worldEpoch = worldEpoch; this.utcNow = utcNow ?? (() => DateTime.UtcNow);
+            this.worldEpoch = worldEpoch; this.utcNow = utcNow ?? (() => DateTime.UtcNow); this.recovery = recovery;
         }
 
         public bool Running { get { return runner.Busy; } }
@@ -38,6 +39,7 @@ namespace KspControl.Bridge
                 case AutopilotOperations.ExecuteNode: return Mutate(request, AutopilotKind.ExecuteNode);
                 case AutopilotOperations.PlanCircularize: return Mutate(request, AutopilotKind.PlanCircularize);
                 case AutopilotOperations.PlanHohmann: return Mutate(request, AutopilotKind.PlanHohmann);
+                case AutopilotOperations.Recover: return Mutate(request, AutopilotKind.Recover);
                 default: return Refuse(request, ControlReasons.OperationUnavailable, null);
             }
         }
@@ -89,6 +91,7 @@ namespace KspControl.Bridge
             var problem = Text(args, "requestId", out requestId);
             if (problem == null && !OperationLimits.IsRequestId(requestId)) problem = "requestId must match [A-Za-z0-9_-]{8,128}";
             double altitude = 0, inclination = 0; bool autostage = false, all = false, ignite = true; string body = null;
+            RecoveryRequest recover = null;
             if (problem == null)
             {
                 switch (kind)
@@ -98,6 +101,7 @@ namespace KspControl.Bridge
                         if (problem == null) problem = OptionalBool(args, "ignite", true, out ignite);
                         break;
                     case AutopilotKind.ExecuteNode: problem = Bool(args, "all", out all); break;
+                    case AutopilotKind.Recover: problem = ReadRecoveryArguments(args, out recover); break;
                     case AutopilotKind.PlanHohmann:
                         problem = Text(args, "targetBodyName", out body);
                         if (problem == null && !AutopilotLimits.IsBodyName(body)) problem = "targetBodyName must be 1.." + AutopilotLimits.BodyNameMax + " letters, digits, spaces, apostrophes, dashes or underscores";
@@ -115,7 +119,8 @@ namespace KspControl.Bridge
             var leaseId = request.LeaseId.ToLowerInvariant();
 
             var fingerprint = OperationHash.Sha256Hex(request.Operation + "|" + leaseId + "|" + altitude.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" + inclination.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
-                + "|" + autostage + "|" + all + "|" + body + (ignite ? "" : "|noignite"));
+                + "|" + autostage + "|" + all + "|" + body + (ignite ? "" : "|noignite")
+                + (recover == null ? "" : "|recover:" + recover.TargetPeriapsisMeters.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ":" + recover.BurnAtApoapsis + ":" + recover.ArmAltitudeMeters.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
             var existing = jobs.Get(requestId);
             if (existing != null)
             {
@@ -141,7 +146,7 @@ namespace KspControl.Bridge
             var job = new AutopilotJob
             {
                 RequestId = requestId, Kind = kind, Fingerprint = fingerprint, LeaseId = leaseId, Ticket = ticket, Effects = effects, VesselId = telemetry.VesselId,
-                TargetAltitudeMeters = altitude, InclinationDegrees = inclination, Autostage = autostage, Ignite = ignite, All = all, TargetBodyName = body, Last = telemetry,
+                TargetAltitudeMeters = altitude, InclinationDegrees = inclination, Autostage = autostage, Ignite = ignite, All = all, TargetBodyName = body, RecoveryRequest = recover, Last = telemetry,
                 CreatedUtc = utcNow(), UpdatedUtc = utcNow()
             };
 
@@ -163,8 +168,10 @@ namespace KspControl.Bridge
             if (!mechjeb.HasCore(telemetry.VesselId)) return Refuse(request, AutopilotReasons.MechJebUnavailable, "the active vessel carries no MechJeb core (part module)");
             if (kind == AutopilotKind.Ascent && !(caps.Has("ascent") && caps.Has("ascentSettings"))) return Refuse(request, AutopilotReasons.MechJebModuleUnavailable, "ascent module members were not found");
             if (kind == AutopilotKind.ExecuteNode && !caps.Has("node")) return Refuse(request, AutopilotReasons.MechJebModuleUnavailable, "node executor members were not found");
+            if (kind == AutopilotKind.Recover && !caps.Has("attitudeControl")) return Refuse(request, AutopilotReasons.MechJebModuleUnavailable, "attitude controller members (attitudeTo, attitudeAngleFromTarget) were not found");
             var competitors = mechjeb.FindCompetitors(telemetry.VesselId, null, false);
             if (competitors.Count > 0) return Refuse(request, AutopilotReasons.CompetingController, "another controller is engaged: " + string.Join(", ", competitors), new JObject { ["competitors"] = new JArray(competitors) });
+            if (kind == AutopilotKind.Recover) return CheckRecovery(request, job);
             if (kind == AutopilotKind.ExecuteNode && telemetry.ManeuverNodes <= 0) return Refuse(request, AutopilotReasons.NoManeuverNode, "the active vessel has no maneuver node");
             if (kind == AutopilotKind.Ascent && telemetry.Orbiting && telemetry.PeriapsisMeters > telemetry.OrbitFloorMeters)
                 return Refuse(request, AutopilotReasons.NotApplicable, "the vessel is already in orbit around " + telemetry.BodyName);
@@ -172,6 +179,41 @@ namespace KspControl.Bridge
             var minimum = telemetry.OrbitFloorMeters + AutopilotLimits.OrbitMarginMeters;
             if (kind == AutopilotKind.Ascent && job.TargetAltitudeMeters < minimum)
                 return Refuse(request, ControlReasons.InvalidArgument, "targetAltitudeMeters must be at least " + Math.Round(minimum) + " m for " + telemetry.BodyName + ": the higher of the atmosphere top and the safe orbit altitude, plus " + AutopilotLimits.OrbitMarginMeters + " m");
+            return null;
+        }
+
+        /// <summary>
+        /// The recovery preconditions, read from the vessel the job is bound to: flying, an atmosphere, a target under its top, a parachute. The topology
+        /// is previewed (separation candidates, root part, heat shield) and reported as warnings, never a refusal: the live phases re-decide every stage.
+        /// </summary>
+        private BridgeResponse CheckRecovery(BridgeRequest request, AutopilotJob job)
+        {
+            if (recovery == null) return Refuse(request, AutopilotReasons.FlightUnavailable, "the recovery port is not available");
+            RecoveryReading r;
+            try { r = recovery.Read(job.VesselId); } catch (Exception) { r = null; }
+            if (r == null) return Refuse(request, AutopilotReasons.FlightUnavailable, "the vessel could not be read");
+            if (r.Landed || r.Situation == "PRELAUNCH") return Refuse(request, AutopilotReasons.NotApplicable, "the vessel is " + r.Situation + "; there is nothing to recover from");
+            if (!r.HasAtmosphere) return Refuse(request, AutopilotReasons.NotApplicable, r.Body + " has no atmosphere: a parachute recovery is impossible there");
+            if (job.RecoveryRequest.TargetPeriapsisMeters >= r.AtmosphereTopMeters)
+                return Refuse(request, ControlReasons.InvalidArgument, "targetPeriapsisMeters must be below the atmosphere top of " + r.Body + " (" + Math.Round(r.AtmosphereTopMeters) + " m)");
+            if (!r.UsableChutes.Any()) return Refuse(request, AutopilotReasons.NoParachute, "the vessel has no usable parachute (none fitted, or all cut)");
+
+            string stopsAt;
+            var candidates = RecoverySeparation.Candidates(r, out stopsAt);
+            var warnings = new JArray();
+            if (!r.RootIsCommand) warnings.Add("root_not_command: the root part is not a command or crewed part, so separation is skipped (the crew would fly off as a new vessel)");
+            if (!r.Parts.Any(p => p.HeatShield)) warnings.Add("no_heat_shield: no ModuleAblator part; a steep reentry may overheat the capsule");
+            if (r.CrewCount == 0) warnings.Add("uncrewed: no living crew aboard");
+            if (r.Parts.Any(p => p.Propulsion && !p.Crewed && !p.Command) && candidates.Count == 0) warnings.Add("separation_unavailable: engines or tanks are attached and no stage before " + stopsAt + " can drop them");
+            if (r.Parts.Any(p => p.Parachute && p.StagingOn && r.Parts.Any(q => q.Separator && q.StagingOn && q.InverseStage == p.InverseStage)))
+                warnings.Add("parachute_stage_decouples: a parachute shares its stage with a decoupler; chutes are armed per part, that stage is never fired");
+            job.RecoveryPreview = new JObject
+            {
+                ["deorbitBurnNeeded"] = r.PeriapsisMeters > job.RecoveryRequest.TargetPeriapsisMeters,
+                ["separationCandidates"] = new JArray(candidates), ["separationStopsAt"] = stopsAt,
+                ["parachutes"] = r.UsableChutes.Count(), ["heatShield"] = r.Parts.Any(p => p.HeatShield), ["crew"] = r.CrewCount,
+                ["warnings"] = warnings
+            };
             return null;
         }
 
@@ -208,6 +250,36 @@ namespace KspControl.Bridge
             if (double.IsNaN(inclination) || double.IsInfinity(inclination) || inclination < AutopilotLimits.InclinationMinDegrees || inclination > AutopilotLimits.InclinationMaxDegrees)
                 return "inclinationDegrees must be " + AutopilotLimits.InclinationMinDegrees + ".." + AutopilotLimits.InclinationMaxDegrees;
             return Bool(args, "autostage", out autostage);
+        }
+
+        private static string ReadRecoveryArguments(JObject args, out RecoveryRequest recover)
+        {
+            recover = new RecoveryRequest();
+            long value;
+            var problem = OptionalInteger(args, "targetPeriapsisMeters", RecoveryLimits.TargetPeriapsisDefaultMeters, RecoveryLimits.TargetPeriapsisMinMeters, RecoveryLimits.TargetPeriapsisMaxMeters, out value);
+            if (problem != null) return problem;
+            recover.TargetPeriapsisMeters = value;
+            problem = OptionalInteger(args, "armAltitudeMeters", RecoveryLimits.ArmAltitudeDefaultMeters, RecoveryLimits.ArmAltitudeMinMeters, RecoveryLimits.ArmAltitudeMaxMeters, out value);
+            if (problem != null) return problem;
+            recover.ArmAltitudeMeters = value;
+            var burnAt = args["burnAt"];
+            if (burnAt != null && burnAt.Type != JTokenType.Null)
+            {
+                if (burnAt.Type != JTokenType.String || !RecoveryLimits.IsBurnAt((string)burnAt)) return "burnAt must be \"" + RecoveryLimits.BurnAtNow + "\" or \"" + RecoveryLimits.BurnAtApoapsis + "\"";
+                recover.BurnAtApoapsis = (string)burnAt == RecoveryLimits.BurnAtApoapsis;
+            }
+            return null;
+        }
+
+        private static string OptionalInteger(JObject args, string name, long fallback, long min, long max, out long value)
+        {
+            value = fallback;
+            var token = args[name];
+            if (token == null || token.Type == JTokenType.Null) return null;
+            if (token.Type != JTokenType.Integer) return name + " must be an integer";
+            value = (long)token;
+            if (value < min || value > max) return name + " must be " + min + ".." + max;
+            return null;
         }
 
         private static string Bool(JObject args, string name, out bool value)

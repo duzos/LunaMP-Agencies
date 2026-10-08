@@ -7,7 +7,7 @@ using Newtonsoft.Json.Linq;
 
 namespace KspControl.Bridge
 {
-    internal enum AutopilotKind { Ascent, ExecuteNode, PlanCircularize, PlanHohmann }
+    internal enum AutopilotKind { Ascent, ExecuteNode, PlanCircularize, PlanHohmann, Recover }
 
     /// <summary>The user object this bridge puts in MechJeb's user pools. Its identity is how the adapter tells our hold from anyone else's.</summary>
     internal sealed class BridgeUser
@@ -30,6 +30,8 @@ namespace KspControl.Bridge
         public int ScanEveryFrames = 5;
         /// <summary>How long after engaging the ascent the bridge waits before firing the first stage of a vessel still on the pad.</summary>
         public long IgniteDelayMs = 1000;
+        /// <summary>Phase machine timing of flight.autopilot_recover.</summary>
+        public RecoveryOptions Recovery = new RecoveryOptions();
     }
 
     /// <summary>
@@ -71,6 +73,9 @@ namespace KspControl.Bridge
         public bool? AscentFinished { get; set; }
         public int StartNodes { get; set; }
         public JObject Plan { get; set; }
+        public RecoveryRequest RecoveryRequest { get; set; }
+        /// <summary>The admission preview of a recovery: separation candidates and topology warnings.</summary>
+        public JObject RecoveryPreview { get; set; }
         public DateTime CreatedUtc { get; set; }
         public DateTime UpdatedUtc { get; set; }
         public DateTime? CompletedUtc { get; set; }
@@ -84,6 +89,7 @@ namespace KspControl.Bridge
         /// <summary>The node executor's Autowarp before we forced it off, restored on release.</summary>
         internal bool? SavedAutowarp;
         internal bool IgniteAttempted;
+        internal RecoveryMachine Recovery;
 
         public static string OperationName(AutopilotKind kind)
         {
@@ -92,6 +98,7 @@ namespace KspControl.Bridge
                 case AutopilotKind.Ascent: return "autopilot_ascent";
                 case AutopilotKind.ExecuteNode: return "autopilot_execute_node";
                 case AutopilotKind.PlanCircularize: return "autopilot_plan_circularize";
+                case AutopilotKind.Recover: return "autopilot_recover";
                 default: return "autopilot_plan_hohmann";
             }
         }
@@ -123,6 +130,13 @@ namespace KspControl.Bridge
                 envelope["ascentFinished"] = AscentFinished.HasValue ? (JToken)AscentFinished.Value : JValue.CreateNull();
                 envelope["ignitedByBridge"] = IgnitedByBridge.HasValue ? (JToken)IgnitedByBridge.Value : JValue.CreateNull();
                 if (Ignition != null) envelope["ignition"] = Ignition;
+            }
+            else if (Kind == AutopilotKind.Recover)
+            {
+                var r = RecoveryRequest ?? new RecoveryRequest();
+                envelope["request"] = new JObject { ["targetPeriapsisMeters"] = r.TargetPeriapsisMeters, ["burnAt"] = r.BurnAtApoapsis ? RecoveryLimits.BurnAtApoapsis : RecoveryLimits.BurnAtNow, ["armAltitudeMeters"] = r.ArmAltitudeMeters };
+                if (RecoveryPreview != null) envelope["preview"] = RecoveryPreview;
+                if (Recovery != null) envelope["recovery"] = Recovery.Describe();
             }
             else if (Kind == AutopilotKind.ExecuteNode)
             {

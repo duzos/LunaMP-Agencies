@@ -43,6 +43,17 @@ public sealed class AutopilotService(MutationService mutations)
   return Run(AutopilotOperations.PlanHohmann,requestId,leaseId,new JObject { ["requestId"]=requestId,["targetBodyName"]=targetBodyName },cancellationToken);
  }
 
+ public Task<string> RecoverAsync(string requestId,string leaseId,int targetPeriapsisMeters,string burnAt,int armAltitudeMeters,CancellationToken cancellationToken)
+ {
+  var bad=MutationArguments.RequestId(requestId) ?? MutationArguments.Lease(leaseId);
+  if(bad==null && (targetPeriapsisMeters<RecoveryLimits.TargetPeriapsisMinMeters || targetPeriapsisMeters>RecoveryLimits.TargetPeriapsisMaxMeters)) bad=$"targetPeriapsisMeters must be {RecoveryLimits.TargetPeriapsisMinMeters}..{RecoveryLimits.TargetPeriapsisMaxMeters}";
+  if(bad==null && !RecoveryLimits.IsBurnAt(burnAt)) bad=$"burnAt must be {RecoveryLimits.BurnAtNow} or {RecoveryLimits.BurnAtApoapsis}";
+  if(bad==null && (armAltitudeMeters<RecoveryLimits.ArmAltitudeMinMeters || armAltitudeMeters>RecoveryLimits.ArmAltitudeMaxMeters)) bad=$"armAltitudeMeters must be {RecoveryLimits.ArmAltitudeMinMeters}..{RecoveryLimits.ArmAltitudeMaxMeters}";
+  if(bad!=null) return Task.FromResult(CraftPlanService.Invalid(bad));
+  var args=new JObject { ["requestId"]=requestId,["targetPeriapsisMeters"]=targetPeriapsisMeters,["burnAt"]=burnAt,["armAltitudeMeters"]=armAltitudeMeters };
+  return Run(AutopilotOperations.Recover,requestId,leaseId,args,cancellationToken);
+ }
+
  private Task<string> Run(string bridgeOperation,string requestId,string leaseId,JObject args,CancellationToken cancellationToken)
   => mutations.RunAsync(AutopilotOperations.Effect,bridgeOperation,requestId,leaseId.ToLowerInvariant(),args,OperationLimits.WaitSecondsMax,cancellationToken,FlightEffects.JournalEntity);
 }
@@ -89,4 +100,13 @@ public sealed class AutopilotTools(BridgeClient bridge,AutopilotService service)
   [Description("Lease id, 32 hex characters, from control_acquire_lease taken in the flight scene.")] [StringLength(ControlLimits.LeaseIdLength,MinimumLength=ControlLimits.LeaseIdLength)] string leaseId,
   [Description("Name of a moon of the current body, for example Mun.")] [StringLength(AutopilotLimits.BodyNameMax,MinimumLength=1)] string targetBodyName,
   CancellationToken cancellationToken=default) => service.PlanHohmannAsync(requestId,leaseId,targetBodyName,cancellationToken);
+
+ [McpServerTool, Description("Bring the active vessel's crew home: deorbit, separation, reentry and parachute landing, run by the bridge as one job. Phases (recovery.phase): deorbit_align/deorbit_wait_apoapsis/deorbit_burn (only when periapsis is above targetPeriapsisMeters: holds retrograde with MechJeb's attitude controller (core.Attitude, usable even when SmartASS is tech-locked), burns through the bridge's fly-by-wire throttle once within 5 degrees, tapers near the target and cuts when periapsis is at or under it), separation (fires each next stage that has a decoupler and no crewed, command, parachute or heat-shield part while engines or fuel tanks are still attached; skipped when the root part is not the command part), coast (attitude released above the atmosphere top + 5 km), reentry (holds surface retrograde, heat shield first, down to 20 km, then releases so the capsule weathervanes), descent, landed. Parachutes are armed per part with ModuleParachute.Deploy (their stage is never fired): as soon as a chute reads SAFE inside the atmosphere, below armAltitudeMeters above the terrain when it is RISKY or stock will hold it until safe, and below 2 km whatever it reads. Ends completed on LANDED or SPLASHED with recovery.impactSpeedMetersPerSecond (surface speed of the last frame before touchdown) and crewAlive, or failed with crew_lost, vessel_lost, deorbit_failed (the burn stopped lowering periapsis above the atmosphere: the vessel stays in orbit), attitude_not_reached or autopilot_timeout (2 hours). Each poll reports recovery {phase, attitude, throttle, stagesFired, separation, warnings, chutes [{state, safety, armedByBridge, armReason}], chutesArmed, chutesOpen, telemetry {altitude, heightAboveTerrain, surface and vertical speed, apoapsis, periapsis, stage}} and the admission preview (separation candidates, topology warnings). Refuses no_parachute, not_applicable (landed, pre-launch or an airless body), competing_controller and mechjeb_module_unavailable. Nothing burns or stages under time warp. Stop, a lost lease, a vessel switch, flight-control input, another MechJeb user or SmartASS taking the attitude controller ends it with the throttle cut and MechJeb released."+Lifecycle)]
+ public Task<string> FlightRecover(
+  [Description("Unique id for this request, 8..128 characters of A-Z a-z 0-9 _ -.")] [StringLength(OperationLimits.SnapshotIdMax,MinimumLength=OperationLimits.SnapshotIdMin)] string requestId,
+  [Description("Lease id, 32 hex characters, from control_acquire_lease taken in the flight scene.")] [StringLength(ControlLimits.LeaseIdLength,MinimumLength=ControlLimits.LeaseIdLength)] string leaseId,
+  [Description("Periapsis in metres the deorbit burn aims at or under, -50000..60000 and below the atmosphere top (default 30000). No burn when periapsis is already there.")] [Range(RecoveryLimits.TargetPeriapsisMinMeters,RecoveryLimits.TargetPeriapsisMaxMeters)] int targetPeriapsisMeters=RecoveryLimits.TargetPeriapsisDefaultMeters,
+  [Description("When the deorbit burn starts: now (as soon as aligned, the default) or apoapsis (20 seconds before the next apoapsis).")] string burnAt=RecoveryLimits.BurnAtNow,
+  [Description("Height above the terrain in metres under which parachutes are armed if they have not been armed as safe already, 1000..30000 (default 10000).")] [Range(RecoveryLimits.ArmAltitudeMinMeters,RecoveryLimits.ArmAltitudeMaxMeters)] int armAltitudeMeters=RecoveryLimits.ArmAltitudeDefaultMeters,
+  CancellationToken cancellationToken=default) => service.RecoverAsync(requestId,leaseId,targetPeriapsisMeters,burnAt,armAltitudeMeters,cancellationToken);
 }

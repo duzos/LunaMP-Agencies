@@ -67,6 +67,8 @@
     <Compile Include="../Bridge/MechJebJob.cs" Link="MechJebJob.cs" />
     <Compile Include="../Bridge/MechJebRunner.cs" Link="MechJebRunner.cs" />
     <Compile Include="../Bridge/MechJebService.cs" Link="MechJebService.cs" />
+    <Compile Include="../Bridge/RecoveryPorts.cs" Link="RecoveryPorts.cs" />
+    <Compile Include="../Bridge/RecoveryMachine.cs" Link="RecoveryMachine.cs" />
     <Compile Include="../Bridge/ManeuverMath.cs" Link="ManeuverMath.cs" />
     <Compile Include="../Bridge/LaunchPort.cs" Link="LaunchPort.cs" />
     <Compile Include="../Bridge/SpendCapStore.cs" Link="SpendCapStore.cs" />

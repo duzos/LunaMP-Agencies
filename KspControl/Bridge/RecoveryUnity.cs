@@ -50,7 +50,7 @@ namespace KspControl.Bridge
                 if (part == null) continue;
                 var info = Describe(part);
                 reading.Parts.Add(info);
-                if (ReferenceEquals(part, vessel.rootPart)) reading.RootIsCommand = info.Command || info.Crewed;
+                if (ReferenceEquals(part, vessel.rootPart)) { reading.RootIsCommand = info.Command || info.Crewed; reading.RootPartId = info.PartId; }
                 foreach (PartModule module in part.Modules)
                 {
                     var chute = module as ModuleParachute;
@@ -70,6 +70,7 @@ namespace KspControl.Bridge
             var info = new RecoveryPart
             {
                 PartId = part.persistentId.ToString(), Name = part.partInfo == null ? part.name : part.partInfo.name,
+                ParentId = part.parent == null ? null : part.parent.persistentId.ToString(),
                 InverseStage = part.inverseStage, StagingOn = part.stagingOn, Crewed = part.protoModuleCrew != null && part.protoModuleCrew.Count > 0
             };
             var engine = false;
@@ -85,6 +86,7 @@ namespace KspControl.Bridge
             var propellant = false;
             foreach (PartResource resource in part.Resources)
                 if (resource != null && resource.maxAmount > 0 && Array.IndexOf(PropellantNames, resource.resourceName) >= 0) { propellant = true; break; }
+            info.Engine = engine;
             info.Propulsion = engine || (propellant && !info.Command && !info.Crewed);
             return info;
         }
@@ -94,7 +96,7 @@ namespace KspControl.Bridge
         public IList<FlightPartAction> StageGroupBindings() { return flight.GroupBindings("Stage"); }
         public void ActivateNextStage() { flight.ActivateNextStage(); }
 
-        public bool ArmChute(string vesselId, string partId)
+        public bool ArmChute(string vesselId, string partId, int automateSafeDeploy)
         {
             var vessel = MechJebSources.FindVessel(vesselId);
             if (vessel == null || vessel.parts == null) return false;
@@ -106,8 +108,10 @@ namespace KspControl.Bridge
                 var chute = module as ModuleParachute;
                 if (chute == null) continue;
                 found = true;
-                // Deploy() arms a STOWED chute (state ACTIVE); stock opens it once deploymentSafeState is within automateSafeDeploy. It refuses while shielded.
-                chute.Deploy();
+                // Stock opens an ACTIVE chute only while automateSafeDeploy >= (int)deploymentSafeState (SAFE 0, RISKY 1, UNSAFE 2, NONE 3 in vacuum), so this
+                // decides when it may open. Deploy() arms a STOWED chute (state ACTIVE) and refuses while it is shielded from the airstream.
+                chute.automateSafeDeploy = Math.Max(0, Math.Min(2, automateSafeDeploy));
+                if (chute.deploymentState == ModuleParachute.deploymentStates.STOWED) chute.Deploy();
             }
             return found;
         }

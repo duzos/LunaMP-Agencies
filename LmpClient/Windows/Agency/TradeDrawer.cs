@@ -16,6 +16,7 @@ namespace LmpClient.Windows.Agency
         private static string tradeSearch = "", tradeError, tradeDraftVesselName;
         private static string giveFunds = "0", giveScience = "0", receiveFunds = "0", receiveScience = "0";
         private static int tradeDesignSource, tradeDesignMode;
+        private static string tradeStockFingerprint, tradeStockUnits = "1";
         private static ToolingManifest tradeInfoManifest, tradeDraftManifest;
         private static string tradeInfoKey, tradeInfoError;
         private static float tradeInfoRefresh;
@@ -42,7 +43,7 @@ namespace LmpClient.Windows.Agency
                 tradeSave = HighLogic.SaveFolder;
                 tradeBuyer = tradeVessel = tradeConfirm = tradeLoadConfirm = Guid.Empty;
                 tradeDraft = null; tradeError = null;
-                tradeDesignSource = tradeDesignMode = 0; tradeBlueprintPath = tradeBlueprintLabel = null;
+                tradeDesignSource = tradeDesignMode = 0; tradeStockFingerprint = null; tradeStockUnits = "1"; tradeBlueprintPath = tradeBlueprintLabel = null;
                 tradeInfoManifest = tradeDraftManifest = null; tradeInfoKey = tradeInfoError = null;
                 if (tradeBrowser != null) tradeBrowser.Dismiss();
                 tradeBrowser = null;
@@ -80,6 +81,11 @@ namespace LmpClient.Windows.Agency
                         GUILayout.Label(incoming ? "The seller prepays " + Funds(offer.PrepaidLaunchFunds) + " when you accept. At launch you pay only inventory and any part cost above that prepayment (for example extra fuel). No tooling is included." :
                             "Your agency prepays " + Funds(offer.PrepaidLaunchFunds) + " when the buyer accepts. No tooling is included.", tradeText);
                     }
+                    else if (offer.DesignMode == TradeDesignMode.Stock)
+                    {
+                        GUILayout.Label("Stock: " + offer.StockUnits + " × " + offer.BlueprintName + " (prepaid parts covered, total " + Funds(offer.StockPrepaidTotal) + ")", tradeText);
+                        GUILayout.Label(incoming ? "You launch these free (you pay inventory and any extra part cost). No tooling is included." : "The units are held for this offer and come back to your stock if it is declined, withdrawn or expires. You keep your tooling.", tradeText);
+                    }
                     else GUILayout.Label("Tooled design: " + offer.BlueprintName + " (" + offer.Editor + ")", tradeText);
                 }
                 GUILayout.Label("Your agency gives", tradeHeading);
@@ -94,7 +100,7 @@ namespace LmpClient.Windows.Agency
                         if (incoming)
                         {
                             var confirming = tradeConfirm == offer.OfferId && tradeConfirmRevision == offer.Revision;
-                            if (confirming) GUILayout.Label("Confirm this exchange? The server will transfer both sides together." + (offer.DesignMode == TradeDesignMode.SingleLaunch && !string.IsNullOrEmpty(offer.DesignFingerprint) ? " The seller's prepayment of " + Funds(offer.PrepaidLaunchFunds) + " is taken at the same moment." : ""), tradeText);
+                            if (confirming) GUILayout.Label("Confirm this exchange? The server will transfer both sides together." + (offer.DesignMode == TradeDesignMode.SingleLaunch && !string.IsNullOrEmpty(offer.DesignFingerprint) ? " The seller's prepayment of " + Funds(offer.PrepaidLaunchFunds) + " is taken at the same moment." : "") + (offer.DesignMode == TradeDesignMode.Stock && !string.IsNullOrEmpty(offer.DesignFingerprint) ? " The " + offer.StockUnits + " stock units transfer together with the currencies." : ""), tradeText);
                             GUILayout.BeginHorizontal();
                             if (GUILayout.Button(confirming ? "Confirm exchange" : "Review and accept", tradeButton))
                             {
@@ -125,7 +131,9 @@ namespace LmpClient.Windows.Agency
                 if (tradeDraft.VesselId != Guid.Empty) GUILayout.Label("Transfers ownership of " + tradeDraftVesselName + ".", tradeText);
                 if (tradeDraft.BlueprintData.Length > 0)
                 {
-                    if (tradeDraft.DesignMode == TradeDesignMode.SingleLaunch)
+                    if (tradeDraft.DesignMode == TradeDesignMode.Stock)
+                        GUILayout.Label("Gives " + tradeDraft.StockUnits + " units of " + tradeDraft.BlueprintName + ". The units leave your stock now and come back if the offer is declined, withdrawn or expires. You keep your tooling.", tradeText);
+                    else if (tradeDraft.DesignMode == TradeDesignMode.SingleLaunch)
                     {
                         GUILayout.Label("Includes a copy of " + tradeDraft.BlueprintName + " (" + tradeDraft.Editor + ") and one free launch. No tooling is included.", tradeText);
                         GUILayout.Label("Your agency prepays about " + Funds(tradeDraftPrepay) + " when the buyer accepts, at your " + (tradeDraftTooled ? "tooled" : "untooled") + " rate of " + tradeDraftRate.ToString("0.##", CultureInfo.InvariantCulture) + "x. The buyer pays only inventory and any extra part cost.", tradeText);
@@ -192,6 +200,13 @@ namespace LmpClient.Windows.Agency
                     {
                         draft.DesignMode = (TradeDesignMode)tradeDesignMode;
                         if (draft.DesignMode == TradeDesignMode.ToolingAndDesign && !ToolingClient.HasTooling(draft.DesignFingerprint)) throw new InvalidOperationException("Tool this design in the editor first, or sell one free launch instead.");
+                        if (draft.DesignMode == TradeDesignMode.Stock)
+                        {
+                            if (!string.IsNullOrEmpty(tradeStockFingerprint) && draft.DesignFingerprint != tradeStockFingerprint) throw new InvalidOperationException("This craft is not the design you chose to sell. Choose its saved craft file.");
+                            var available = StockUi.Available(draft.DesignFingerprint);
+                            if (available < 1) throw new InvalidOperationException("You hold no stock of this design. Build stock in the Designs tab first.");
+                            draft.StockUnits = StockUi.ParseUnits(tradeStockUnits, available);
+                        }
                         tradeDraftPrepay = TradeClient.EstimatePrepay(manifest, out tradeDraftRate, out tradeDraftTooled);
                     }
                     tradeDraftManifest = manifest;
@@ -229,13 +244,29 @@ namespace LmpClient.Windows.Agency
             if (tradeInfoManifest == null) { GUILayout.Label(tradeInfoError ?? "Choose a craft first.", tradeText); return; }
             var tooled = ToolingClient.HasTooling(ToolingPolicy.Fingerprint(tradeInfoManifest));
             var prepay = TradeClient.EstimatePrepay(tradeInfoManifest, out var rate, out _);
-            if (!tooled) tradeDesignMode = (int)TradeDesignMode.SingleLaunch;
+            var stockAvailable = StockUi.Available(ToolingPolicy.Fingerprint(tradeInfoManifest));
+            if (tradeDesignMode == (int)TradeDesignMode.Stock && stockAvailable <= 0) tradeDesignMode = (int)(tooled ? TradeDesignMode.ToolingAndDesign : TradeDesignMode.SingleLaunch);
+            if (!tooled && tradeDesignMode == (int)TradeDesignMode.ToolingAndDesign) tradeDesignMode = (int)TradeDesignMode.SingleLaunch;
             var enabled = GUI.enabled;
             GUI.enabled = enabled && tooled;
             if (GUILayout.Toggle(tradeDesignMode == (int)TradeDesignMode.ToolingAndDesign, "Design + tooling: unlimited launches at the tooled price (you keep your tooling)", tradeButton)) tradeDesignMode = (int)TradeDesignMode.ToolingAndDesign;
             GUI.enabled = enabled;
             if (!tooled) GUILayout.Label("Tool this design in the editor first to sell tooling.", tradeText);
             if (GUILayout.Toggle(tradeDesignMode == (int)TradeDesignMode.SingleLaunch, "Design + one free launch (no tooling): you prepay " + Funds(prepay) + " now at your " + (tooled ? "tooled" : "untooled") + " rate (" + rate.ToString("0.##", CultureInfo.InvariantCulture) + "x)", tradeButton)) tradeDesignMode = (int)TradeDesignMode.SingleLaunch;
+            GUI.enabled = enabled && stockAvailable > 0;
+            if (GUILayout.Toggle(tradeDesignMode == (int)TradeDesignMode.Stock, "Sell stock: K of " + stockAvailable + " units (no tooling; buyer launches these free)", tradeButton)) tradeDesignMode = (int)TradeDesignMode.Stock;
+            GUI.enabled = enabled;
+            if (stockAvailable <= 0) GUILayout.Label("Build stock in the Designs tab first.", tradeText);
+            else if (tradeDesignMode == (int)TradeDesignMode.Stock)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Units", GUILayout.Width(48));
+                tradeStockUnits = GUILayout.TextField(tradeStockUnits ?? "1", 4, GUILayout.Width(56));
+                StockUi.Digits(tradeStockUnits, out tradeStockUnits);
+                GUILayout.Label("of " + stockAvailable, GUILayout.Width(60));
+                GUILayout.EndHorizontal();
+                if (StockUi.LotSlotsFull) GUILayout.Label("Lot slots are full: turn off Use stock, or sell or launch a smaller lot.", tradeText);
+            }
         }
 
         private static void BrowseTradeBlueprint(EditorFacility facility)
@@ -278,7 +309,7 @@ namespace LmpClient.Windows.Agency
         private static void DrawReceivedTrades()
         {
             var designs = TradeClient.GetReceivedDesignsSnapshot();
-            if (designs.Count == 0) GUILayout.Label("Purchased designs will appear here. Tooling plus design gives unlimited launches at the tooled price. One free launch is spent by your next launch of the exact part list, which then behaves like any untooled design. Adding or removing parts changes the design.", tradeText);
+            if (designs.Count == 0) GUILayout.Label("Purchased designs and bought stock will appear here. Stock units let you launch that design free (inventory and extra part cost still apply) until they run out. Tooling plus design gives unlimited launches at the tooled price. One free launch is spent by your next launch of the exact part list, which then behaves like any untooled design. Adding or removing parts changes the design.", tradeText);
             foreach (var design in designs)
             {
                 GUILayout.BeginVertical(GUI.skin.box);
@@ -286,6 +317,8 @@ namespace LmpClient.Windows.Agency
                 GUILayout.Label("From " + TradeAgencyName(design.SellerAgencyId) + " · " + design.Editor, tradeText);
                 if (design.Kind == TradeEntitlementKind.SingleLaunch)
                     GUILayout.Label("One free launch: " + (design.Redeemed ? "Used" : design.Reserved ? "In progress" : "Available") + " (seller prepaid " + Funds(design.PrepaidFunds) + ")", tradeText);
+                else if (design.Kind == TradeEntitlementKind.StockDesign)
+                    GUILayout.Label("Stock: " + design.StockUnits + " units available", tradeText);
                 else if (design.VesselId == Guid.Empty && !string.IsNullOrEmpty(design.LocalPath)) GUILayout.Label("Tooling + design (unlimited)", tradeText);
                 GUILayout.Label(design.DeliveryStatus, tradeText);
                 if (!string.IsNullOrEmpty(design.LocalPath))

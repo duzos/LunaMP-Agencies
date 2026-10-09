@@ -36,7 +36,7 @@ namespace LmpClient.Windows.Agency
                 button = new GUIStyle(GUI.skin.button) { wordWrap = true };
             }
             WindowRect.width = Mathf.Min(340, Screen.width - 16);
-            WindowRect.height = Mathf.Min(compact ? (ToolingClient.EditorVoucher != null ? 150 : 112) : 420, Screen.height - 32);
+            WindowRect.height = Mathf.Min(compact ? (ToolingClient.EditorVoucher != null || ToolingClient.EditorStock != null ? 150 : 112) : 420, Screen.height - 32);
             WindowRect = FixWindowPos(GUILayout.Window(6812 + MainSystem.WindowOffset, WindowRect, DrawContent, "Agency design",
                 GUILayout.Width(WindowRect.width), GUILayout.Height(WindowRect.height)));
         }
@@ -62,6 +62,12 @@ namespace LmpClient.Windows.Agency
             var voucher = ToolingClient.EditorVoucher;
             if (voucher != null)
                 GUILayout.Label("One free launch from " + SellerName(voucher.SellerAgencyId) + " applies: you pay " + Money(quote.LaunchCost) + " (inventory/extra only).", text);
+            var stock = ToolingClient.EditorStock;
+            if (stock != null)
+            {
+                var source = stock.SourceAgencyId == Guid.Empty ? "built by you" : "bought from " + SellerName(stock.SourceAgencyId);
+                GUILayout.Label("Using 1 of " + Math.Max(stock.Units, StockUi.Available(stock.Fingerprint)) + " stock (" + source + "): you pay " + Money(quote.LaunchCost) + " (inventory/extra only).", text);
+            }
             if (compact)
             {
                 if (GUILayout.Button("Show tooling details", button)) compact = false;
@@ -72,6 +78,12 @@ namespace LmpClient.Windows.Agency
             {
                 TradeClient.UseVoucher = GUILayout.Toggle(TradeClient.UseVoucher, "Use free launch voucher", button);
                 if (!TradeClient.UseVoucher) GUILayout.Label("The voucher stays unspent. This launch is charged the normal price.", text);
+            }
+            if (stock != null || StockUi.Available(quote.Fingerprint) > 0)
+            {
+                ToolingClient.UseStock = GUILayout.Toggle(ToolingClient.UseStock, "Use stock", button);
+                if (!ToolingClient.UseStock) GUILayout.Label("Stock stays unspent; this launch is charged the normal price.", text);
+                else if (stock == null && StockUi.LotSlotsFull) GUILayout.Label("Lot slots are full: turn off Use stock, or sell or launch a smaller lot.", text);
             }
             GUILayout.Label(quote.AlreadyTooled ? "This exact design is tooled for your agency." : "This design is not tooled. Launching it as is costs " + Multiplier(ToolingClient.Rates().UntooledLaunch) + " its part price (science parts and inventory stay 1x), or you can purchase tooling once.", text);
             CostRow("Science parts · full price", quote.ScienceCost);
@@ -99,7 +111,16 @@ namespace LmpClient.Windows.Agency
                     GUILayout.EndHorizontal();
                 }
             }
-            else confirmFingerprint = null;
+            else
+            {
+                confirmFingerprint = null;
+                if (ToolingClient.EditorBlueprintNeedsSave && GUILayout.Button("Save craft to tooling (free)", button))
+                {
+                    try { ToolingClient.SaveBlueprintToTooling(); }
+                    catch (Exception) { }
+                }
+                if (ToolingClient.EditorBlueprintNeedsSave) GUILayout.Label("Saves this craft with your tooling so the Designs tab can load it.", text);
+            }
             GUILayout.Space(6);
             GUILayout.Label(ToolingClient.LatestStatus ?? "Prices are confirmed by the server before launch.", text);
             GUILayout.EndScrollView();

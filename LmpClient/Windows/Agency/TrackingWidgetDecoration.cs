@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using KSP.UI.Screens;
+using LmpClient.Diagnostics;
 using LmpClient.Systems.Agency;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.SettingsSys;
@@ -22,6 +24,10 @@ namespace LmpClient.Windows.Agency
         private const float EvaluateInterval = 0.5f;
         private const float FlagWidth = 24f, FlagHeight = 15f, FlagInset = 2f, MarginShift = 28f;
         private static readonly FieldInfo IconImageField = AccessTools.Field(typeof(VesselIconSprite), "image");
+        // Per-widget lookup without a GetComponent call every frame; entries leave on OnDestroy.
+        private static readonly Dictionary<int, TrackingWidgetDecoration> Decorations = new Dictionary<int, TrackingWidgetDecoration>();
+        private static bool errorLogged;
+        private int key;
 
         private TrackingStationWidget widget;
         private TextMeshProUGUI nameText;
@@ -40,10 +46,30 @@ namespace LmpClient.Windows.Agency
         /// <summary>Called from <c>LabelEvents.OnMapWidgetTextProcessed</c> after every stock widget Update.</summary>
         internal static void Process(TrackingStationWidget widget)
         {
-            if (!widget || !widget.textName) return;
-            var decoration = widget.GetComponent<TrackingWidgetDecoration>();
-            if (!decoration) decoration = widget.gameObject.AddComponent<TrackingWidgetDecoration>();
-            decoration.Tick(widget);
+            try
+            {
+                if (!widget || !widget.textName) return;
+                var key = widget.GetInstanceID();
+                if (!Decorations.TryGetValue(key, out var decoration) || !decoration)
+                {
+                    decoration = widget.GetComponent<TrackingWidgetDecoration>();
+                    if (!decoration) decoration = widget.gameObject.AddComponent<TrackingWidgetDecoration>();
+                    decoration.key = key;
+                    Decorations[key] = decoration;
+                }
+                decoration.Tick(widget);
+            }
+            catch (Exception e)
+            {
+                if (errorLogged) return;
+                errorLogged = true;
+                PlaytestDiagnostics.Write("client.agency-presentation.tracking-widget-error", () => e.Message);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (Decorations.TryGetValue(key, out var current) && ReferenceEquals(current, this)) Decorations.Remove(key);
         }
 
         private void Tick(TrackingStationWidget source)
@@ -62,7 +88,10 @@ namespace LmpClient.Windows.Agency
                 return;
             }
 
-            var displayName = vessel.DiscoveryInfo.displayName.Value;
+            // Stock Update (this runs as its postfix) has just set textName to the discovery display name, so read
+            // it back instead of calling DiscoveryInfo.displayName.Value (a Localizer.Format allocation per frame).
+            var displayName = nameText.text;
+            if (composed != null && displayName == composed) displayName = rawName;
             var version = AgencyIdentityClient.Version;
             var now = Time.unscaledTime;
             if (vessel.id != lastVessel || version != lastVersion || now >= nextEvaluate || displayName != rawName)

@@ -150,6 +150,8 @@ namespace LmpClient.Harmony
             foreach(var button in new List<TrackingStationObjectButton>(counts.Keys))if(!button)counts.Remove(button);
             if(SpaceTracking.Instance)rebuildList?.Invoke(SpaceTracking.Instance,null);
             if(MapViewFiltering.Instance)updateCounts?.Invoke(MapViewFiltering.Instance,null);
+            // Plan 41: identification may have changed, so re-run the agency orbit / icon tint (orbit-only, no Version bump).
+            Systems.Agency.AgencyIdentityClient.RequestOrbitRefresh();
         }
         internal static void ClearHiddenSelection()
         {

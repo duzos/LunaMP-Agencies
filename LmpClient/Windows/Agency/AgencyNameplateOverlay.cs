@@ -1,5 +1,4 @@
 using System;
-using KSP.UI;
 using LmpClient.Systems.Agency;
 using LmpClient.Systems.SettingsSys;
 using LmpCommon.Agency;
@@ -60,8 +59,7 @@ namespace LmpClient.Windows.Agency
                 return;
             }
             if (!MainSystem.ToolbarShowGui || !FlightGlobals.ready || MapView.MapIsEnabled) return;
-            var ui = UIMasterController.Instance;
-            if (ui != null && !ui.IsUIShowing) return; // F2
+            if (StockUiOverlayGate.Covered()) return; // F2 / pause menu
             var cameraManager = CameraManager.Instance;
             if (cameraManager != null && (cameraManager.currentCameraMode == CameraManager.CameraMode.IVA || cameraManager.currentCameraMode == CameraManager.CameraMode.Internal)) return;
             var active = FlightGlobals.ActiveVessel;

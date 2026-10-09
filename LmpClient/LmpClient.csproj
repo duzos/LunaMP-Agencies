@@ -543,6 +543,7 @@
     <Compile Include="Windows\Agency\TrackingWidgetDecoration.cs" />
     <Compile Include="Windows\Agency\AgencyNameplateOverlay.cs" />
     <Compile Include="Windows\Agency\LaunchSiteFlagOverlay.cs" />
+    <Compile Include="Windows\Agency\StockUiOverlayGate.cs" />
     <Compile Include="Systems\Agency\LaunchSiteLocator.cs" />
     <Compile Include="Harmony\AgencySiteCaption.cs" />
     <Compile Include="Systems\Agency\AgencySystem.cs" />

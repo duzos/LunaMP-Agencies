@@ -128,14 +128,19 @@ namespace LmpClient.Windows.Status
 
             AgencyStyle agencyStyle = null;
             var agency = Guid.Empty;
-            if (SettingsSystem.CurrentSettings.AgencyChatPlayerList)
+            var agenciesOn = SettingsSystem.CurrentSettings.AgencyChatPlayerList;
+            if (agenciesOn)
             {
                 agency = AgencyPresentation.GetPlayerAgency(playerStatus.PlayerName);
-                if (agency != Guid.Empty && !AgencyPresentation.TryGetAgencyStyle(agency, out agencyStyle)) agency = Guid.Empty;
+                if (agency != Guid.Empty && !AgencyPresentation.TryGetFrameAgencyStyle(agency, out agencyStyle))
+                {
+                    agency = Guid.Empty;
+                    agencyStyle = null;
+                }
             }
 
             var version = AgencyIdentityClient.Version;
-            var useAgencyColour = agencyStyle != null && agencyStyle.HasColour;
+            var useAgencyColour = agencyStyle != null && agencyStyle.FrameHasColour;
             var colourAgency = useAgencyColour ? agency : Guid.Empty;
             if (!_playerNameStyle.TryGetValue(playerStatus.PlayerName, out var entry) || entry.Version != version || entry.Agency != colourAgency)
             {
@@ -157,7 +162,8 @@ namespace LmpClient.Windows.Status
                 _playerNameStyle[playerStatus.PlayerName] = entry;
             }
 
-            if (agencyStyle != null) AgencyBadge.DrawFlag(agency, 20, 12);
+            // Slot reserved while the toggle is on: names line up and Layout/Repaint control counts always match.
+            if (agenciesOn) AgencyBadge.DrawFlag(agency, 20, 12, true, entry.Style);
             GUILayout.Label(playerStatus.PlayerName, entry.Style);
             GUILayout.FlexibleSpace();
             GUILayout.Label(playerStatus.DisplayText, _stateTextStyle);

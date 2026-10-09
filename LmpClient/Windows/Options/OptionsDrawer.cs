@@ -102,6 +102,8 @@ namespace LmpClient.Windows.Options
         }
 
         private static bool _showAgencyDisplaySettings;
+        private static readonly GUIContent AutoCraftFlagContent = new GUIContent("Launch default-flag craft with agency flag",
+            "The agency flag is painted on the craft's flag parts, so every player who sees the craft sees it.");
         private static bool _nameplateRangeDirty;
         private static float _nameplateRangeSaved = float.NaN;
 
@@ -118,7 +120,7 @@ namespace LmpClient.Windows.Options
             if (tint != settings.AgencyTintVessels) { settings.AgencyTintVessels = tint; changed = refresh = true; }
             var trackingFlags = GUILayout.Toggle(settings.AgencyTrackingListFlags, "Agency flags in tracking station list");
             if (trackingFlags != settings.AgencyTrackingListFlags) { settings.AgencyTrackingListFlags = trackingFlags; changed = refresh = true; }
-            var autoFlag = GUILayout.Toggle(settings.AgencyAutoCraftFlag, "Launch default-flag craft with agency flag");
+            var autoFlag = GUILayout.Toggle(settings.AgencyAutoCraftFlag, AutoCraftFlagContent);
             if (autoFlag != settings.AgencyAutoCraftFlag) { settings.AgencyAutoCraftFlag = autoFlag; changed = true; }
             var nameplates = GUILayout.Toggle(settings.AgencyNameplates, "Agency nameplates over rival craft");
             if (nameplates != settings.AgencyNameplates) { settings.AgencyNameplates = nameplates; changed = true; }

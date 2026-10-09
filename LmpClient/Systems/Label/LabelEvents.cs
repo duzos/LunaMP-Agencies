@@ -19,6 +19,14 @@ namespace LmpClient.Systems.Label
 
                 if (!string.IsNullOrEmpty(owner))
                     label.text.text = $"{owner}\n{label.text.text}";
+
+                // Stock ProcessLabel assigns the label colour on every call (this runs as its postfix), so the tint
+                // is re-applied each frame and never restored. The stock target highlight (same test as stock) wins.
+                if (!AgencyPresentation.TryGetVesselStyle(vessel, SettingsSystem.CurrentSettings.AgencyTintVessels, out var style) || !style.HasColour) return;
+                var target = FlightGlobals.fetch ? FlightGlobals.fetch.VesselTarget : null;
+                var targetVessel = target?.GetVessel();
+                if (targetVessel != null && targetVessel == vessel) return;
+                label.text.color = style.TextColour;
             }
         }
 
@@ -31,6 +39,10 @@ namespace LmpClient.Systems.Label
             {
                 label.Header = $"{owner}\n{label.Header}";
             }
+
+            // Agency line above the owner line; TmpPrefix is TMP-escaped and already ends with a newline.
+            if (AgencyPresentation.TryGetVesselStyle(vessel, SettingsSystem.CurrentSettings.AgencyTintVessels, out var style))
+                label.Header = style.TmpPrefix + label.Header;
         }
 
         public void OnMapWidgetTextProcessed(TrackingStationWidget widget)

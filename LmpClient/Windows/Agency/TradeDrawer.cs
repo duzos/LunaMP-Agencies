@@ -164,7 +164,7 @@ namespace LmpClient.Windows.Agency
             foreach (var agency in AgencySystem.Singleton.KnownAgencies.Values.Where(a => a.Id != tradeAgency && (a.Name ?? "").IndexOf(tradeSearch, StringComparison.OrdinalIgnoreCase) >= 0).OrderBy(a => a.Name))
             {
                 GUILayout.BeginHorizontal();
-                if (SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(agency.Id, 32, 20);
+                if (SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(agency.Id, 32, 20, true, tradeButton);
                 if (GUILayout.Toggle(tradeBuyer == agency.Id, agency.Name, tradeButton)) tradeBuyer = agency.Id;
                 GUILayout.EndHorizontal();
             }

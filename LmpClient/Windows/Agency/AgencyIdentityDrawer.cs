@@ -32,7 +32,8 @@ namespace LmpClient.Windows.Agency
             GUILayout.BeginHorizontal();
             // Flag slot keeps its width even when the agency has no flag so rows stay aligned.
             if (SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(id, 32, 20, true);
-            if (AgencyPresentation.TryGetAgencyStyle(id, out var style) && style.HasColour)
+            // Frame-frozen: the accent is an extra control, so it must not appear between Layout and Repaint.
+            if (AgencyPresentation.TryGetFrameAgencyStyle(id, out var style) && style.FrameHasColour)
             {
                 var previous = GUI.color;
                 try

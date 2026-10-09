@@ -37,6 +37,13 @@ namespace LmpClient.Harmony
 
         private static bool appliedLogged, notInstalledLogged;
 
+        /// <summary>Re-arms the once-per-session craft flag diagnostics; called when a new server session starts.</summary>
+        internal static void ResetDiagnostics()
+        {
+            appliedLogged = false;
+            notInstalledLogged = false;
+        }
+
         /// <summary>
         /// Launch default-flag craft with the agency flag. Only the part flagURL changes: ship.missionFlag is left alone,
         /// and the tooling/trade fingerprints come from the craft file, so they are unaffected.

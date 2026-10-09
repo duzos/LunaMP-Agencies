@@ -32,11 +32,20 @@ namespace LmpClient.Harmony
             {
                 if (data == null || __instance == null || string.IsNullOrEmpty(__instance.name)) return;
                 var agency = AgencySystem.Singleton;
-                if (agency == null) return;
-                var snapshot = agency.LaunchSitesSnapshot;
-                if (!LaunchSiteFlagPolicy.ShouldShow(SettingsSystem.CurrentSettings.AgencySiteFlags, LaunchSiteAccess.Enabled, snapshot.Ready,
-                        snapshot.Assignments.TryGetValue(__instance.name, out var owner) ? owner : Guid.Empty, false)) return;
-                if (!AgencyPresentation.TryGetAgencyStyle(owner, out var style)) return;
+                var snapshot = agency?.LaunchSitesSnapshot;
+                var owner = Guid.Empty;
+                AgencyStyle style = null;
+                var show = snapshot != null
+                           && LaunchSiteFlagPolicy.ShouldShow(SettingsSystem.CurrentSettings.AgencySiteFlags, LaunchSiteAccess.Enabled, snapshot.Ready,
+                               snapshot.Assignments.TryGetValue(__instance.name, out owner) ? owner : Guid.Empty, false)
+                           && AgencyPresentation.TryGetAgencyStyle(owner, out style);
+                if (!show)
+                {
+                    // Stock never resets captionLine3, so take back our own line once it no longer applies.
+                    if (Lines.TryGetValue(__instance.name, out var stale) && stale.Line != null && ReferenceEquals(data.captionLine3, stale.Line))
+                        data.captionLine3 = null;
+                    return;
+                }
                 if (!Lines.TryGetValue(__instance.name, out var cached)) Lines[__instance.name] = cached = new CachedLine();
                 if (!ReferenceEquals(cached.TmpName, style.TmpName) || !ReferenceEquals(cached.Colour, style.TextColourHex))
                 {

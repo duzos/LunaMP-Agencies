@@ -41,6 +41,11 @@ namespace LmpClient.Systems.Agency
         // Per-frame frozen flag for GUILayout helpers (AgencyBadge) so Layout and Repaint agree.
         internal int LayoutFrame = -1;
         internal Texture2D LayoutFlag;
+        // Per-frame frozen Known / HasColour for GUILayout callers (TryGetFrameAgencyStyle).
+        internal int CheckedFrame = -1;
+        internal bool FrameKnown;
+        /// <summary><see cref="HasColour"/> as of the first <see cref="AgencyPresentation.TryGetFrameAgencyStyle"/> call this frame.</summary>
+        internal bool FrameHasColour;
     }
 
     /// <summary>
@@ -100,6 +105,25 @@ namespace LmpClient.Systems.Agency
             if (style.BuiltVersion != version || !ReferenceEquals(style.BuiltName, name)) Rebuild(style, version, info);
             else if (style.FlagUrl != null && !style.Flag) style.Flag = GetFlagTexture(style.FlagUrl);
             return style.Known;
+        }
+
+        /// <summary>
+        /// As <see cref="TryGetAgencyStyle"/>, but the result and <see cref="AgencyStyle.FrameHasColour"/> are frozen at
+        /// the first call in a frame, so a GUILayout caller that adds or skips controls on them lays out the same
+        /// controls for Layout and Repaint even if an identity update lands in between.
+        /// </summary>
+        internal static bool TryGetFrameAgencyStyle(Guid agency, out AgencyStyle style)
+        {
+            var known = TryGetAgencyStyle(agency, out style);
+            if (style == null) return false;
+            var frame = Time.frameCount;
+            if (style.CheckedFrame != frame)
+            {
+                style.CheckedFrame = frame;
+                style.FrameKnown = known;
+                style.FrameHasColour = known && style.HasColour;
+            }
+            return style.FrameKnown;
         }
 
         /// <summary>

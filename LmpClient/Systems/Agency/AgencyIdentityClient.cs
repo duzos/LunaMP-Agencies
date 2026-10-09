@@ -20,6 +20,7 @@ namespace LmpClient.Systems.Agency
         {
             lock (Gate) { Identities.Clear(); Deleted.Clear(); Volatile.Write(ref supported, -1); }
             RequestRefresh();
+            LmpClient.Harmony.ShipConstruction_AssembleForLaunch.ResetDiagnostics();
         }
         internal static void Negotiate(int version)
         {
@@ -67,6 +68,11 @@ namespace LmpClient.Systems.Agency
             Interlocked.Increment(ref version);
             Interlocked.Exchange(ref refresh, 1);
         }
+        /// <summary>
+        /// Re-tints every vessel's orbit / icon on the next Update without bumping <see cref="Version"/> (no style
+        /// rebuild). Used when visibility changes which vessels may be identified.
+        /// </summary>
+        internal static void RequestOrbitRefresh() => Interlocked.Exchange(ref refresh, 1);
         // Called by the agency system's Unity Update routine, never the network handler.
         internal static void Update()
         {

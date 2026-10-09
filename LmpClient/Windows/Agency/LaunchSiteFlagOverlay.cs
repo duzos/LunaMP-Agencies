@@ -21,6 +21,7 @@ namespace LmpClient.Windows.Agency
         {
             if (Event.current == null || Event.current.type != EventType.Repaint || !MainSystem.ToolbarShowGui) return;
             if (MainSystem.NetworkState < LmpCommon.Enums.ClientState.Handshaking) return;
+            if (StockUiOverlayGate.Covered()) return; // F2, pause menu, KSC facility screens
             var scene = HighLogic.LoadedScene;
             var map = scene == GameScenes.TRACKSTATION || (scene == GameScenes.FLIGHT && MapView.MapIsEnabled);
             if (!map && scene != GameScenes.SPACECENTER) return;

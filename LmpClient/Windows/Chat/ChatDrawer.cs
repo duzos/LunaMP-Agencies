@@ -50,22 +50,29 @@ namespace LmpClient.Windows.Chat
 
             foreach (var chatMsg in ChatSystem.Singleton.ChatMessages)
             {
-                var styled = false;
+                var agency = System.Guid.Empty;
                 AgencyStyle agencyStyle = null;
                 if (agenciesOn && chatMsg.Item1 != consoleId)
                 {
-                    var agency = AgencyPresentation.GetPlayerAgency(chatMsg.Item1);
-                    styled = agency != System.Guid.Empty && AgencyPresentation.TryGetAgencyStyle(agency, out agencyStyle);
+                    agency = AgencyPresentation.GetPlayerAgency(chatMsg.Item1);
+                    // Frame-frozen so the colour decision cannot change between Layout and Repaint.
+                    if (agency == System.Guid.Empty || !AgencyPresentation.TryGetFrameAgencyStyle(agency, out agencyStyle))
+                    {
+                        agency = System.Guid.Empty;
+                        agencyStyle = null;
+                    }
                 }
 
-                _playerNameStyle.normal.textColor = styled && agencyStyle.HasColour
+                _playerNameStyle.normal.textColor = agencyStyle != null && agencyStyle.FrameHasColour
                     ? agencyStyle.TextColour
                     : PlayerColorSystem.Singleton.GetPlayerColor(chatMsg.Item1);
 
-                if (styled)
+                if (agenciesOn)
                 {
+                    // The flag slot is always reserved while the toggle is on, so every message lines up and the
+                    // control count never depends on whether this sender's agency is known yet.
                     GUILayout.BeginHorizontal();
-                    AgencyBadge.DrawFlag(agencyStyle.AgencyId, 16, 10);
+                    AgencyBadge.DrawFlag(agency, 16, 10, true, _playerNameStyle);
                     GUILayout.Label(chatMsg.Item3, _playerNameStyle, GUILayout.ExpandWidth(true));
                     GUILayout.EndHorizontal();
                 }

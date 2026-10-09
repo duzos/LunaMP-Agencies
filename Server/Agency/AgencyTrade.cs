@@ -1,6 +1,7 @@
 using LmpCommon.Agency;
 using LunaConfigNode.CfgNode;
 using Server.Client;
+using Server.Log;
 using Server.System;
 using System;
 using System.Collections.Generic;
@@ -34,7 +35,25 @@ namespace Server.Agency
         /// </summary>
         private static void CloseOffer(EconomyDocument document, StoredTradeOffer stored, TradeOfferStatus status, bool strict)
         {
-            throw new NotImplementedException("CloseOffer is implemented by plan 40 slice S2.");
+            stored.Offer.Status = status;
+            stored.Offer.Revision++;
+            var escrow = stored.Escrow;
+            stored.Escrow = new List<DesignStockLot>();
+            if (escrow == null || escrow.Count == 0) return;
+            var sellerId = stored.Offer.SellerAgencyId;
+            if (!document.Agencies.TryGetValue(sellerId, out var seller))
+            {
+                if (strict) throw new InvalidDataException("Offer " + stored.Offer.OfferId + " holds escrowed stock but its seller " + sellerId + " has no economy row.");
+                if (!AgencyStore.Agencies.TryGetValue(sellerId, out var source))
+                {
+                    // The agency was deleted; nobody is left to return the units to.
+                    LunaLog.Warning($"[Economy] Discarded {escrow.Sum(l => l.Units)} escrowed stock units of {stored.Offer.DesignFingerprint} from offer {stored.Offer.OfferId}: seller agency {sellerId} no longer exists.");
+                    return;
+                }
+                document.Agencies[sellerId] = seller = new EconomyAgency { Funds = source.Funds, Science = source.Science };
+            }
+            // Each escrow row came out of this seller's stock, so returning it never adds a lot slot (R1.1).
+            foreach (var lot in escrow) StockPolicy.Merge(seller.Stock, lot);
         }
 
         private static bool IsTradeOperation(EconomyOperation operation) => operation >= EconomyOperation.TradeCreate && operation <= EconomyOperation.TradeDelivered;
@@ -48,6 +67,7 @@ namespace Server.Agency
                 if (row.Blueprint.Length > 0 && Hash(row.Blueprint) != row.BlueprintHash) throw new InvalidDataException("Trade blueprint checksum mismatch.");
                 if (!Enum.IsDefined(typeof(TradeDesignMode), row.Offer.DesignMode) || !ToolingPolicy.FiniteNonNegative(row.Offer.PrepaidLaunchFunds) || !ToolingPolicy.FiniteNonNegative(row.Offer.LaunchMultiplier)) throw new InvalidDataException("Invalid trade design terms.");
                 if (row.Offer.DesignMode == TradeDesignMode.SingleLaunch && (string.IsNullOrEmpty(row.Offer.DesignFingerprint) || row.Blueprint.Length == 0)) throw new InvalidDataException("Invalid single-launch offer.");
+                ValidateStockOffer(row);
             }
             foreach (var received in document.Entitlements.Values)
             {
@@ -57,8 +77,43 @@ namespace Server.Agency
                     if (entitlement.EntitlementId == Guid.Empty || entitlement.BlueprintData.Length > 0 && Hash(entitlement.BlueprintData) != entitlement.BlueprintHash) throw new InvalidDataException("Invalid purchased design.");
                     if (!Enum.IsDefined(typeof(TradeEntitlementKind), entitlement.Kind) || !ToolingPolicy.FiniteNonNegative(entitlement.PrepaidFunds) || !ToolingPolicy.FiniteNonNegative(entitlement.LaunchMultiplier)) throw new InvalidDataException("Invalid purchased design terms.");
                     if (entitlement.Kind == TradeEntitlementKind.SingleLaunch && (string.IsNullOrEmpty(entitlement.Fingerprint) || entitlement.Redeemed && entitlement.LaunchId == Guid.Empty)) throw new InvalidDataException("Invalid single-launch voucher.");
+                    if (entitlement.Kind == TradeEntitlementKind.StockDesign && (string.IsNullOrEmpty(entitlement.Fingerprint) || entitlement.Redeemed || entitlement.LaunchId != Guid.Empty || entitlement.PrepaidFunds != 0)) throw new InvalidDataException("Invalid stock design.");
                 }
             }
+        }
+
+        /// <summary>Offer-level stock invariants: open Stock offers escrow exactly their units of their design; every other offer escrows nothing.</summary>
+        private static void ValidateStockOffer(StoredTradeOffer row)
+        {
+            var offer = row.Offer;
+            if (row.Escrow == null || !ToolingPolicy.FiniteNonNegative(offer.StockPrepaidTotal) || offer.StockUnits < 0) throw new InvalidDataException("Invalid stock offer.");
+            if (offer.DesignMode != TradeDesignMode.Stock)
+            {
+                if (row.Escrow.Count > 0 || offer.StockUnits != 0) throw new InvalidDataException("Only a stock offer can escrow stock.");
+                return;
+            }
+            if (string.IsNullOrEmpty(offer.DesignFingerprint) || row.Blueprint.Length == 0 || offer.StockUnits < 1 || offer.StockUnits > StockDefaults.MaxHeldUnits || row.Design != null) throw new InvalidDataException("Invalid stock offer.");
+            if (offer.Status != TradeOfferStatus.Open)
+            {
+                if (row.Escrow.Count > 0) throw new InvalidDataException("A closed stock offer still holds escrow.");
+                return;
+            }
+            foreach (var lot in row.Escrow)
+                if (lot == null || lot.LotId == Guid.Empty || lot.Fingerprint != offer.DesignFingerprint || lot.Units < 1 || lot.Units > StockDefaults.MaxHeldUnits || !ToolingPolicy.FiniteNonNegative(lot.PrepaidPerUnit) || !ToolingPolicy.FiniteNonNegative(lot.LaunchMultiplier))
+                    throw new InvalidDataException("Invalid escrowed stock.");
+            if (row.Escrow.Sum(l => (long)l.Units) != offer.StockUnits) throw new InvalidDataException("Escrowed stock does not match the offer.");
+        }
+
+        /// <summary>
+        /// Drops StockDesign entitlements nothing needs any more: delivered, nothing retains the design for the holder
+        /// (<see cref="StockDesignRetainable"/>), and no open incoming Stock offer of that design. The craft file stays on the client's disk.
+        /// Called from RetireTerminalLaunches.
+        /// </summary>
+        private static void RetireStockDesigns(EconomyDocument document)
+        {
+            foreach (var entry in document.Entitlements)
+                entry.Value.RemoveAll(e => e.Kind == TradeEntitlementKind.StockDesign && e.Delivered && !StockDesignRetainable(document, entry.Key, e.Fingerprint)
+                    && !document.TradeOffers.Values.Any(o => o.Offer.Status == TradeOfferStatus.Open && o.Offer.DesignMode == TradeDesignMode.Stock && o.Offer.BuyerAgencyId == entry.Key && o.Offer.DesignFingerprint == e.Fingerprint));
         }
 
         private static string Hash(byte[] bytes)
@@ -120,8 +175,8 @@ namespace Server.Agency
             foreach (var stored in document.TradeOffers.Values)
             {
                 if (stored.Offer.Status != TradeOfferStatus.Open) continue;
-                if (stored.Offer.ExpiresUtcTicks <= UtcNow().Ticks) { stored.Offer.Status = TradeOfferStatus.Expired; stored.Offer.Revision++; }
-                else if (!AgencyStore.Agencies.TryGetValue(stored.Offer.SellerAgencyId, out var seller) || !AgencyStore.Agencies.TryGetValue(stored.Offer.BuyerAgencyId, out var buyer) || seller.OwnerUniqueId != stored.SellerOwner || buyer.OwnerUniqueId != stored.BuyerOwner) { stored.Offer.Status = TradeOfferStatus.Invalidated; stored.Offer.Revision++; }
+                if (stored.Offer.ExpiresUtcTicks <= UtcNow().Ticks) CloseOffer(document, stored, TradeOfferStatus.Expired, false);
+                else if (!AgencyStore.Agencies.TryGetValue(stored.Offer.SellerAgencyId, out var seller) || !AgencyStore.Agencies.TryGetValue(stored.Offer.BuyerAgencyId, out var buyer) || seller.OwnerUniqueId != stored.SellerOwner || buyer.OwnerUniqueId != stored.BuyerOwner) CloseOffer(document, stored, TradeOfferStatus.Invalidated, false);
             }
             // An old accept never creates an offer. Retired IDs fail closed, while the
             // connection sequence watermark also rejects evicted request retries.
@@ -133,19 +188,21 @@ namespace Server.Agency
             foreach (var saved in document.TradeOffers.Values.Where(o => o.Offer.Status == TradeOfferStatus.Open && o.Offer.VesselId != Guid.Empty))
             {
                 try { ValidateOfferedTitle(saved, ownership); }
-                catch (InvalidOperationException) { saved.Offer.Status = TradeOfferStatus.Invalidated; saved.Offer.Revision++; }
+                catch (InvalidOperationException) { CloseOffer(document, saved, TradeOfferStatus.Invalidated, false); }
             }
         }
 
         private static void AddEntitlement(EconomyDocument candidate, Guid agencyId, TradeEntitlement entitlement)
         {
             if (!candidate.Entitlements.TryGetValue(agencyId, out var entries)) candidate.Entitlements[agencyId] = entries = new List<TradeEntitlement>();
-            // Each purchased launch is its own voucher; only permanent allowances collapse into one.
+            // Each purchased launch is its own voucher; only permanent allowances and stock craft files collapse into one.
             if (entitlement.Kind == TradeEntitlementKind.Permanent && entries.Any(e => e.Kind == TradeEntitlementKind.Permanent && e.Fingerprint == entitlement.Fingerprint && e.BlueprintHash == entitlement.BlueprintHash && e.VesselId == entitlement.VesselId)) return;
+            if (entitlement.Kind == TradeEntitlementKind.StockDesign && entries.Any(e => e.Kind == TradeEntitlementKind.StockDesign && e.Fingerprint == entitlement.Fingerprint && e.BlueprintHash == entitlement.BlueprintHash)) return;
             entries.Add(entitlement);
         }
 
-        private static void ApplyTrade(EconomyDocument candidate, ClientStructure client, EconomyCommand command, EconomyResult result)
+        /// <param name="newFiles">Execute's list of blueprint files written in this transaction, so a failed Commit can delete them; null leaves them to the Load cleanup.</param>
+        private static void ApplyTrade(EconomyDocument candidate, ClientStructure client, EconomyCommand command, EconomyResult result, List<string> newFiles = null)
         {
             if (!TradeEnabled || command.Trade == null) throw new InvalidOperationException("Agency trade is unavailable.");
             var request = command.Trade;
@@ -155,6 +212,8 @@ namespace Server.Agency
                 if (!candidate.Entitlements.TryGetValue(client.AgencyId, out var entries)) throw new InvalidOperationException("Purchased design not found.");
                 var entry = entries.SingleOrDefault(e => e.EntitlementId == request.EntitlementId) ?? throw new InvalidOperationException("Purchased design not found.");
                 entry.Delivered = true;
+                // The client has written the stock craft file; keep only its hash so repeat purchases don't fill the purchased-design storage.
+                if (entry.Kind == TradeEntitlementKind.StockDesign) entry.BlueprintData = Array.Empty<byte>();
                 return;
             }
             if (command.Operation == EconomyOperation.TradeCreate)
@@ -166,25 +225,43 @@ namespace Server.Agency
                 if (!TradePolicy.ValidateAmounts(request.SellerFunds, request.SellerScience, request.BuyerFunds, request.BuyerScience)) throw new ArgumentException("Invalid trade currency amounts.");
                 var seller = AgencyStore.Agencies[client.AgencyId];
                 if (!Enum.IsDefined(typeof(TradeDesignMode), request.DesignMode)) throw new ArgumentException("Unsupported design mode.");
-                var singleLaunch = request.DesignMode == TradeDesignMode.SingleLaunch;
-                if (singleLaunch && (!ToolingEnabled || string.IsNullOrEmpty(request.DesignFingerprint))) throw new InvalidOperationException(ToolingEnabled ? "A single-launch offer needs a design." : "Single-launch offers need agency tooling.");
+                switch (request.DesignMode)
+                {
+                    case TradeDesignMode.SingleLaunch:
+                        if (!ToolingEnabled || string.IsNullOrEmpty(request.DesignFingerprint)) throw new InvalidOperationException(ToolingEnabled ? "A single-launch offer needs a design." : "Single-launch offers need agency tooling.");
+                        break;
+                    case TradeDesignMode.Stock:
+                        if (!ToolingEnabled || string.IsNullOrEmpty(request.DesignFingerprint)) throw new InvalidOperationException(ToolingEnabled ? "A stock offer needs a design." : "Stock offers need agency tooling.");
+                        if (request.StockUnits < 1 || request.StockUnits > StockDefaults.MaxHeldUnits) throw new ArgumentException("Choose between 1 and " + StockDefaults.MaxHeldUnits + " units to sell.");
+                        break;
+                    case TradeDesignMode.ToolingAndDesign:
+                        break;
+                    default: throw new ArgumentException("Unsupported design mode.");
+                }
                 var offer = new TradeOffer { DesignMode = request.DesignMode, OfferId = request.OfferId, SellerAgencyId = client.AgencyId, BuyerAgencyId = request.BuyerAgencyId, VesselId = request.VesselId, Revision = 1, ExpiresUtcTicks = UtcNow().AddHours(24).Ticks, SellerFunds = request.SellerFunds, SellerScience = request.SellerScience, BuyerFunds = request.BuyerFunds, BuyerScience = request.BuyerScience, DesignFingerprint = request.DesignFingerprint };
                 var stored = new StoredTradeOffer { Offer = offer, SellerOwner = seller.OwnerUniqueId, BuyerOwner = buyer.OwnerUniqueId, SessionId = command.SessionId, CreatedSequence = command.Sequence };
                 if (!string.IsNullOrEmpty(request.DesignFingerprint))
                 {
                     var blueprintFingerprint = ToolingPolicy.Fingerprint(BlueprintManifest(request.BlueprintData, request.Editor));
-                    if (singleLaunch)
+                    switch (request.DesignMode)
                     {
-                        // The seller needs no tooling: the manifest only prices the launch the seller prepays.
-                        if (command.Manifest == null || ToolingPolicy.ManifestHash(command.Manifest) != command.ManifestHash || ToolingPolicy.Fingerprint(command.Manifest) != request.DesignFingerprint || blueprintFingerprint != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the priced launch manifest.");
-                        var quote = Quote(Agency(candidate, client.AgencyId), command.Manifest, command.ManifestHash);
-                        offer.LaunchMultiplier = quote.AlreadyTooled ? Rates().TooledLaunch : Rates().UntooledLaunch;
-                        offer.PrepaidLaunchFunds = UsesFunds ? TradePolicy.PrepaidLaunchCost(quote, offer.LaunchMultiplier) : 0;
-                    }
-                    else
-                    {
-                        stored.Design = Copy(Agency(candidate, client.AgencyId).Designs.SingleOrDefault(d => d.Fingerprint == request.DesignFingerprint) ?? throw new InvalidOperationException("Only an existing tooled design can be sold."));
-                        if (blueprintFingerprint != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the offered tooling.");
+                        case TradeDesignMode.SingleLaunch:
+                            // The seller needs no tooling: the manifest only prices the launch the seller prepays.
+                            if (command.Manifest == null || ToolingPolicy.ManifestHash(command.Manifest) != command.ManifestHash || ToolingPolicy.Fingerprint(command.Manifest) != request.DesignFingerprint || blueprintFingerprint != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the priced launch manifest.");
+                            var quote = Quote(Agency(candidate, client.AgencyId), command.Manifest, command.ManifestHash);
+                            offer.LaunchMultiplier = quote.AlreadyTooled ? Rates().TooledLaunch : Rates().UntooledLaunch;
+                            offer.PrepaidLaunchFunds = UsesFunds ? TradePolicy.PrepaidLaunchCost(quote, offer.LaunchMultiplier) : 0;
+                            break;
+                        case TradeDesignMode.ToolingAndDesign:
+                            stored.Design = Copy(Agency(candidate, client.AgencyId).Designs.SingleOrDefault(d => d.Fingerprint == request.DesignFingerprint) ?? throw new InvalidOperationException("Only an existing tooled design can be sold."));
+                            if (blueprintFingerprint != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the offered tooling.");
+                            break;
+                        case TradeDesignMode.Stock:
+                            // No tooling needed: a reseller of bought stock offers the craft file it received. Stock never sets stored.Design.
+                            if (blueprintFingerprint != request.DesignFingerprint) throw new ArgumentException("Blueprint does not match the offered stock.");
+                            EscrowStock(candidate, client.AgencyId, stored, request.StockUnits);
+                            break;
+                        default: throw new ArgumentException("Unsupported design mode.");
                     }
                     stored.Blueprint = Copy(request.BlueprintData);
                     stored.BlueprintHash = Hash(stored.Blueprint);
@@ -199,7 +276,7 @@ namespace Server.Agency
                     offer.VesselName = VesselStoreSystem.CurrentVessels[offer.VesselId].Fields.GetSingle("name")?.Value;
                     ValidateOfferedTitle(stored, AgencyVesselMap.ExportDocument());
                 }
-                if (offer.VesselId == Guid.Empty && stored.Design == null && stored.Blueprint.Length == 0 && offer.SellerFunds + offer.SellerScience + offer.BuyerFunds + offer.BuyerScience == 0) throw new ArgumentException("Offer has no assets or currencies.");
+                if (offer.VesselId == Guid.Empty && stored.Design == null && stored.Blueprint.Length == 0 && stored.Escrow.Count == 0 && offer.SellerFunds + offer.SellerScience + offer.BuyerFunds + offer.BuyerScience == 0) throw new ArgumentException("Offer has no assets or currencies.");
                 candidate.TradeOffers[offer.OfferId] = stored;
                 result.TradeOfferId = offer.OfferId;
                 return;
@@ -216,13 +293,12 @@ namespace Server.Agency
             RequireAgencyOwner(command.Operation == EconomyOperation.TradeCancel ? trade.SellerAgencyId : trade.BuyerAgencyId, client);
             if (command.Operation == EconomyOperation.TradeDecline || command.Operation == EconomyOperation.TradeCancel)
             {
-                trade.Status = command.Operation == EconomyOperation.TradeCancel ? TradeOfferStatus.Cancelled : TradeOfferStatus.Declined;
-                trade.Revision++;
+                CloseOffer(candidate, saved, command.Operation == EconomyOperation.TradeCancel ? TradeOfferStatus.Cancelled : TradeOfferStatus.Declined, false);
                 return;
             }
             if (command.Operation != EconomyOperation.TradeAccept) throw new ArgumentException("Unsupported trade decision.");
             if (!AgencyStore.Agencies.TryGetValue(trade.SellerAgencyId, out var sellerAgency) || !AgencyStore.Agencies.TryGetValue(trade.BuyerAgencyId, out var buyerAgency) || sellerAgency.OwnerUniqueId != saved.SellerOwner || buyerAgency.OwnerUniqueId != saved.BuyerOwner) throw new InvalidOperationException("Agency ownership changed; create a new offer.");
-            if (trade.DesignMode == TradeDesignMode.SingleLaunch && !ToolingEnabled) throw new InvalidOperationException("Single-launch designs need agency tooling.");
+            if ((trade.DesignMode == TradeDesignMode.SingleLaunch || trade.DesignMode == TradeDesignMode.Stock) && !ToolingEnabled) throw new InvalidOperationException(trade.DesignMode == TradeDesignMode.Stock ? "Stock offers need agency tooling." : "Single-launch designs need agency tooling.");
             var ownership = AgencyVesselMap.ExportDocument();
             ValidateOfferedTitle(saved, ownership);
             var sellerBalance = Agency(candidate, trade.SellerAgencyId);
@@ -237,11 +313,16 @@ namespace Server.Agency
                 Charge(sellerBalance, trade.PrepaidLaunchFunds);
                 AddEntitlement(candidate, trade.BuyerAgencyId, new TradeEntitlement { EntitlementId = Guid.NewGuid(), SellerAgencyId = trade.SellerAgencyId, Fingerprint = trade.DesignFingerprint, BlueprintName = trade.BlueprintName, Editor = trade.Editor, BlueprintHash = saved.BlueprintHash, BlueprintData = Copy(saved.Blueprint), Kind = TradeEntitlementKind.SingleLaunch, PrepaidFunds = UsesFunds ? trade.PrepaidLaunchFunds : 0, LaunchMultiplier = trade.LaunchMultiplier });
             }
-            else if (saved.Design != null)
+            else if (trade.DesignMode == TradeDesignMode.ToolingAndDesign && saved.Design != null)
             {
                 if (!sellerBalance.Designs.Any(d => d.Fingerprint == saved.Design.Fingerprint)) throw new InvalidOperationException("Offered tooling no longer exists.");
                 if (!buyerBalance.Designs.Any(d => d.Fingerprint == saved.Design.Fingerprint)) buyerBalance.Designs.Add(Copy(saved.Design));
                 AddEntitlement(candidate, trade.BuyerAgencyId, new TradeEntitlement { EntitlementId = Guid.NewGuid(), SellerAgencyId = trade.SellerAgencyId, Fingerprint = saved.Design.Fingerprint, BlueprintName = trade.BlueprintName, Editor = trade.Editor, BlueprintHash = saved.BlueprintHash, BlueprintData = Copy(saved.Blueprint) });
+            }
+            else if (trade.DesignMode == TradeDesignMode.Stock)
+            {
+                TransferEscrow(candidate, saved, buyerBalance);
+                AddEntitlement(candidate, trade.BuyerAgencyId, new TradeEntitlement { EntitlementId = Guid.NewGuid(), SellerAgencyId = trade.SellerAgencyId, Fingerprint = trade.DesignFingerprint, BlueprintName = trade.BlueprintName, Editor = trade.Editor, BlueprintHash = saved.BlueprintHash, BlueprintData = Copy(saved.Blueprint), Kind = TradeEntitlementKind.StockDesign });
             }
             if (trade.VesselId != Guid.Empty)
             {
@@ -254,8 +335,63 @@ namespace Server.Agency
                 candidate.Journal = new EconomyVesselJournal { OwnershipAfter = ownership };
                 InvalidateChangedOffers(candidate, ownership);
             }
+            // Last, after everything that can refuse the accept (R2.2): a refused accept never writes a blueprint file.
+            if (trade.DesignMode == TradeDesignMode.ToolingAndDesign && saved.Design != null) CopyToolingBlueprint(candidate, saved, newFiles);
             trade.Status = TradeOfferStatus.Accepted;
             trade.Revision++;
+        }
+
+        /// <summary>
+        /// Moves <paramref name="units"/> of the offer's design from the seller's stock into the offer's escrow, oldest first, with fresh LotIds.
+        /// In Career only funds-built units can be sold. Fails, with nothing committed, when the seller is short or the take needs a 65th lot slot.
+        /// </summary>
+        private static void EscrowStock(EconomyDocument candidate, Guid sellerId, StoredTradeOffer stored, int units)
+        {
+            var offer = stored.Offer;
+            var seller = Agency(candidate, sellerId);
+            var fingerprint = offer.DesignFingerprint;
+            if (UsesFunds)
+            {
+                var all = seller.Stock.Where(l => l.Fingerprint == fingerprint).Sum(l => (long)l.Units);
+                var fundsBuilt = seller.Stock.Where(l => l.Fingerprint == fingerprint && l.FundsBuilt).Sum(l => (long)l.Units);
+                if (fundsBuilt < units && all >= units) throw new InvalidOperationException((all - fundsBuilt) + " of these units were built without funds and can't be sold in Career.");
+            }
+            stored.Escrow = StockPolicy.Take(seller.Stock, fingerprint, units, UsesFunds).ToList();
+            offer.StockUnits = units;
+            offer.StockPrepaidTotal = stored.Escrow.Sum(l => l.Units * l.PrepaidPerUnit);
+            if (!ToolingPolicy.FiniteNonNegative(offer.StockPrepaidTotal)) throw new ArgumentException("Stock value exceeds the supported range.");
+            // The offer is not in the document yet, so its escrow rows are added to the count here.
+            if (StockLotSlots(candidate, sellerId) + stored.Escrow.Count > StockDefaults.MaxLots) throw new InvalidOperationException("Too many stock batches; launch or sell some stock first.");
+        }
+
+        /// <summary>Accept of a Stock offer: the escrowed units join the buyer's stock with fresh LotIds and unchanged terms, sourced from the seller.</summary>
+        private static void TransferEscrow(EconomyDocument candidate, StoredTradeOffer saved, EconomyAgency buyer)
+        {
+            var trade = saved.Offer;
+            if (UsesFunds && saved.Escrow.Any(l => !l.FundsBuilt)) throw new InvalidOperationException("These units were built without funds and can't be sold in Career.");
+            if (StockHeld(candidate, trade.BuyerAgencyId, trade.DesignFingerprint) + trade.StockUnits > StockDefaults.MaxHeldUnits) throw new InvalidOperationException("Buyer cannot hold more of this design.");
+            foreach (var lot in saved.Escrow)
+                StockPolicy.Merge(buyer.Stock, new DesignStockLot { LotId = Guid.NewGuid(), Fingerprint = lot.Fingerprint, Units = lot.Units, PrepaidPerUnit = lot.PrepaidPerUnit, LaunchMultiplier = lot.LaunchMultiplier, BuilderAgencyId = lot.BuilderAgencyId, SourceAgencyId = trade.SellerAgencyId, FundsBuilt = lot.FundsBuilt, CreatedUtcTicks = lot.CreatedUtcTicks });
+            saved.Escrow = new List<DesignStockLot>();
+            if (StockLotSlots(candidate, trade.BuyerAgencyId) > StockDefaults.MaxLots) throw new InvalidOperationException("Buyer has too many stock batches; the buyer must launch or sell some stock first.");
+        }
+
+        /// <summary>ToolingAndDesign accept: gives the buyer the offer's craft as its tooling blueprint when it has none. Any storage miss skips; it never fails the accept.</summary>
+        private static void CopyToolingBlueprint(EconomyDocument candidate, StoredTradeOffer saved, List<string> newFiles)
+        {
+            var trade = saved.Offer;
+            var buyer = Agency(candidate, trade.BuyerAgencyId);
+            if (saved.Blueprint.Length == 0 || buyer.Blueprints.ContainsKey(saved.Design.Fingerprint)) return;
+            try
+            {
+                if (!TryStoreBlueprint(candidate, trade.BuyerAgencyId, saved.Design.Fingerprint, saved.Blueprint, trade.Editor, trade.BlueprintName, newFiles ?? new List<string>(), out var reason))
+                    LunaLog.Debug($"[Economy] Bought tooling {saved.Design.Fingerprint} kept without a saved craft for {trade.BuyerAgencyId}: {reason}");
+            }
+            catch (Exception e)
+            {
+                // TryStoreBlueprint never throws by contract; this keeps any storage fault from refusing a paid trade.
+                LunaLog.Warning($"[Economy] Bought tooling {saved.Design.Fingerprint} kept without a saved craft for {trade.BuyerAgencyId}: {e.Message}");
+            }
         }
 
         private static TradeOffer[] TradeOffersFor(EconomyDocument document, Guid agencyId)
@@ -274,10 +410,14 @@ namespace Server.Agency
             lock (AgencyVesselMap.TransactionGate)
             {
                 if (entitlementId == Guid.Empty) return true;
-                if (!TradeEnabled || !Ready || !_document.Entitlements.TryGetValue(agencyId, out var entitlements)) return false;
+                if (!Ready) return false;
                 var manifest = new ToolingManifest { Parts = vessel.Parts.GetAllValues().Select(p => new ToolingPart { Name = p.Fields.GetSingle("name")?.Value }).ToArray() };
-                // A voucher grants research for the one launch that reserved it, and only while tooling gameplay is on.
-                var allowed = entitlements.Where(e => e.EntitlementId == entitlementId && (e.Kind == TradeEntitlementKind.Permanent || ToolingEnabled && launchId != Guid.Empty && !e.Redeemed && e.LaunchId == launchId));
+                // A stock unit grants research only to the Prepared launch that reserved it, keyed by its lot ID. It needs tooling, not trade.
+                if (launchId != Guid.Empty && _document.Launches.TryGetValue(launchId, out var stockLaunch) && stockLaunch.Stock != null && stockLaunch.Stock.LotId == entitlementId)
+                    return ToolingEnabled && stockLaunch.State == LaunchState.Prepared && stockLaunch.AgencyId == agencyId && TradePolicy.CanUseEntitlement(manifest, new[] { stockLaunch.Stock.Fingerprint });
+                if (!TradeEnabled || !_document.Entitlements.TryGetValue(agencyId, out var entitlements)) return false;
+                // Permanent: always. SingleLaunch: only for the one launch that reserved it, while tooling gameplay is on. StockDesign: never by itself.
+                var allowed = entitlements.Where(e => e.EntitlementId == entitlementId && (e.Kind == TradeEntitlementKind.Permanent || e.Kind == TradeEntitlementKind.SingleLaunch && ToolingEnabled && launchId != Guid.Empty && !e.Redeemed && e.LaunchId == launchId));
                 return TradePolicy.CanUseEntitlement(manifest, allowed.Select(e => e.Fingerprint));
             }
         }

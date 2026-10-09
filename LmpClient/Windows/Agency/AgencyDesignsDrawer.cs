@@ -406,7 +406,10 @@ namespace LmpClient.Windows.Agency
         private static void DrawBoughtRow(DesignRow row)
         {
             GUILayout.BeginVertical(GUI.skin.box);
+            GUILayout.BeginHorizontal();
+            if (row.SourceAgency != Guid.Empty && SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(row.SourceAgency, 32, 20);
             GUILayout.Label(row.Name, designsHeading);
+            GUILayout.EndHorizontal();
             GUILayout.Label("Stock: " + row.Available + " available" + (row.Offered > 0 ? " · " + row.Offered + " offered" : "") + (row.SourceAgency != Guid.Empty ? " · bought from " + TradeAgencyName(row.SourceAgency) : ""), designsText);
             var received = row.BoughtDesign;
             if (received != null && !string.IsNullOrEmpty(received.LocalPath))

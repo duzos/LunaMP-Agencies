@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using LmpClient.Network;
 using LmpClient.Systems.Agency;
+using LmpClient.Systems.SettingsSys;
 using LmpClient.Systems.Flag;
 using LmpClient.Systems.PlayerColorSys;
 using LmpCommon.Agency;
@@ -29,20 +30,18 @@ namespace LmpClient.Windows.Agency
         private static void DrawIdentityLabel(Guid id, string text)
         {
             GUILayout.BeginHorizontal();
-            var value = AgencyIdentityClient.Get(id);
-            var texture = GameDatabase.Instance?.GetTexture(value.FlagUrl, false)
-                ?? GameDatabase.Instance?.GetTexture(AgencyIdentityDefaults.DefaultFlagUrl, false);
-            if (texture) GUILayout.Label(texture, GUILayout.Width(32), GUILayout.Height(20));
-            var previous = GUI.color;
-            try
+            // Flag slot keeps its width even when the agency has no flag so rows stay aligned.
+            if (SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(id, 32, 20, true);
+            if (AgencyPresentation.TryGetAgencyStyle(id, out var style) && style.HasColour)
             {
-                if (AgencyIdentityClient.TryColour(id, out var colour))
+                var previous = GUI.color;
+                try
                 {
-                    GUI.color = colour;
+                    GUI.color = style.Colour;
                     GUILayout.Label(Texture2D.whiteTexture, GUILayout.Width(8), GUILayout.Height(20));
                 }
+                finally { GUI.color = previous; }
             }
-            finally { GUI.color = previous; }
             GUILayout.Label(text);
             GUILayout.EndHorizontal();
         }

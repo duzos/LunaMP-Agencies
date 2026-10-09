@@ -89,7 +89,7 @@ namespace Server.Agency
             if (row.Escrow == null || !ToolingPolicy.FiniteNonNegative(offer.StockPrepaidTotal) || offer.StockUnits < 0) throw new InvalidDataException("Invalid stock offer.");
             if (offer.DesignMode != TradeDesignMode.Stock)
             {
-                if (row.Escrow.Count > 0 || offer.StockUnits != 0) throw new InvalidDataException("Only a stock offer can escrow stock.");
+                if (row.Escrow.Count > 0 || offer.StockUnits != 0 || offer.StockPrepaidTotal != 0) throw new InvalidDataException("Only a stock offer can escrow stock.");
                 return;
             }
             if (string.IsNullOrEmpty(offer.DesignFingerprint) || row.Blueprint.Length == 0 || offer.StockUnits < 1 || offer.StockUnits > StockDefaults.MaxHeldUnits || row.Design != null) throw new InvalidDataException("Invalid stock offer.");
@@ -102,6 +102,8 @@ namespace Server.Agency
                 if (lot == null || lot.LotId == Guid.Empty || lot.Fingerprint != offer.DesignFingerprint || lot.Units < 1 || lot.Units > StockDefaults.MaxHeldUnits || !ToolingPolicy.FiniteNonNegative(lot.PrepaidPerUnit) || !ToolingPolicy.FiniteNonNegative(lot.LaunchMultiplier))
                     throw new InvalidDataException("Invalid escrowed stock.");
             if (row.Escrow.Sum(l => (long)l.Units) != offer.StockUnits) throw new InvalidDataException("Escrowed stock does not match the offer.");
+            var escrowed = row.Escrow.Sum(l => l.Units * l.PrepaidPerUnit);
+            if (Math.Abs(escrowed - offer.StockPrepaidTotal) > 1e-6 * Math.Max(1, escrowed)) throw new InvalidDataException("Escrowed stock value does not match the offer.");
         }
 
         /// <summary>
@@ -204,7 +206,8 @@ namespace Server.Agency
         /// <param name="newFiles">Execute's list of blueprint files written in this transaction, so a failed Commit can delete them; null leaves them to the Load cleanup.</param>
         private static void ApplyTrade(EconomyDocument candidate, ClientStructure client, EconomyCommand command, EconomyResult result, List<string> newFiles = null)
         {
-            if (!TradeEnabled || command.Trade == null) throw new InvalidOperationException("Agency trade is unavailable.");
+            // With trade off only the seller withdrawing their own open Stock offer is still allowed (checked below), so escrow is never stranded.
+            if (command.Trade == null || !TradeEnabled && command.Operation != EconomyOperation.TradeCancel) throw new InvalidOperationException("Agency trade is unavailable.");
             var request = command.Trade;
             PruneTrade(candidate);
             if (command.Operation == EconomyOperation.TradeDelivered)
@@ -283,6 +286,7 @@ namespace Server.Agency
             }
             if (!candidate.TradeOffers.TryGetValue(request.OfferId, out var saved)) throw new InvalidOperationException("Offer no longer exists.");
             var trade = saved.Offer;
+            if (!TradeEnabled && !IsOwnStockOffer(trade, client.AgencyId)) throw new InvalidOperationException("Agency trade is unavailable.");
             result.TradeOfferId = trade.OfferId;
             if (command.Operation == EconomyOperation.TradeAccept && trade.Status == TradeOfferStatus.Accepted)
             {
@@ -394,10 +398,14 @@ namespace Server.Agency
             }
         }
 
+        /// <summary>An open Stock offer this agency is selling; the one thing a seller can still see and cancel while trade is switched off.</summary>
+        private static bool IsOwnStockOffer(TradeOffer offer, Guid agencyId) => offer.DesignMode == TradeDesignMode.Stock && offer.Status == TradeOfferStatus.Open && offer.SellerAgencyId == agencyId;
+
         private static TradeOffer[] TradeOffersFor(EconomyDocument document, Guid agencyId)
         {
-            if (!TradeEnabled) return Array.Empty<TradeOffer>();
-            return document.TradeOffers.Values.Where(o => o.Offer.SellerAgencyId == agencyId || o.Offer.BuyerAgencyId == agencyId).Select(o =>
+            var offers = TradeEnabled ? document.TradeOffers.Values.Where(o => o.Offer.SellerAgencyId == agencyId || o.Offer.BuyerAgencyId == agencyId)
+                : document.TradeOffers.Values.Where(o => IsOwnStockOffer(o.Offer, agencyId));
+            return offers.Select(o =>
             {
                 var offer = Copy(o.Offer);
                 if (offer.Status == TradeOfferStatus.Open && offer.ExpiresUtcTicks <= UtcNow().Ticks) { offer.Status = TradeOfferStatus.Expired; offer.Revision++; }

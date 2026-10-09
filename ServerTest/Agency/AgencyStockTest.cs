@@ -646,6 +646,52 @@ namespace ServerTest.Agency
             }
         }
 
+        [TestMethod]
+        public void ClosedSessionIsPrunedEvenWhenItDisconnectedDuringTheSweepBackoff()
+        {
+            using (var f = Start())
+            {
+                var now = DateTime.UtcNow;
+                AgencyEconomyStore.UtcNow = () => now;
+                Assert.IsTrue(Build(f, 2).Success);
+                Assert.IsTrue(Prepare(f.Economy.Execute, Probe(), Lots(f).Single().LotId, out _).Success);
+                var session = f.Economy.Session;
+                Assert.IsTrue(Document().SessionSequences.ContainsKey(session));
+                now = now.AddSeconds(61);
+                AgencyEconomyStore.PersistenceCheckpoint = point => { if (point == "before-document") throw new IOException("disk full"); };
+                AgencyEconomyStore.MaintenanceSweep();
+                AgencyEconomyStore.CancelPending(f.Economy.Client);
+                Assert.IsTrue(Document().SessionSequences.ContainsKey(session), "Backing off, nothing was committed yet.");
+
+                AgencyEconomyStore.PersistenceCheckpoint = null;
+                now = now.AddSeconds(61);
+                AgencyEconomyStore.MaintenanceSweep();
+                Assert.IsFalse(Document().SessionSequences.ContainsKey(session), "The next successful sweep prunes the closed session.");
+                Assert.IsFalse(Document().Operations.Values.Any(o => o.SessionId == session));
+            }
+        }
+
+        [TestMethod]
+        public void SandboxBuiltStockLaunchedInCareerPaysTheNormalTooledRateNotTheStockDiscount()
+        {
+            using (var f = Start())
+            {
+                GeneralSettings.SettingsStore.GameMode = GameMode.Sandbox;
+                Assert.IsTrue(Build(f, 100).Success);
+                GeneralSettings.SettingsStore.GameMode = GameMode.Career;
+                var lot = Lots(f).Single();
+                Assert.IsFalse(lot.FundsBuilt);
+                Assert.AreEqual(0d, lot.PrepaidPerUnit);
+                Assert.IsTrue(lot.LaunchMultiplier < AgencyEconomyTest.Fixture.SettingsRates().TooledLaunch, "Premise: the lot carries a discounted multiplier.");
+                var funds = Funds(f);
+                var prepared = Prepare(f.Economy.Execute, Probe(Kit()), lot.LotId, out _);
+                Assert.IsTrue(prepared.Success, prepared.Reason);
+                var normal = 100 * AgencyEconomyTest.Fixture.SettingsRates().TooledLaunch + 40;
+                Assert.AreEqual(normal, prepared.Quote.LaunchCost, 1e-9);
+                Assert.AreEqual(funds - normal, Funds(f), 1e-9);
+            }
+        }
+
         private static JObject Written() => JObject.Parse(File.ReadAllText(AgencyEconomyStore.FilePath));
 
         [TestMethod]

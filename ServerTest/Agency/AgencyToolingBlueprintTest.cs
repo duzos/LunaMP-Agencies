@@ -104,6 +104,23 @@ namespace ServerTest.Agency
             }
         }
 
+        [TestMethod]
+        public void AReplaceIsAllowedAfterTheClockJumpsBackwardPastTheSavedTime()
+        {
+            using (var f = new AgencyEconomyTest.Fixture())
+            {
+                var now = DateTime.UtcNow;
+                AgencyEconomyStore.UtcNow = () => now;
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe()).Success);
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), Craft).Success);
+                now = now.AddHours(-2);
+                var replaced = AgencyStockTest.Tool(f.Execute, Probe(), Edited);
+                Assert.IsTrue(replaced.Success);
+                Assert.IsFalse((replaced.Reason ?? "").Contains("less than a minute"), replaced.Reason);
+                Assert.AreEqual(Sha(Edited), f.Snapshot.DesignBlueprints.Single().Hash);
+            }
+        }
+
         private static string FakeHash(int i) => i.ToString("x64");
 
         [TestMethod]

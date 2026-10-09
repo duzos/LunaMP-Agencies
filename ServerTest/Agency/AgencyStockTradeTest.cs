@@ -11,6 +11,7 @@ using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using Newtonsoft.Json.Linq;
 
 namespace ServerTest.Agency
 {
@@ -76,6 +77,79 @@ namespace ServerTest.Agency
         private static StoredTradeOffer Stored(Guid offer) => Doc().TradeOffers[offer];
         private static Guid Seller(AgencyTradeTest.Fixture f) => f.Economy.Client.AgencyId;
         private static Guid Buyer(AgencyTradeTest.Fixture f) => f.Buyer.AgencyId;
+
+        // ---- Review fixes: trade off, escrow value ----
+
+        [TestMethod]
+        public void WithTradeOffASellerStillSeesAndCancelsOwnOpenStockOffersAndGetsTheUnitsBack()
+        {
+            using (var f = Start())
+            {
+                Seed(Seller(f), 5);
+                var stock = SeedOffer(Seller(f), Buyer(f), 3).Offer;
+                Assert.AreEqual(2, Units(Seller(f)));
+                GeneralSettings.SettingsStore.AgencyTrade = false;
+                Assert.AreEqual(stock.OfferId, AgencyEconomyStore.Snapshot(Seller(f)).Offers.Single().OfferId, "The seller can see the open stock offer.");
+                Assert.AreEqual(0, AgencyEconomyStore.Snapshot(Buyer(f)).Offers.Length, "Everything else stays hidden.");
+                var buyerTry = f.Buy(Decision(EconomyOperation.TradeDecline, stock.OfferId));
+                Assert.IsFalse(buyerTry.Success);
+                Assert.AreEqual(3, Stored(stock.OfferId).Escrow.Sum(l => l.Units));
+                var cancelled = f.Economy.Execute(Decision(EconomyOperation.TradeCancel, stock.OfferId));
+                Assert.IsTrue(cancelled.Success, cancelled.Reason);
+                Assert.AreEqual(5, Units(Seller(f)));
+                Assert.AreEqual(TradeOfferStatus.Cancelled, Stored(stock.OfferId).Offer.Status);
+                Assert.AreEqual(0, Stored(stock.OfferId).Escrow.Count);
+                Assert.AreEqual(0, AgencyEconomyStore.Snapshot(Seller(f)).Offers.Length, "A closed offer is no longer listed while trade is off.");
+            }
+        }
+
+        [TestMethod]
+        public void WithTradeOffNothingElseInTradeIsAvailable()
+        {
+            using (var f = Start())
+            {
+                Seed(Seller(f), 5);
+                var stock = SeedOffer(Seller(f), Buyer(f), 3).Offer;
+                var other = f.Economy.Execute(f.Offer());
+                Assert.IsTrue(other.Success, other.Reason);
+                GeneralSettings.SettingsStore.AgencyTrade = false;
+                Assert.IsFalse(f.Economy.Execute(Decision(EconomyOperation.TradeCancel, other.TradeOfferId)).Success, "A non-stock offer can't be cancelled while trade is off.");
+                Assert.IsFalse(f.Buy(Decision(EconomyOperation.TradeAccept, stock.OfferId)).Success);
+                Assert.IsFalse(f.Economy.Execute(StockOffer(Buyer(f), 1)).Success);
+                Assert.AreEqual(TradeOfferStatus.Open, Stored(stock.OfferId).Offer.Status);
+            }
+        }
+
+        private static JObject Written() => JObject.Parse(File.ReadAllText(AgencyEconomyStore.FilePath));
+
+        [TestMethod]
+        public void StockPrepaidTotalMustMatchTheEscrowAndBeZeroOnEveryOtherOffer()
+        {
+            using (var f = Start())
+            {
+                Seed(Seller(f), 6, prepaid: 5);
+                var stock = SeedOffer(Seller(f), Buyer(f), 3).Offer;
+                var other = f.Economy.Execute(f.Offer());
+                Assert.IsTrue(other.Success, other.Reason);
+                Assert.IsTrue(f.Economy.Execute(StockOffer(Buyer(f), 1)).Success, "Persists the seeded offer.");
+                var good = Written();
+                void Corrupt(Action<JObject> change)
+                {
+                    var json = (JObject)good.DeepClone();
+                    change(json);
+                    File.WriteAllText(AgencyEconomyStore.FilePath, json.ToString());
+                    AgencyEconomyStore.Load();
+                    Assert.IsFalse(AgencyEconomyStore.Ready);
+                }
+                JObject Offer(JObject json, Guid id) => (JObject)json["TradeOffers"][id.ToString()]["Offer"];
+                Corrupt(json => Offer(json, stock.OfferId)["StockPrepaidTotal"] = 1000);
+                Corrupt(json => Offer(json, stock.OfferId)["StockPrepaidTotal"] = 0);
+                Corrupt(json => Offer(json, other.TradeOfferId)["StockPrepaidTotal"] = 5);
+                File.WriteAllText(AgencyEconomyStore.FilePath, good.ToString());
+                AgencyEconomyStore.Load();
+                Assert.IsTrue(AgencyEconomyStore.Ready, "Untouched state, and offers without the field, still validate.");
+            }
+        }
 
         // ---- Create ----
 

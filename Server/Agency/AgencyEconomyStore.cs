@@ -100,6 +100,8 @@ namespace Server.Agency
         private const int MaxOperations = 512;
         private static readonly HashSet<ClientStructure> PublicationBlocked = new HashSet<ClientStructure>(global::System.Collections.Generic.ReferenceEqualityComparer.Instance);
         public static bool MayPublish(ClientStructure client) { lock (AgencyVesselMap.TransactionGate) return !Enabled || Ready && !PublicationBlocked.Contains(client); }
+        /// <summary>Sessions closed while a failed Persist had the sweep backing off; their sequence and operation rows are pruned by the next successful CancelPending.</summary>
+        private static readonly HashSet<Guid> ClosedSessions = new HashSet<Guid>();
         private static readonly Dictionary<ClientStructure, Guid> Sessions = new Dictionary<ClientStructure, Guid>(global::System.Collections.Generic.ReferenceEqualityComparer.Instance);
         private const int MaxLaunches = 4096;
         private const int MaxFileBytes = 128 * 1024 * 1024;
@@ -145,7 +147,7 @@ namespace Server.Agency
                             };
                         Persist(_document);
                     }
-                    Sessions.Clear();
+                    Sessions.Clear(); ClosedSessions.Clear();
                     Departures.Clear();
                     PublicationBlocked.Clear();
                     _document.SessionSequences.Clear();
@@ -610,23 +612,24 @@ namespace Server.Agency
             {
                 var closedSession = Guid.Empty;
                 if (client != null) PublicationBlocked.Remove(client);
-                if (client != null && Sessions.TryGetValue(client, out closedSession)) Sessions.Remove(client);
+                if (client != null && Sessions.TryGetValue(client, out closedSession)) { Sessions.Remove(client); ClosedSessions.Add(closedSession); }
                 // After a failed Persist this backs off for a minute instead of retrying (and logging) every second or on every disconnect.
                 if (UtcNow() < _cancelPendingBackoffUntil) return;
                 try
                 {
                     var candidate = Copy(_document);
                     var pending = candidate.Launches.Values.Where(l => l.State == LaunchState.Prepared && (client != null ? l.ActorId == client.UniqueIdentifier && l.SessionTicks == client.ConnectionTime.Ticks : l.ExpiresUtcTicks <= UtcNow().Ticks)).ToArray();
-                    if (pending.Length == 0 && closedSession == Guid.Empty && !TradeNeedsMaintenance(candidate)) return;
-                    if (closedSession != Guid.Empty)
+                    if (pending.Length == 0 && ClosedSessions.Count == 0 && !TradeNeedsMaintenance(candidate)) return;
+                    foreach (var closed in ClosedSessions)
                     {
-                        candidate.SessionSequences.Remove(closedSession);
-                        foreach (var operation in candidate.Operations.Where(p => p.Value.SessionId == closedSession).Select(p => p.Key).ToArray()) candidate.Operations.Remove(operation);
+                        candidate.SessionSequences.Remove(closed);
+                        foreach (var operation in candidate.Operations.Where(p => p.Value.SessionId == closed).Select(p => p.Key).ToArray()) candidate.Operations.Remove(operation);
                     }
                     foreach (var launch in pending) RefundPrepared(candidate, launch);
                     PruneTrade(candidate);
                     RetireTerminalLaunches(candidate);
                     Commit(candidate);
+                    ClosedSessions.Clear();
                 }
                 catch (Exception e)
                 {

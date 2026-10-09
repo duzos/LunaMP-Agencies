@@ -91,8 +91,17 @@ namespace Server.Agency
         {
             var lot = agency.Stock.FirstOrDefault(l => l != null && l.LotId == command.StockLotId && l.Units > 0) ?? throw new InvalidOperationException("No stock left for this design.");
             if (lot.Fingerprint != quote.Fingerprint) throw new InvalidOperationException("Stock does not match this design.");
-            launchCharge = StockPolicy.LaunchCharge(quote, lot);
-            launchMultiplier = lot.LaunchMultiplier;
+            if (UsesFunds && !lot.FundsBuilt)
+            {
+                // Built in Sandbox (nothing prepaid): after a switch to Career it pays the normal tooled launch rate, never the stock discount.
+                launchMultiplier = Rates().TooledLaunch;
+                launchCharge = TradePolicy.VoucherLaunchCharge(quote, 0, launchMultiplier);
+            }
+            else
+            {
+                launchCharge = StockPolicy.LaunchCharge(quote, lot);
+                launchMultiplier = lot.LaunchMultiplier;
+            }
             var terms = StockPolicy.TermsOf(lot);
             lot.Units -= 1;
             if (lot.Units == 0) agency.Stock.Remove(lot);
@@ -243,7 +252,7 @@ namespace Server.Agency
             var path = BlueprintPath(hash);
             holder.Blueprints.TryGetValue(fingerprint, out var existing);
             if (existing != null && existing.Hash == hash && FileHasHash(path, hash)) return true;
-            if (existing != null && existing.Hash != hash && UtcNow().Ticks - existing.SavedUtcTicks < TimeSpan.FromSeconds(ToolingLimits.BlueprintReplaceCooldownSeconds).Ticks)
+            if (existing != null && existing.Hash != hash && UtcNow().Ticks >= existing.SavedUtcTicks && UtcNow().Ticks - existing.SavedUtcTicks < TimeSpan.FromSeconds(ToolingLimits.BlueprintReplaceCooldownSeconds).Ticks)
             { reason = "saved less than a minute ago"; return false; }
             var agencyTotal = holder.Blueprints.Where(p => p.Key != fingerprint && p.Value != null).Sum(p => (long)p.Value.Size) + bytes.Length;
             if (agencyTotal > ToolingLimits.MaxAgencyToolingBlueprintBytes) { reason = "storage limit"; return false; }

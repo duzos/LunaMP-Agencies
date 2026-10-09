@@ -115,6 +115,7 @@ namespace Server.Agency
             lock (AgencyVesselMap.TransactionGate)
             {
                 PublishedBalances.Clear();
+                ResetMaintenanceState();
                 _error = null;
                 try
                 {
@@ -175,6 +176,7 @@ namespace Server.Agency
                     if (TradeNeedsMaintenance(candidate)) { PruneTrade(candidate); changed = true; }
                     if (changed) Commit(candidate);
                     Initialized = true;
+                    CleanupBlueprintFiles(_document);
                 }
                 catch (Exception e) { _error = "Economy recovery required: " + e.GetType().Name; }
             }
@@ -204,6 +206,7 @@ namespace Server.Agency
                 foreach (var part in record.Parts)
                     if (part == null || !ToolingPolicy.FiniteNonNegative(part.Multiplier) || !ToolingPolicy.FiniteNonNegative(part.MaximumRefund)) throw new InvalidDataException("Invalid paid part value.");
             }
+            ValidateStockLinks(document);
         }
 
         private static void Persist(EconomyDocument document)
@@ -418,6 +421,8 @@ namespace Server.Agency
             lock (AgencyVesselMap.TransactionGate)
             {
                 var result = new EconomyResult { RequestId = command?.RequestId ?? Guid.Empty, Operation = command?.Operation ?? EconomyOperation.Quote, LaunchId = command?.LaunchId ?? Guid.Empty, VesselId = command?.VesselId ?? Guid.Empty };
+                ExecuteNewBlueprintFiles.Clear();
+                ExecuteReplacedBlueprintHashes.Clear();
                 try
                 {
                     if (!Enabled) throw new InvalidOperationException("Tooling is disabled.");
@@ -431,6 +436,12 @@ namespace Server.Agency
                     {
                         if (previous.AgencyId != client.AgencyId || previous.ActorId != client.UniqueIdentifier || previous.RequestHash != hash) throw new InvalidOperationException("Operation ID was already used.");
                         return Copy(previous.Result);
+                    }
+                    if (command.Operation == EconomyOperation.FetchBlueprint)
+                    {
+                        // Read-only like Quote: no copy, receipt, revision or sequence.
+                        FetchBlueprint(client, command, result);
+                        return result;
                     }
                     if (command.Operation != EconomyOperation.Quote && _document.SessionSequences.TryGetValue(sessionId, out var lastSequence) && command.Sequence <= lastSequence)
                         throw new InvalidOperationException("Operation receipt expired; an old sequence cannot execute again.");
@@ -450,15 +461,28 @@ namespace Server.Agency
                         case EconomyOperation.TradeDecline:
                         case EconomyOperation.TradeCancel:
                         case EconomyOperation.TradeDelivered:
+                            // TODO(plan 40 merge with S2): pass ExecuteNewBlueprintFiles once ApplyTrade takes the newFiles parameter (feat/bbs-s2):
+                            // ApplyTrade(candidate, client, command, result, ExecuteNewBlueprintFiles);
                             ApplyTrade(candidate, client, command, result);
                             break;
                         case EconomyOperation.Tool:
                             result.Quote = Quote(agency, command.Manifest, command.ManifestHash);
+                            var designName = SanitizeDesignName(command.DesignName);
                             if (!result.Quote.AlreadyTooled)
                             {
                                 Charge(agency, result.Quote.ToolingCost);
-                                agency.Designs.Add(new ToolingDesign { Fingerprint = result.Quote.Fingerprint, Manifest = Copy(command.Manifest), ToolingBasis = result.Quote.ToolingCost });
+                                agency.Designs.Add(new ToolingDesign { Fingerprint = result.Quote.Fingerprint, Manifest = Copy(command.Manifest), ToolingBasis = result.Quote.ToolingCost, Name = designName });
                             }
+                            // The blueprint runs after everything that can refuse the Tool, so a refused Tool never writes a file. Storage never fails it.
+                            if (command.BlueprintData != null && command.BlueprintData.Length > 0)
+                            {
+                                var savedName = designName ?? agency.Designs.FirstOrDefault(x => x.Fingerprint == result.Quote.Fingerprint)?.Name;
+                                if (!TryStoreBlueprint(candidate, client.AgencyId, result.Quote.Fingerprint, command.BlueprintData, command.BlueprintEditor, savedName, ExecuteNewBlueprintFiles, out var notSaved))
+                                    result.Reason = "Tooled; craft not saved (" + notSaved + ")";
+                            }
+                            break;
+                        case EconomyOperation.BuildStock:
+                            BuildStock(candidate, agency, client, command, result);
                             break;
                         case EconomyOperation.PrepareLaunch:
                             if (command.LaunchId == Guid.Empty || candidate.Launches.ContainsKey(command.LaunchId) || candidate.Launches.Count >= MaxLaunches) throw new InvalidOperationException("Launch identity unavailable.");
@@ -466,7 +490,11 @@ namespace Server.Agency
                             var launchCharge = result.Quote.LaunchCost;
                             var launchMultiplier = result.Quote.AlreadyTooled ? Rates().TooledLaunch : Rates().UntooledLaunch;
                             var reserved = Guid.Empty;
-                            if (command.VoucherId != Guid.Empty)
+                            StockTerms stockTerms = null;
+                            if (command.VoucherId != Guid.Empty && command.StockLotId != Guid.Empty) throw new InvalidOperationException("Choose either a voucher or stock.");
+                            if (command.StockLotId != Guid.Empty)
+                                stockTerms = ReserveStock(agency, command, result.Quote, ref launchCharge, ref launchMultiplier);
+                            else if (command.VoucherId != Guid.Empty)
                             {
                                 if (!TradeEnabled) throw new InvalidOperationException("Agency trade is unavailable.");
                                 var voucher = candidate.Entitlements.TryGetValue(client.AgencyId, out var held) ? held.SingleOrDefault(e => e.EntitlementId == command.VoucherId) : null;
@@ -485,9 +513,10 @@ namespace Server.Agency
                                 SessionTicks = client.ConnectionTime.Ticks, SessionId = sessionId, CreatedSequence = command.Sequence, Token = Guid.NewGuid(), State = LaunchState.Prepared,
                                 ExpiresUtcTicks = UtcNow().AddSeconds(60).Ticks, Manifest = Copy(command.Manifest),
                                 Charge = UsesFunds ? launchCharge : 0,
-                                Multiplier = launchMultiplier, VoucherId = reserved
+                                Multiplier = launchMultiplier, VoucherId = reserved, Stock = stockTerms
                             };
                             candidate.Launches[launch.LaunchId] = launch;
+                            if (stockTerms != null) RequireLotSlots(candidate, client.AgencyId);
                             result.LaunchToken = launch.Token; result.ExpiresUtcTicks = launch.ExpiresUtcTicks;
                             break;
                         case EconomyOperation.CancelLaunch:
@@ -519,15 +548,17 @@ namespace Server.Agency
                             break;
                         default: throw new ArgumentException("Unsupported economy operation.");
                     }
-                    result.Success = true; result.Reason = "Operation committed."; result.Revision = _document.Revision + 1;
+                    result.Success = true; if (string.IsNullOrEmpty(result.Reason)) result.Reason = "Operation committed."; result.Revision = _document.Revision + 1;
                     candidate.SessionSequences[sessionId] = command.Sequence;
                     candidate.Operations[command.RequestId] = new EconomyOperationReceipt { AgencyId = client.AgencyId, ActorId = client.UniqueIdentifier, SessionId = sessionId, Sequence = command.Sequence, RequestHash = hash, Result = Copy(result) };
                     while (candidate.Operations.Count > MaxOperations) candidate.Operations.Remove(candidate.Operations.First().Key);
                     Commit(candidate);
+                    DeleteReplacedBlueprintFiles();
                     if (command.Operation == EconomyOperation.Revert || command.Operation == EconomyOperation.RevertLaunch) PublicationBlocked.Add(client);
                 }
                 catch (Exception e)
                 {
+                    DiscardNewBlueprintFiles();
                     result.Success = false;
                     result.RecoveryRequired = _error != null;
                     result.Reason = result.RecoveryRequired ? _error : e.Message;
@@ -541,6 +572,8 @@ namespace Server.Agency
         {
             Agency(document, launch.AgencyId).Funds += launch.Charge;
             launch.State = LaunchState.Cancelled;
+            // Cancelled first, so the launch no longer holds its reserved slot when its unit comes back.
+            GiveBackUnit(document, launch);
             // A launch that never registered gives its reserved voucher back; a redeemed one is never touched here.
             var voucher = FindVoucher(document, launch);
             if (voucher != null && !voucher.Redeemed && voucher.LaunchId == launch.LaunchId) voucher.LaunchId = Guid.Empty;
@@ -577,21 +610,33 @@ namespace Server.Agency
             if (!Enabled || !Ready) return;
             lock (AgencyVesselMap.TransactionGate)
             {
-                var candidate = Copy(_document);
-                var pending = candidate.Launches.Values.Where(l => l.State == LaunchState.Prepared && (client != null ? l.ActorId == client.UniqueIdentifier && l.SessionTicks == client.ConnectionTime.Ticks : l.ExpiresUtcTicks <= UtcNow().Ticks)).ToArray();
                 var closedSession = Guid.Empty;
                 if (client != null) PublicationBlocked.Remove(client);
                 if (client != null && Sessions.TryGetValue(client, out closedSession)) Sessions.Remove(client);
-                if (pending.Length == 0 && closedSession == Guid.Empty && !TradeNeedsMaintenance(candidate)) return;
-                if (closedSession != Guid.Empty)
+                // After a failed Persist this backs off for a minute instead of retrying (and logging) every second or on every disconnect.
+                if (UtcNow() < _cancelPendingBackoffUntil) return;
+                try
                 {
-                    candidate.SessionSequences.Remove(closedSession);
-                    foreach (var operation in candidate.Operations.Where(p => p.Value.SessionId == closedSession).Select(p => p.Key).ToArray()) candidate.Operations.Remove(operation);
+                    var candidate = Copy(_document);
+                    var pending = candidate.Launches.Values.Where(l => l.State == LaunchState.Prepared && (client != null ? l.ActorId == client.UniqueIdentifier && l.SessionTicks == client.ConnectionTime.Ticks : l.ExpiresUtcTicks <= UtcNow().Ticks)).ToArray();
+                    if (pending.Length == 0 && closedSession == Guid.Empty && !TradeNeedsMaintenance(candidate)) return;
+                    if (closedSession != Guid.Empty)
+                    {
+                        candidate.SessionSequences.Remove(closedSession);
+                        foreach (var operation in candidate.Operations.Where(p => p.Value.SessionId == closedSession).Select(p => p.Key).ToArray()) candidate.Operations.Remove(operation);
+                    }
+                    foreach (var launch in pending) RefundPrepared(candidate, launch);
+                    PruneTrade(candidate);
+                    RetireTerminalLaunches(candidate);
+                    Commit(candidate);
                 }
-                foreach (var launch in pending) RefundPrepared(candidate, launch);
-                PruneTrade(candidate);
-                RetireTerminalLaunches(candidate);
-                Commit(candidate);
+                catch (Exception e)
+                {
+                    // Persist throws before Commit assigns _document, so the live document is unchanged; nothing escapes into the receive loop.
+                    _cancelPendingBackoffUntil = UtcNow().AddSeconds(60);
+                    LogMaintenanceError("CancelPending: " + e.GetType().Name + ": " + e.Message);
+                    return;
+                }
             }
             Broadcast();
         }
@@ -925,6 +970,8 @@ namespace Server.Agency
                 launch.State = LaunchState.Reverted;
                 var spent = FindVoucher(candidate, launch);
                 if (spent != null && spent.Redeemed && spent.LaunchId == launch.LaunchId) { spent.Redeemed = false; spent.LaunchId = Guid.Empty; }
+                // The stock unit comes back with the launch's own terms; this can never refuse the revert.
+                GiveBackUnit(candidate, launch);
             }
             var ownership = AgencyVesselMap.ExportDocument();
             ownership.Revision++;
@@ -984,12 +1031,20 @@ namespace Server.Agency
         private static EconomySnapshot BuildSnapshot(EconomyDocument document, Guid agencyId)
         {
             var snapshot = new EconomySnapshot { Ready = true, AgencyId = agencyId, Revision = document.Revision };
-            if (document.Agencies.TryGetValue(agencyId, out var agency)) { snapshot.Funds = agency.Funds; snapshot.Science = agency.Science; snapshot.Designs = Copy(agency.Designs.ToArray()); }
+            if (document.Agencies.TryGetValue(agencyId, out var agency))
+            {
+                snapshot.Funds = agency.Funds; snapshot.Science = agency.Science; snapshot.Designs = Copy(agency.Designs.ToArray());
+                snapshot.Stock = Copy((agency.Stock ?? new List<DesignStockLot>()).ToArray());
+                // Metadata only: the bytes stay in Universe/AgencyBlueprints and are fetched on demand.
+                snapshot.DesignBlueprints = (agency.Blueprints ?? new Dictionary<string, ToolingBlueprintRef>()).Values.Where(r => r != null)
+                    .Select(r => new ToolingBlueprintInfo { Fingerprint = r.Fingerprint, Name = r.Name, Editor = r.Editor, Hash = r.Hash, Bytes = r.Size }).ToArray();
+            }
             else if (AgencyStore.Agencies.TryGetValue(agencyId, out var source)) { snapshot.Funds = source.Funds; snapshot.Science = source.Science; }
             snapshot.Offers = TradeOffersFor(document, agencyId);
             snapshot.Entitlements = document.Entitlements.TryGetValue(agencyId, out var entitlements) ? Copy(entitlements.ToArray()) : Array.Empty<TradeEntitlement>();
             snapshot.Vessels = Copy(document.Vessels.Values.ToArray());
             snapshot.Launches = document.Launches.Values.Where(l => l.AgencyId == agencyId).Select(l => new LaunchReceiptSummary { LaunchId = l.LaunchId, VesselId = l.VesselId, Charge = l.Charge, State = l.State, ExpiresUtcTicks = l.ExpiresUtcTicks }).ToArray();
+            snapshot.StockHeldByFingerprint = StockHeldByFingerprint(document, agencyId);
             return snapshot;
         }
 
@@ -1017,6 +1072,8 @@ namespace Server.Agency
             // Once its launch is gone the voucher can no longer be restored by a revert, so a spent one is just dead weight.
             foreach (var held in document.Entitlements.Values)
                 held.RemoveAll(e => e.Kind == TradeEntitlementKind.SingleLaunch && e.Redeemed && !document.Launches.ContainsKey(e.LaunchId));
+            // TODO(plan 40 merge with S2): enable once AgencyTrade.cs (feat/bbs-s2) provides RetireStockDesigns; it relies on StockDesignRetainable.
+            // RetireStockDesigns(document);
         }
 
         public static void SendTo(ClientStructure client)
@@ -1112,7 +1169,8 @@ namespace Server.Agency
                 VesselOwnershipSystem.Changed();
                 foreach (var recipient in ClientRetriever.GetAuthenticatedClients()) AgencyNetwork.SendVesselMapSyncTo(recipient);
             }
-            Broadcast();
+            // A quote or a blueprint fetch changes nothing, so it never broadcasts a snapshot.
+            if (command == null || command.Operation != EconomyOperation.Quote && command.Operation != EconomyOperation.FetchBlueprint) Broadcast();
             SendResult(client, result);
         }
     }

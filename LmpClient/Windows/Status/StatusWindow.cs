@@ -26,7 +26,14 @@ namespace LmpClient.Windows.Status
         private static GUIStyle _subspaceStyle;
         private static GUIStyle _subspaceListStyle;
 
-        private static Dictionary<string, GUIStyle> _playerNameStyle;
+        private static Dictionary<string, PlayerNameStyle> _playerNameStyle;
+        private sealed class PlayerNameStyle
+        {
+            internal GUIStyle Style;
+            internal int Version;
+            internal System.Guid Agency;
+        }
+
         private static GUIStyle _stateTextStyle;
 
         private static GUIStyle _highlightStyle;
@@ -58,7 +65,7 @@ namespace LmpClient.Windows.Status
         {
             if (!ColorEventHandled)
             {
-                _playerNameStyle = new Dictionary<string, GUIStyle>();
+                _playerNameStyle = new Dictionary<string, PlayerNameStyle>();
                 ColorEventHandled = true;
             }
 
@@ -97,7 +104,7 @@ namespace LmpClient.Windows.Status
             LayoutOptions[2] = GUILayout.MinHeight(WindowHeight);
             LayoutOptions[3] = GUILayout.MaxHeight(WindowHeight);
 
-            _playerNameStyle = new Dictionary<string, GUIStyle>();
+            _playerNameStyle = new Dictionary<string, PlayerNameStyle>();
 
             _stateTextStyle = new GUIStyle(GUI.skin.label) { normal = { textColor = XKCDColors.KSPNeutralUIGrey } };
             _stateTextStyle.hover.textColor = _stateTextStyle.normal.textColor;

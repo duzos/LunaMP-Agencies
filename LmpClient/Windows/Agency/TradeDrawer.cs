@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Linq;
 using LmpClient.Systems.Agency;
+using LmpClient.Systems.SettingsSys;
 using LmpCommon.Agency;
 using UnityEngine;
 using KSP.UI.Screens;
@@ -71,7 +72,11 @@ namespace LmpClient.Windows.Agency
             {
                 var incoming = offer.BuyerAgencyId == tradeAgency;
                 GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.Label((incoming ? "From " : "To ") + TradeAgencyName(incoming ? offer.SellerAgencyId : offer.BuyerAgencyId) + " · " + offer.Status, tradeHeading);
+                var counterparty = incoming ? offer.SellerAgencyId : offer.BuyerAgencyId;
+                GUILayout.BeginHorizontal();
+                if (SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(counterparty, 32, 20);
+                GUILayout.Label((incoming ? "From " : "To ") + TradeAgencyName(counterparty) + " · " + offer.Status, tradeHeading);
+                GUILayout.EndHorizontal();
                 if (offer.VesselId != Guid.Empty) GUILayout.Label("Craft: " + offer.VesselName, tradeText);
                 if (!string.IsNullOrEmpty(offer.DesignFingerprint))
                 {
@@ -157,7 +162,12 @@ namespace LmpClient.Windows.Agency
             tradeSearch = GUILayout.TextField(tradeSearch, 80);
             tradeBuyerScroll = GUILayout.BeginScrollView(tradeBuyerScroll, GUILayout.Height(90));
             foreach (var agency in AgencySystem.Singleton.KnownAgencies.Values.Where(a => a.Id != tradeAgency && (a.Name ?? "").IndexOf(tradeSearch, StringComparison.OrdinalIgnoreCase) >= 0).OrderBy(a => a.Name))
+            {
+                GUILayout.BeginHorizontal();
+                if (SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(agency.Id, 32, 20);
                 if (GUILayout.Toggle(tradeBuyer == agency.Id, agency.Name, tradeButton)) tradeBuyer = agency.Id;
+                GUILayout.EndHorizontal();
+            }
             GUILayout.EndScrollView();
             GUILayout.Label("2. Choose items to give (optional)", tradeHeading);
             if (GUILayout.Toggle(tradeVessel == Guid.Empty, "No craft transfer", tradeButton)) tradeVessel = Guid.Empty;
@@ -331,7 +341,10 @@ namespace LmpClient.Windows.Agency
             {
                 GUILayout.BeginVertical(GUI.skin.box);
                 GUILayout.Label(design.Name, tradeHeading);
+                GUILayout.BeginHorizontal();
+                if (SettingsSystem.CurrentSettings.AgencyWindowFlags) AgencyBadge.DrawFlag(design.SellerAgencyId, 32, 20);
                 GUILayout.Label("From " + TradeAgencyName(design.SellerAgencyId) + " · " + design.Editor, tradeText);
+                GUILayout.EndHorizontal();
                 if (design.Kind == TradeEntitlementKind.SingleLaunch)
                     GUILayout.Label("One free launch: " + (design.Redeemed ? "Used" : design.Reserved ? "In progress" : "Available") + " (seller prepaid " + Funds(design.PrepaidFunds) + ")", tradeText);
                 else if (design.Kind == TradeEntitlementKind.StockDesign)

@@ -50,6 +50,15 @@ namespace LmpClient.Systems.PlayerColorSys
         }
 
         /// <summary>
+        /// Backup for the scene-load race: the <c>OrbitRenderer.Start</c> postfix is the main re-tint, this
+        /// asks the agency identity client to re-tint every vessel once the new scene's GUI is ready.
+        /// </summary>
+        public void OnLevelReady(GameScenes scene)
+        {
+            Agency.AgencyIdentityClient.RequestRefresh();
+        }
+
+        /// <summary>
         /// Find the vessel using the lock name
         /// </summary>
         private static void UpdateVesselColorsFromLockVesselId(Guid vesselId)

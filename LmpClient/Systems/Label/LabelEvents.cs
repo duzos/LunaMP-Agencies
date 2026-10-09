@@ -1,7 +1,10 @@
 ﻿using KSP.UI.Screens;
 using KSP.UI.Screens.Mapview;
 using LmpClient.Base;
+using LmpClient.Systems.Agency;
 using LmpClient.Systems.Lock;
+using LmpClient.Systems.SettingsSys;
+using LmpClient.Windows.Agency;
 
 namespace LmpClient.Systems.Label
 {
@@ -32,13 +35,8 @@ namespace LmpClient.Systems.Label
 
         public void OnMapWidgetTextProcessed(TrackingStationWidget widget)
         {
-            if (widget.vessel == null) return;
-
-            var owner = LockSystem.LockQuery.GetControlLockOwner(widget.vessel.id);
-            if (!string.IsNullOrEmpty(owner))
-            {
-                widget.textName.text = $"({owner}) {widget.textName.text}";
-            }
+            // Owner prefix, agency tint and flag are all handled (and cached) by the per-widget decoration.
+            TrackingWidgetDecoration.Process(widget);
         }
     }
 }

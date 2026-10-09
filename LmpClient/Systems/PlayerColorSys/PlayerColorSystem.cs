@@ -1,5 +1,6 @@
 ﻿using LmpClient.Base;
 using LmpClient.Events;
+using LmpClient.Systems.Agency;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.SettingsSys;
 using System.Collections.Generic;
@@ -32,6 +33,7 @@ namespace LmpClient.Systems.PlayerColorSys
             GameEvents.onVesselCreate.Add(PlayerColorEvents.OnVesselCreated);
             VesselInitializeEvent.onVesselInitialized.Add(PlayerColorEvents.VesselInitialized);
             GameEvents.OnMapEntered.Add(PlayerColorEvents.MapEntered);
+            GameEvents.onLevelWasLoadedGUIReady.Add(PlayerColorEvents.OnLevelReady);
             LockEvent.onLockAcquire.Add(PlayerColorEvents.OnLockAcquire);
             LockEvent.onLockRelease.Add(PlayerColorEvents.OnLockRelease);
         }
@@ -42,6 +44,7 @@ namespace LmpClient.Systems.PlayerColorSys
             GameEvents.onVesselCreate.Remove(PlayerColorEvents.OnVesselCreated);
             VesselInitializeEvent.onVesselInitialized.Remove(PlayerColorEvents.VesselInitialized);
             GameEvents.OnMapEntered.Remove(PlayerColorEvents.MapEntered);
+            GameEvents.onLevelWasLoadedGUIReady.Remove(PlayerColorEvents.OnLevelReady);
             LockEvent.onLockAcquire.Remove(PlayerColorEvents.OnLockAcquire);
             LockEvent.onLockRelease.Remove(PlayerColorEvents.OnLockRelease);
             PlayerColors.Clear();
@@ -54,15 +57,28 @@ namespace LmpClient.Systems.PlayerColorSys
         /// <summary>
         /// When we create a vessel set it's orbit color to the player color
         /// </summary>
-        public void SetVesselOrbitColor(Vessel vessel)
+        public void SetVesselOrbitColor(Vessel vessel) => SetVesselOrbitColor(vessel, null);
+
+        /// <summary>
+        /// As <see cref="SetVesselOrbitColor(Vessel)"/>; also recolours <paramref name="renderer"/> directly, for the
+        /// <c>OrbitRenderer.Start</c> postfix that runs before <c>orbitDriver.Renderer</c> may be assigned.
+        /// </summary>
+        public void SetVesselOrbitColor(Vessel vessel, OrbitRendererBase renderer)
         {
             if (vessel == null) return;
 
-            if (LmpClient.Systems.Agency.AgencyIdentityClient.TryColour(
-                LmpClient.Systems.Agency.AgencySystem.Singleton.GetVesselAgency(vessel.id), out var agencyColour))
-            { SetOrbitColor(vessel, agencyColour); return; }
-            var vesselOwner = LockSystem.LockQuery.GetControlLockOwner(vessel.id);
-            SetOrbitColor(vessel, vesselOwner == null ? DefaultColor : GetPlayerColor(vesselOwner));
+            Color colour;
+            // The agency branch needs the feature toggle and a vessel the local agency may identify (plan 41 S1).
+            if (AgencyPresentation.TryGetVesselStyle(vessel, SettingsSystem.CurrentSettings.AgencyTintVessels, out var style) && style.HasColour)
+                colour = style.Colour;
+            else
+            {
+                var vesselOwner = LockSystem.LockQuery.GetControlLockOwner(vessel.id);
+                colour = vesselOwner == null ? DefaultColor : GetPlayerColor(vesselOwner);
+            }
+
+            SetOrbitColor(vessel, colour);
+            if (renderer && renderer != vessel.orbitDriver?.Renderer) renderer.SetColor(colour);
         }
 
         /// <summary>

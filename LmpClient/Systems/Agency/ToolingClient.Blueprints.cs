@@ -99,5 +99,68 @@ namespace LmpClient.Systems.Agency
             else if (HighLogic.LoadedScene == GameScenes.SPACECENTER) EditorDriver.StartAndLoadVessel(path, editor == "SPH" ? EditorFacility.SPH : EditorFacility.VAB);
             else throw new InvalidOperationException("Return to the Space Center to load a design.");
         }
+
+        // ---- Local craft names: the save's own Ships/VAB and Ships/SPH crafts, matched to tooled designs by fingerprint ----
+
+        private const int MaxLocalCraftFiles = 400;
+        private const float LocalCraftRescanSeconds = 60f;
+        private static readonly object localCraftLock = new object();
+        private static Dictionary<string, string> localCraftNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        private static string localCraftSave;
+        private static float localCraftScanned = float.NegativeInfinity;
+        private static bool localCraftScanning;
+
+        /// <summary>
+        /// The ship name of a craft in this save's own VAB/SPH library whose physical parts match <paramref name="fingerprint"/>, or null. Only the
+        /// player's local files are read. The index is built off the main thread, at most once a minute and only when a caller asks, so a miss
+        /// returns null now and the name shows on a later frame.
+        /// </summary>
+        internal static string LocalCraftName(string fingerprint)
+        {
+            if (string.IsNullOrEmpty(fingerprint)) return null;
+            var save = HighLogic.SaveFolder;
+            var now = UnityEngine.Time.realtimeSinceStartup;
+            lock (localCraftLock)
+            {
+                if (localCraftSave == save && localCraftNames.TryGetValue(fingerprint, out var known)) return known;
+                if (localCraftScanning || localCraftSave == save && now - localCraftScanned < LocalCraftRescanSeconds) return null;
+                localCraftScanning = true; localCraftScanned = now;
+                if (localCraftSave != save) { localCraftSave = save; localCraftNames = new Dictionary<string, string>(StringComparer.Ordinal); }
+            }
+            string[] directories;
+            try { directories = new[] { TradeClient.CraftDirectory("VAB"), TradeClient.CraftDirectory("SPH") }; }
+            catch (Exception) { lock (localCraftLock) localCraftScanning = false; return null; }
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                var names = new Dictionary<string, string>(StringComparer.Ordinal);
+                try
+                {
+                    var files = directories.Where(System.IO.Directory.Exists)
+                        .SelectMany(d => System.IO.Directory.GetFiles(d, "*.craft", System.IO.SearchOption.TopDirectoryOnly))
+                        .Take(MaxLocalCraftFiles);
+                    foreach (var file in files)
+                    {
+                        try
+                        {
+                            var info = new System.IO.FileInfo(file);
+                            if (!info.Exists || info.Length == 0 || info.Length > ToolingLimits.MaxToolingBlueprintBytes) continue;
+                            var text = System.IO.File.ReadAllText(file, Encoding.UTF8);
+                            var fp = ToolingDesignNames.CraftFingerprint(text);
+                            var name = ToolingDesignNames.ShipNameFromCraft(text);
+                            // On a collision the ordinally smallest name wins, so the choice is stable between scans.
+                            if (fp != null && name != null && (!names.TryGetValue(fp, out var held) || string.CompareOrdinal(name, held) < 0)) names[fp] = name;
+                        }
+                        catch (Exception) { }
+                    }
+                }
+                catch (Exception) { }
+                lock (localCraftLock)
+                {
+                    if (localCraftSave == save) localCraftNames = names;
+                    localCraftScanning = false;
+                }
+            });
+            return null;
+        }
     }
 }

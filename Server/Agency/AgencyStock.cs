@@ -208,10 +208,60 @@ namespace Server.Agency
         private static readonly List<string> ExecuteNewBlueprintFiles = new List<string>();
         private static readonly List<string> ExecuteReplacedBlueprintHashes = new List<string>();
 
-        private static string SanitizeDesignName(string name)
+        /// <summary>Control characters become spaces and an overlong name is cut to <see cref="ToolingDesignNames.MaxLength"/>; null when nothing is left.</summary>
+        private static string SanitizeDesignName(string name) => ToolingDesignNames.Sanitize(name);
+
+        /// <summary>
+        /// Gives every nameless tooled design the craft name of its saved blueprint: the ref's stored name, else the blueprint file's top-level
+        /// "ship = " line (the ref's name is filled too). Only the agency's own refs and files are read. Returns true when anything changed.
+        /// </summary>
+        internal static bool BackfillDesignNames(EconomyDocument d)
         {
-            var trimmed = name?.Trim();
-            return string.IsNullOrEmpty(trimmed) || trimmed.Length > 80 || trimmed.Any(char.IsControl) ? null : trimmed;
+            var changed = false;
+            foreach (var agency in d?.Agencies.Values ?? Enumerable.Empty<EconomyAgency>())
+            {
+                if (agency?.Designs == null) continue;
+                foreach (var design in agency.Designs)
+                {
+                    if (design == null || design.Name != null && SanitizeDesignName(design.Name) == design.Name) continue;
+                    var name = SanitizeDesignName(design.Name);
+                    ToolingBlueprintRef blueprint = null;
+                    if (name == null && agency.Blueprints != null && design.Fingerprint != null && agency.Blueprints.TryGetValue(design.Fingerprint, out blueprint) && blueprint != null)
+                    {
+                        name = SanitizeDesignName(blueprint.Name) ?? BlueprintFileShipName(blueprint.Hash);
+                        if (name != null && SanitizeDesignName(blueprint.Name) == null) blueprint.Name = name;
+                    }
+                    if (name == design.Name) continue;
+                    design.Name = name;
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        /// <summary>The "ship = " name in a stored blueprint file, reading only its header. Null when the file is missing or unreadable.</summary>
+        private static string BlueprintFileShipName(string hash)
+        {
+            if (!IsBlueprintHash(hash)) return null;
+            try
+            {
+                var path = BlueprintPath(hash);
+                if (!File.Exists(path)) return null;
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    var buffer = new byte[(int)Math.Min(stream.Length, ToolingDesignNames.MaxHeaderBytes)];
+                    var read = 0;
+                    while (read < buffer.Length)
+                    {
+                        var n = stream.Read(buffer, read, buffer.Length - read);
+                        if (n <= 0) break;
+                        read += n;
+                    }
+                    if (read < buffer.Length) Array.Resize(ref buffer, read);
+                    return ToolingDesignNames.ShipNameFromCraft(buffer);
+                }
+            }
+            catch (Exception) { return null; }
         }
 
         private static bool FileHasHash(string path, string hash)
@@ -268,7 +318,11 @@ namespace Server.Agency
                 newFiles?.Add(path);
             }
             if (existing != null && existing.Hash != hash && existing.Hash != null) ExecuteReplacedBlueprintHashes.Add(existing.Hash);
+            name = SanitizeDesignName(name) ?? ToolingDesignNames.ShipNameFromCraft(bytes);
             holder.Blueprints[fingerprint] = new ToolingBlueprintRef { Fingerprint = fingerprint, Name = name, Editor = editor, Hash = hash, Size = bytes.Length, SavedUtcTicks = UtcNow().Ticks };
+            // A design tooled without a name (before agencies.9, or the name was unusable) takes the saved craft's name.
+            var design = holder.Designs.FirstOrDefault(x => x.Fingerprint == fingerprint);
+            if (design != null && SanitizeDesignName(design.Name) == null && name != null) design.Name = name;
             return true;
         }
 

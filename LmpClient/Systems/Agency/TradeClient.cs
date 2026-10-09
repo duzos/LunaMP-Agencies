@@ -310,7 +310,7 @@ namespace LmpClient.Systems.Agency
             return string.IsNullOrEmpty(clean)?fallback:clean;
         }
         /// <summary>The current save's Ships/&lt;editor&gt; directory, refusing anything outside saves/ or reached through a link.</summary>
-        private static string CraftDirectory(string editor)
+        internal static string CraftDirectory(string editor)
         {
             if (editor!="VAB" && editor!="SPH") throw new InvalidOperationException("Choose a valid VAB or SPH craft.");
             var saveRoot=Path.GetFullPath(Path.Combine(KSPUtil.ApplicationRootPath,"saves"));

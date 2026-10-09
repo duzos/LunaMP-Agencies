@@ -183,11 +183,36 @@ namespace LmpClient.Windows.Agency
             if (!string.IsNullOrEmpty(ToolingClient.LatestStatus)) GUILayout.Label(ToolingClient.LatestStatus, designsText);
         }
 
-        private static string DesignDisplayName(ToolingDesign design)
+        /// <summary>
+        /// The craft name of a design, wherever one is known: the stored tooling name, the saved blueprint's name, then a craft in this save's own
+        /// library with the same parts. Null when none is known; the caller then shows the fingerprint prefix.
+        /// </summary>
+        private static string ResolvedDesignName(string fingerprint, params string[] known)
         {
-            if (!string.IsNullOrWhiteSpace(design.Name)) return design.Name;
-            return "Design " + StockUi.ShortFingerprint(design.Fingerprint);
+            var name = ToolingDesignNames.Resolve(known);
+            if (name == null)
+            {
+                try { name = ToolingDesignNames.Sanitize(ToolingClient.LocalCraftName(fingerprint)); }
+                catch (Exception) { name = null; }
+            }
+            return Localized(name);
         }
+
+        /// <summary>Stock crafts name themselves with a localization tag (#autoLOC_...); show the player's language instead.</summary>
+        private static string Localized(string name)
+        {
+            if (name == null || !name.StartsWith("#", StringComparison.Ordinal)) return name;
+            try { return ToolingDesignNames.Sanitize(KSP.Localization.Localizer.Format(name)) ?? name; }
+            catch (Exception) { return name; }
+        }
+
+        /// <summary>The row heading and the search/sort key: the resolved craft name, else "Design &lt;fingerprint prefix&gt;".</summary>
+        private static string DisplayName(string resolved, string fingerprint) => resolved ?? ToolingDesignNames.Fallback(fingerprint);
+
+        /// <summary>A search matches the shown name or, for disambiguation, the fingerprint prefix.</summary>
+        private static bool MatchesSearch(string name, string fingerprint, string search) =>
+            string.IsNullOrEmpty(search) || name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+            || StockUi.ShortFingerprint(fingerprint).StartsWith(search.TrimStart('#'), StringComparison.OrdinalIgnoreCase) && search.TrimStart('#').Length > 0;
 
         private static string DesignDetail(ToolingDesign design)
         {
@@ -219,12 +244,14 @@ namespace LmpClient.Windows.Agency
             {
                 if (design == null || string.IsNullOrEmpty(design.Fingerprint)) continue;
                 designsTotal++;
-                var name = DesignDisplayName(design);
-                if (name.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 var info = StockUi.Blueprint(design.Fingerprint);
+                var resolved = ResolvedDesignName(design.Fingerprint, design.Name, info?.Name);
+                var name = DisplayName(resolved, design.Fingerprint);
+                if (!MatchesSearch(name, design.Fingerprint, search)) continue;
                 var row = new DesignRow
                 {
-                    Fingerprint = design.Fingerprint, Name = name, Detail = DesignDetail(design), Blueprint = info, Facility = info?.Editor,
+                    Fingerprint = design.Fingerprint, Name = name, Detail = DesignDetail(design) + (resolved != null ? " · #" + StockUi.ShortFingerprint(design.Fingerprint) : ""),
+                    Blueprint = info, Facility = info?.Editor,
                     Available = StockUi.Available(design.Fingerprint), Offered = StockUi.Offered(design.Fingerprint), Held = StockUi.Held(design.Fingerprint)
                 };
                 designsQty.TryGetValue(row.Fingerprint, out var qty);
@@ -248,8 +275,8 @@ namespace LmpClient.Windows.Agency
             {
                 designsBoughtTotal++;
                 var received = StockUi.BoughtDesign(fp);
-                var name = !string.IsNullOrWhiteSpace(received?.Name) ? received.Name : "Design " + StockUi.ShortFingerprint(fp);
-                if (name.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                var name = DisplayName(ResolvedDesignName(fp, received?.Name), fp);
+                if (!MatchesSearch(name, fp, search)) continue;
                 var source = lots?.Where(l => l != null && l.Fingerprint == fp && l.SourceAgencyId != Guid.Empty).Select(l => l.SourceAgencyId).FirstOrDefault() ?? Guid.Empty;
                 bought.Add(new DesignRow
                 {

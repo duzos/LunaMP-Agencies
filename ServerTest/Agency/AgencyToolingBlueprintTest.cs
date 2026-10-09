@@ -47,12 +47,88 @@ namespace ServerTest.Agency
         }
 
         [TestMethod]
-        public void UnsafeDesignNamesAreDroppedWithoutRefusingTheTool()
+        public void UnsafeDesignNamesAreCleanedWithoutRefusingTheTool()
         {
             using (var f = new AgencyEconomyTest.Fixture())
             {
                 Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), name: "bad\u0001name").Success);
-                Assert.IsNull(f.Snapshot.Designs.Single().Name);
+                Assert.AreEqual("bad name", f.Snapshot.Designs.Single().Name);
+            }
+        }
+
+        [TestMethod]
+        public void AnOverlongDesignNameIsCutNotDropped()
+        {
+            using (var f = new AgencyEconomyTest.Fixture())
+            {
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), name: new string('x', 200)).Success);
+                Assert.AreEqual(new string('x', ToolingDesignNames.MaxLength), f.Snapshot.Designs.Single().Name);
+            }
+        }
+
+        [TestMethod]
+        public void ANamelessDesignTakesTheNameOfTheCraftTooledAgain()
+        {
+            using (var f = new AgencyEconomyTest.Fixture())
+            {
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), name: null).Success);
+                Assert.IsNull(f.Snapshot.Designs.Single().Name, "Tooled before names were stored.");
+                var funds = f.Snapshot.Funds;
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), name: "Probe Lander").Success);
+                Assert.AreEqual("Probe Lander", f.Snapshot.Designs.Single().Name);
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), name: "Renamed").Success);
+                Assert.AreEqual("Probe Lander", f.Snapshot.Designs.Single().Name, "A stored name is kept.");
+                Assert.AreEqual(funds, f.Snapshot.Funds);
+            }
+        }
+
+        [TestMethod]
+        public void SavingACraftWithoutANameNamesTheDesignFromItsShipLine()
+        {
+            using (var f = new AgencyEconomyTest.Fixture())
+            {
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), name: null).Success);
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), Craft, name: null).Success);
+                Assert.AreEqual("Probe", f.Snapshot.Designs.Single().Name);
+                Assert.AreEqual("Probe", f.Snapshot.DesignBlueprints.Single().Name);
+            }
+        }
+
+        [TestMethod]
+        public void LoadBackfillsNamelessDesignsFromTheirOwnBlueprint()
+        {
+            using (var f = new AgencyEconomyTest.Fixture())
+            {
+                Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), Craft).Success);
+                var other = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "other", UnitCost = 5 } } };
+                var otherFp = ToolingPolicy.Fingerprint(other);
+                var good = JsonConvert.DeserializeObject<EconomyDocument>(File.ReadAllText(AgencyEconomyStore.FilePath));
+                var mine = good.Agencies[f.Client.AgencyId];
+                // A pre-agencies.9 record: no design name and no ref name; the name is only in the stored craft file.
+                mine.Designs.Single().Name = null;
+                mine.Blueprints[Fp].Name = null;
+                // Another agency's named design with the same parts must not leak into this agency's nameless one.
+                mine.Designs.Add(new ToolingDesign { Fingerprint = otherFp, Manifest = other });
+                var stranger = Guid.NewGuid();
+                good.Agencies[stranger] = new EconomyAgency();
+                good.Agencies[stranger].Designs.Add(new ToolingDesign { Fingerprint = otherFp, Manifest = other, Name = "Secret" });
+                File.WriteAllText(AgencyEconomyStore.FilePath, JsonConvert.SerializeObject(good));
+                AgencyEconomyStore.Load();
+                Assert.IsTrue(AgencyEconomyStore.Ready);
+                var loaded = Document().Agencies[f.Client.AgencyId];
+                Assert.AreEqual("Probe", loaded.Designs.Single(d => d.Fingerprint == Fp).Name);
+                Assert.AreEqual("Probe", loaded.Blueprints[Fp].Name);
+                Assert.IsNull(loaded.Designs.Single(d => d.Fingerprint == otherFp).Name);
+                var persisted = JsonConvert.DeserializeObject<EconomyDocument>(File.ReadAllText(AgencyEconomyStore.FilePath));
+                Assert.AreEqual("Probe", persisted.Agencies[f.Client.AgencyId].Designs.Single(d => d.Fingerprint == Fp).Name, "The backfill is persisted.");
+
+                // A ref name, when present, wins over the file.
+                persisted.Agencies[f.Client.AgencyId].Designs.Single(d => d.Fingerprint == Fp).Name = null;
+                persisted.Agencies[f.Client.AgencyId].Blueprints[Fp].Name = "From Ref";
+                File.WriteAllText(AgencyEconomyStore.FilePath, JsonConvert.SerializeObject(persisted));
+                AgencyEconomyStore.Load();
+                Assert.IsTrue(AgencyEconomyStore.Ready);
+                Assert.AreEqual("From Ref", Document().Agencies[f.Client.AgencyId].Designs.Single(d => d.Fingerprint == Fp).Name);
             }
         }
 

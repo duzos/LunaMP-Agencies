@@ -176,6 +176,7 @@ namespace Server.Agency
                     if (ReleaseOrphanedVouchers(candidate)) changed = true;
                     RetireTerminalLaunches(candidate);
                     if (TradeNeedsMaintenance(candidate)) { PruneTrade(candidate); changed = true; }
+                    if (BackfillDesignNames(candidate)) changed = true;
                     if (changed) Commit(candidate);
                     Initialized = true;
                     CleanupBlueprintFiles(_document);
@@ -472,6 +473,12 @@ namespace Server.Agency
                             {
                                 Charge(agency, result.Quote.ToolingCost);
                                 agency.Designs.Add(new ToolingDesign { Fingerprint = result.Quote.Fingerprint, Manifest = Copy(command.Manifest), ToolingBasis = result.Quote.ToolingCost, Name = designName });
+                            }
+                            else if (designName != null)
+                            {
+                                // A design tooled before names were stored (or without a usable one) takes the name of the craft tooled again or saved to it.
+                                var tooledDesign = agency.Designs.FirstOrDefault(x => x.Fingerprint == result.Quote.Fingerprint);
+                                if (tooledDesign != null && SanitizeDesignName(tooledDesign.Name) == null) tooledDesign.Name = designName;
                             }
                             // The blueprint runs after everything that can refuse the Tool, so a refused Tool never writes a file. Storage never fails it.
                             if (command.BlueprintData != null && command.BlueprintData.Length > 0)

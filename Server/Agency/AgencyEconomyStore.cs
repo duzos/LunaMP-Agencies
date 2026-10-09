@@ -87,6 +87,8 @@ namespace Server.Agency
     /// <summary>Durable balance and tooling authority; all projections are replayable.</summary>
     public static partial class AgencyEconomyStore
     {
+        /// <summary>How long a prepared launch token stays valid. Slow modded flight-scene loads can exceed a minute, so this is generous.</summary>
+        internal const int LaunchTokenSeconds = 300;
         internal static bool Initialized;
         private static EconomyDocument _document = new EconomyDocument();
         private static string _error;
@@ -518,7 +520,7 @@ namespace Server.Agency
                             {
                                 LaunchId = command.LaunchId, AgencyId = client.AgencyId, ActorId = client.UniqueIdentifier,
                                 SessionTicks = client.ConnectionTime.Ticks, SessionId = sessionId, CreatedSequence = command.Sequence, Token = Guid.NewGuid(), State = LaunchState.Prepared,
-                                ExpiresUtcTicks = UtcNow().AddSeconds(60).Ticks, Manifest = Copy(command.Manifest),
+                                ExpiresUtcTicks = UtcNow().AddSeconds(LaunchTokenSeconds).Ticks, Manifest = Copy(command.Manifest),
                                 Charge = UsesFunds ? launchCharge : 0,
                                 Multiplier = launchMultiplier, VoucherId = reserved, Stock = stockTerms
                             };

@@ -171,7 +171,7 @@ namespace ServerTest.Agency
                 StringAssert.Contains(early.Reason, "saved less than a minute ago");
                 Assert.AreEqual(Sha(Craft), f.Snapshot.DesignBlueprints.Single().Hash);
                 Assert.IsFalse(File.Exists(FileFor(Edited)));
-                now = now.AddSeconds(61);
+                now = now.AddSeconds(AgencyEconomyStore.LaunchTokenSeconds + 1);
                 Assert.IsTrue(AgencyStockTest.Tool(f.Execute, Probe(), Edited).Success);
                 Assert.AreEqual(Sha(Edited), f.Snapshot.DesignBlueprints.Single().Hash);
                 Assert.IsTrue(File.Exists(FileFor(Edited)));

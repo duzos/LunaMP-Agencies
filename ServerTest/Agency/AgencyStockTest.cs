@@ -264,7 +264,7 @@ namespace ServerTest.Agency
                 f.Refresh();
 
                 Assert.IsTrue(Prepare(f.Economy.Execute, manifest, lot, out _).Success);
-                now = now.AddSeconds(61);
+                now = now.AddSeconds(AgencyEconomyStore.LaunchTokenSeconds + 1);
                 AgencyEconomyStore.CancelPending();
                 Assert.AreEqual(10, Units(f));
 
@@ -498,7 +498,7 @@ namespace ServerTest.Agency
                 Assert.IsTrue(Slots(agency) <= 64);
                 f.Refresh();
                 Assert.IsTrue(Prepare(f.Economy.Execute, Probe(), Lots(f).First().LotId, out _).Success);
-                now = now.AddSeconds(61);
+                now = now.AddSeconds(AgencyEconomyStore.LaunchTokenSeconds + 1);
                 AgencyEconomyStore.CancelPending();
                 Assert.IsTrue(Slots(agency) <= 64);
                 Assert.IsTrue(Prepare(f.Economy.Execute, Probe(), Lots(f).First().LotId, out _).Success);
@@ -623,7 +623,7 @@ namespace ServerTest.Agency
                 Assert.IsTrue(Build(f, 2).Success);
                 var prepared = Prepare(f.Economy.Execute, Probe(), Lots(f).Single().LotId, out var launch);
                 Assert.IsTrue(prepared.Success);
-                now = now.AddSeconds(61);
+                now = now.AddSeconds(AgencyEconomyStore.LaunchTokenSeconds + 1);
                 var document = Document();
                 var attempts = 0;
                 AgencyEconomyStore.PersistenceCheckpoint = point => { if (point == "before-document") { attempts++; throw new IOException("disk full"); } };
@@ -639,7 +639,7 @@ namespace ServerTest.Agency
                 Assert.IsTrue(AgencyEconomyStore.Ready);
 
                 AgencyEconomyStore.PersistenceCheckpoint = null;
-                now = now.AddSeconds(61);
+                now = now.AddSeconds(AgencyEconomyStore.LaunchTokenSeconds + 1);
                 AgencyEconomyStore.MaintenanceSweep();
                 Assert.IsTrue(!Document().Launches.TryGetValue(launch, out var swept) || swept.State == LaunchState.Cancelled);
                 Assert.AreEqual(2, Units(f));
@@ -657,14 +657,14 @@ namespace ServerTest.Agency
                 Assert.IsTrue(Prepare(f.Economy.Execute, Probe(), Lots(f).Single().LotId, out _).Success);
                 var session = f.Economy.Session;
                 Assert.IsTrue(Document().SessionSequences.ContainsKey(session));
-                now = now.AddSeconds(61);
+                now = now.AddSeconds(AgencyEconomyStore.LaunchTokenSeconds + 1);
                 AgencyEconomyStore.PersistenceCheckpoint = point => { if (point == "before-document") throw new IOException("disk full"); };
                 AgencyEconomyStore.MaintenanceSweep();
                 AgencyEconomyStore.CancelPending(f.Economy.Client);
                 Assert.IsTrue(Document().SessionSequences.ContainsKey(session), "Backing off, nothing was committed yet.");
 
                 AgencyEconomyStore.PersistenceCheckpoint = null;
-                now = now.AddSeconds(61);
+                now = now.AddSeconds(AgencyEconomyStore.LaunchTokenSeconds + 1);
                 AgencyEconomyStore.MaintenanceSweep();
                 Assert.IsFalse(Document().SessionSequences.ContainsKey(session), "The next successful sweep prunes the closed session.");
                 Assert.IsFalse(Document().Operations.Values.Any(o => o.SessionId == session));

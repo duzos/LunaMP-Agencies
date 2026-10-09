@@ -145,6 +145,16 @@ namespace LmpClient.Systems.Agency
         /// </summary>
         internal static bool HasEntitlement(ToolingManifest manifest) => HasTradeEntitlement(manifest) || ToolingClient.HasStockResearch(manifest);
         /// <summary>
+        /// Every exact part list HasEntitlement could accept right now, as a cheap superset that needs no craft file: purchased allowances and
+        /// vouchers (when trade is ready) and held stock. An empty set means no craft can be unlocked, so callers skip parsing craft files.
+        /// </summary>
+        internal static HashSet<string> ResearchCandidates()
+        {
+            TradeEntitlement[] held = Array.Empty<TradeEntitlement>();
+            if (Ready) lock (gate) held = entitlements;
+            return ResearchGrantPolicy.Candidates(ResearchGrantPolicy.EntitlementFingerprints(held, ToolingClient.Enabled && useVoucher), ToolingClient.StockResearchCandidates());
+        }
+        /// <summary>
         /// Whether purchased rights unlock this exact part list. Permanent allowances always count. A free-launch voucher counts only
         /// when it will really be applied: tooling on, toggle on, and either selected for the launch in progress or the one the next launch would use.
         /// </summary>

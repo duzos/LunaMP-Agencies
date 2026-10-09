@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using LmpCommon.Agency;
@@ -25,6 +26,9 @@ namespace LmpClient.Harmony
                 Patch(harmony,typeof(ShipConstruct),"LoadShip",new[]{typeof(ConfigNode),typeof(uint),typeof(bool),typeof(string).MakeByRefType()},nameof(Load),null,nameof(EndLoad));
                 Patch(harmony,typeof(ShipTemplate),"LoadShip",new[]{typeof(ConfigNode)},nameof(Load),null,nameof(EndLoad));
                 Patch(harmony,typeof(KSP.UI.Screens.CraftProfileInfo),"LoadDetailsFromCraftFile",new[]{typeof(ConfigNode),typeof(string),typeof(bool),typeof(bool)},nameof(Load),null,nameof(EndLoad));
+                // Craft lists (the KSC launch dialog, the editor's load dialog) read a cached .loadmeta through CraftProfileInfo.Load, which checks
+                // PartTechAvailable from part names alone. Without this the KSC dialog marks a bought craft "Locked or Invalid Parts" and greys Launch.
+                Patch(harmony,typeof(KSP.UI.Screens.CraftProfileInfo),"GetSaveData",new[]{typeof(string),typeof(string)},nameof(ListLoad),null,nameof(EndLoad));
                 Patch(harmony,typeof(ResearchAndDevelopment),"PartTechAvailable",new[]{typeof(AvailablePart)},null,nameof(PartAvailable));
                 foreach(var type in new[]{typeof(ShipConstruct),typeof(VesselCrewManifest)})
                 {
@@ -49,12 +53,44 @@ namespace LmpClient.Harmony
         {
             __state=allowedParts; allowedParts=null;
             if(!Active || !Ready) return;
+            try {allowedParts=AllowedParts(ToolingManifestBuilder.FromConfig(__0,null));}
+            catch { /* Malformed/missing parts retain normal stock load failures. */ }
+        }
+        /// <summary>The part names a purchased design or held stock unlocks for this exact manifest, or null when nothing does.</summary>
+        private static HashSet<string> AllowedParts(ToolingManifest manifest)
+            => TradeClient.HasEntitlement(manifest) && CargoAllowed(manifest) ? new HashSet<string>(manifest.Parts.Select(p=>p.Name),StringComparer.Ordinal) : null;
+        /// <summary>
+        /// GetSaveData(fullPath, loadMetaPath): the craft is parsed only when the agency holds some grant at all and the file's part list is one
+        /// of the granted fingerprints, so players without bought designs or stock keep KSP's cached-metadata fast path.
+        /// </summary>
+        private static void ListLoad(string __0,out HashSet<string> __state)
+        {
+            __state=allowedParts; allowedParts=null;
+            if(!Active || !Ready || string.IsNullOrEmpty(__0)) return;
             try
             {
-                var manifest=ToolingManifestBuilder.FromConfig(__0,null);
-                if(TradeClient.HasEntitlement(manifest) && CargoAllowed(manifest)) allowedParts=new HashSet<string>(manifest.Parts.Select(p=>p.Name),StringComparer.Ordinal);
+                var candidates=TradeClient.ResearchCandidates();
+                if(candidates.Count==0) return;
+                var manifest=CachedManifest(__0);
+                if(manifest!=null && candidates.Contains(ToolingPolicy.Fingerprint(manifest))) allowedParts=AllowedParts(manifest);
             }
-            catch { /* Malformed/missing parts retain normal stock load failures. */ }
+            catch { /* An unreadable craft keeps the stock locked-part listing. */ }
+        }
+        private sealed class CachedCraft {internal long Ticks,Length;internal ToolingManifest Manifest;}
+        private static readonly Dictionary<string,CachedCraft> craftCache=new Dictionary<string,CachedCraft>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>The craft file's manifest (no crew), reparsed only when its size or write time changes. Main thread only, like the dialogs.</summary>
+        private static ToolingManifest CachedManifest(string path)
+        {
+            var info=new FileInfo(path);
+            if(!info.Exists) return null;
+            var ticks=info.LastWriteTimeUtc.Ticks;
+            if(craftCache.TryGetValue(path,out var cached) && cached.Ticks==ticks && cached.Length==info.Length) return cached.Manifest;
+            ToolingManifest manifest=null;
+            try {manifest=ToolingManifestBuilder.FromFile(path,null);}
+            catch { /* Missing parts or a malformed file: cached as "no manifest" until the file changes. */ }
+            if(craftCache.Count>=512) craftCache.Clear();
+            craftCache[path]=new CachedCraft{Ticks=ticks,Length=info.Length,Manifest=manifest};
+            return manifest;
         }
         private static Exception EndLoad(Exception __exception,HashSet<string> __state){allowedParts=__state;return __exception;}
         private static void PartAvailable(AvailablePart __0,ref bool __result)

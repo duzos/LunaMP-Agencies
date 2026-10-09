@@ -336,6 +336,17 @@ namespace LmpClient.Systems.Agency
                 if (!(snapshot?.Stock ?? Array.Empty<DesignStockLot>()).Any(l => l != null && l.Units > 0 && l.Fingerprint == fingerprint)) return false;
             return SelectStock(StandardQuote(manifest)) != null;
         }
+        /// <summary>
+        /// Designs whose held stock could unlock research (the cheap pre-check before HasStockResearch): nothing unless tooling is ready and
+        /// Use stock is on; otherwise every design with a held unit plus the design of a stock launch in progress.
+        /// </summary>
+        internal static IEnumerable<string> StockResearchCandidates()
+        {
+            if (!Ready || !useStock) return Array.Empty<string>();
+            var launch = pending;
+            var pendingFingerprint = launch != null && launch.StockLot != Guid.Empty ? launch.StockFingerprint : null;
+            lock (stateLock) return ResearchGrantPolicy.StockFingerprints(snapshot?.Stock, pendingFingerprint).ToArray();
+        }
         /// <summary>Saved-blueprint metadata for a tooled design, or null when none is saved.</summary>
         public static ToolingBlueprintInfo BlueprintInfo(string fingerprint)
         {

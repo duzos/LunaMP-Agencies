@@ -119,7 +119,13 @@ namespace Server.Server
             {
                 while (ServerContext.ServerRunning)
                 {
-                    if((global::Server.Agency.VesselOwnershipSystem.Enabled || global::Server.Agency.AgencyEconomyStore.Enabled) && DateTime.UtcNow>=ownershipSweep) { global::Server.Agency.VesselOwnershipSystem.SweepExpired(); global::Server.Agency.AgencyEconomyStore.CancelPending(); ownershipSweep=DateTime.UtcNow.AddSeconds(1); }
+                    if ((global::Server.Agency.VesselOwnershipSystem.Enabled || global::Server.Agency.AgencyEconomyStore.Enabled) && DateTime.UtcNow >= ownershipSweep)
+                    {
+                        // Nothing thrown by the sweep may leave this loop: an escaped exception would end message receiving for good.
+                        try { global::Server.Agency.AgencyEconomyStore.MaintenanceSweep(); }
+                        catch (Exception e) { LunaLog.Error($"[Economy] Maintenance sweep failed: {e}"); }
+                        finally { ownershipSweep = DateTime.UtcNow.AddSeconds(1); }
+                    }
                     var msg = Server.ReadMessage();
                     if (msg != null)
                     {

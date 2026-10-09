@@ -1,4 +1,5 @@
-﻿using LmpCommon.Enums;
+﻿using LmpCommon.Agency;
+using LmpCommon.Enums;
 using Server.Log;
 using Server.Settings.Base;
 using Server.Settings.Definition;
@@ -24,6 +25,21 @@ namespace Server.Settings
 
             //Load the gameplay settings last so we have the GeneralSettings.SettingsStore.GameDifficulty defined
             new GameplaySettings().Load();
+            ValidateStockSettings();
+        }
+
+        /// <summary>
+        /// A bad stock discount setting resets both values to the defaults in memory instead of taking the economy offline;
+        /// a discount of 0.5 or more would make building more units cheaper in total.
+        /// </summary>
+        public static void ValidateStockSettings()
+        {
+            var settings = GeneralSettings.SettingsStore;
+            if (settings == null || StockRates.IsValid(settings.StockMaxDiscount, settings.StockFullDiscountUnits)) return;
+            LunaLog.Warning($"Invalid stock settings StockMaxDiscount={settings.StockMaxDiscount} StockFullDiscountUnits={settings.StockFullDiscountUnits}: " +
+                            $"use 0 <= StockMaxDiscount < 0.5 and 2 <= StockFullDiscountUnits <= 1000. Using {StockDefaults.MaxDiscount} and {StockDefaults.FullDiscountUnits}.");
+            settings.StockMaxDiscount = StockDefaults.MaxDiscount;
+            settings.StockFullDiscountUnits = StockDefaults.FullDiscountUnits;
         }
 
         public static void ValidateDifficultySettings()

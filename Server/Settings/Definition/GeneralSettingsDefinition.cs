@@ -119,6 +119,13 @@ namespace Server.Settings.Definition
         [XmlComment(Value = "Launch price multiplier for a craft whose exact part list is not tooled yet: 2 charges double the part cost. " +
                             "Science parts and inventory always stay at 1x. Recovery never refunds more than was paid. Tooling gameplay only.")]
         public double UntooledLaunchMultiplier { get; set; } = ToolingDefaults.UntooledLaunch;
+
+        [XmlComment(Value = "Largest volume discount on the tooled non-science share of a bulk stock build (0 <= value < 0.5). " +
+                            "A build of n units gets this x min(1, (n - 1) / (StockFullDiscountUnits - 1)). Invalid values reset both stock settings to 0.3 and 10. Tooling gameplay only.")]
+        public double StockMaxDiscount { get; set; } = StockDefaults.MaxDiscount;
+
+        [XmlComment(Value = "Units in one stock build that reach the full StockMaxDiscount (2 to 1000). Existing stock keeps the price it was built at.")]
+        public int StockFullDiscountUnits { get; set; } = StockDefaults.FullDiscountUnits;
         public int AgencyDockRequestTimeoutSeconds { get; set; } = 30;
         public int AgencyDockGrantTimeoutSeconds { get; set; } = 30;
 

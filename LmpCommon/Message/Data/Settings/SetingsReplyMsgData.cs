@@ -91,6 +91,8 @@ namespace LmpCommon.Message.Data.Settings
         public double AgencyContactExpirySeconds = VisibilityContactSettings.ExpirySeconds;
         public double AgencyActiveDetectionRangeMultiplier = VisibilityContactSettings.ActiveDetectionRangeMultiplier;
         public double ToolingCostMultiplier = ToolingDefaults.ToolingCost, TooledLaunchMultiplier = ToolingDefaults.TooledLaunch, ToolingCombineMultiplier = ToolingDefaults.Combine, UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch;
+        public double StockMaxDiscount = StockDefaults.MaxDiscount;
+        public int StockFullDiscountUnits = StockDefaults.FullDiscountUnits;
 
         public override string ClassName { get; } = nameof(SettingsReplyMsgData);
 
@@ -176,6 +178,9 @@ namespace LmpCommon.Message.Data.Settings
             lidgrenMsg.Write(VisibilityContactSettings.NormalizeIdentificationDistance(AgencyContactIdentificationDistance));
             lidgrenMsg.Write(VisibilityContactSettings.NormalizeExpirySeconds(AgencyContactExpirySeconds));
             lidgrenMsg.Write(VisibilityContactSettings.NormalizeActiveDetectionRangeMultiplier(AgencyActiveDetectionRangeMultiplier));
+            var stock = StockRates.Normalize(StockMaxDiscount, StockFullDiscountUnits);
+            lidgrenMsg.Write(stock.MaxDiscount);
+            lidgrenMsg.Write(stock.FullDiscountUnits);
         }
 
         internal override void InternalDeserialize(NetIncomingMessage lidgrenMsg)
@@ -274,6 +279,7 @@ namespace LmpCommon.Message.Data.Settings
             AgencyContactIdentificationDistance = VisibilityContactSettings.IdentificationDistance;
             AgencyContactExpirySeconds = VisibilityContactSettings.ExpirySeconds;
             AgencyActiveDetectionRangeMultiplier = VisibilityContactSettings.ActiveDetectionRangeMultiplier;
+            StockMaxDiscount = StockDefaults.MaxDiscount; StockFullDiscountUnits = StockDefaults.FullDiscountUnits;
             ToolingCostMultiplier = ToolingDefaults.ToolingCost; TooledLaunchMultiplier = ToolingDefaults.TooledLaunch; ToolingCombineMultiplier = ToolingDefaults.Combine; UntooledLaunchMultiplier = ToolingDefaults.LegacyUntooledLaunch;
             if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 193)
             {
@@ -296,7 +302,14 @@ namespace LmpCommon.Message.Data.Settings
                             AgencyContactIdentificationDistance = VisibilityContactSettings.NormalizeIdentificationDistance(lidgrenMsg.ReadDouble());
                             AgencyContactExpirySeconds = VisibilityContactSettings.NormalizeExpirySeconds(lidgrenMsg.ReadDouble());
                             if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 64)
+                            {
                                 AgencyActiveDetectionRangeMultiplier = VisibilityContactSettings.NormalizeActiveDetectionRangeMultiplier(lidgrenMsg.ReadDouble());
+                                if (lidgrenMsg.LengthBits - lidgrenMsg.Position >= 96)
+                                {
+                                    var stock = StockRates.Normalize(lidgrenMsg.ReadDouble(), lidgrenMsg.ReadInt32());
+                                    StockMaxDiscount = stock.MaxDiscount; StockFullDiscountUnits = stock.FullDiscountUnits;
+                                }
+                            }
                         }
                     }
                 }
@@ -306,7 +319,7 @@ namespace LmpCommon.Message.Data.Settings
         internal override int InternalGetMessageSize()
         {
             return base.InternalGetMessageSize() + sizeof(WarpMode) + sizeof(GameMode) + sizeof(TerrainQuality) + sizeof(GameDifficulty) +
-                sizeof(bool) * 35 + sizeof(double) * 9 + sizeof(int) * 9 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
+                sizeof(bool) * 35 + sizeof(double) * 10 + sizeof(int) * 10 + sizeof(float) * 19 + ConsoleIdentifier.GetByteCount();
         }
     }
 }

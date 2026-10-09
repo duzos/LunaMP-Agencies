@@ -9,7 +9,7 @@ using LmpCommon.Message.Interface;
 // Gameplay entry points deliberately throw; these tests exercise synchronization only.
 public class TestUnityObject { public static implicit operator bool(TestUnityObject value) => value != null; }
 public enum EditorFacility { VAB }
-public enum GameScenes { SPACECENTER }
+public enum GameScenes { SPACECENTER, EDITOR, FLIGHT }
 public enum ControlTypes { EDITOR_LAUNCH }
 public class Funding : TestUnityObject { public static Funding Instance; }
 public class ResearchAndDevelopment : TestUnityObject { public static ResearchAndDevelopment Instance; }
@@ -17,7 +17,7 @@ public class CrewMember { public string name; }
 public class VesselCrewManifest { public IEnumerable<CrewMember> GetAllCrew(bool value) => throw new NotSupportedException(); }
 public class Vessel : TestUnityObject { public Guid id; public bool loaded, packed; public CelestialBody mainBody; public Part rootPart; public Vector3d CoMD, velocityD; }
 public class Part : TestUnityObject { public uint flightID, craftID; public TestUnityObject rb; public Vessel vessel; public List<CrewMember> protoModuleCrew = new List<CrewMember>(); }
-public class ShipConstruct { public List<Part> parts = new List<Part>(); }
+public class ShipConstruct { public List<Part> parts = new List<Part>(); public string shipName = string.Empty; }
 public class ProtoPartSnapshot { public uint flightID; }
 public class ProtoVessel { public Guid vesselID; public bool landed, splashed; public OrbitSnapshot orbitSnapShot; public List<ProtoPartSnapshot> protoPartSnapshots = new List<ProtoPartSnapshot>(); }
 public class ShipTemplate { public ConfigNode config; }
@@ -67,7 +67,10 @@ namespace LmpClient.Systems.SettingsSys
     {
         internal bool AgencyTooling, AgencyTrade;
         internal bool CanRevert = true;
+        internal GameMode GameMode = GameMode.Career;
         internal double ToolingCostMultiplier = ToolingDefaults.ToolingCost, TooledLaunchMultiplier = ToolingDefaults.TooledLaunch, UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch, ToolingCombineMultiplier = ToolingDefaults.Combine;
+        internal double StockMaxDiscount = StockDefaults.MaxDiscount;
+        internal int StockFullDiscountUnits = StockDefaults.FullDiscountUnits;
     }
     internal static class SettingsSystem { internal static TestSettings ServerSettings = new TestSettings(); }
 }
@@ -101,7 +104,9 @@ namespace LmpClient.Systems.Agency
     }
     internal static class ToolingManifestBuilder
     {
-        internal static ToolingManifest Build(ShipConstruct ship, VesselCrewManifest crew) => throw new NotSupportedException();
+        /// <summary>Test hook for the editor manifest; unset, building throws as the real builder would without KSP.</summary>
+        internal static Func<ShipConstruct, ToolingManifest> BuildHook;
+        internal static ToolingManifest Build(ShipConstruct ship, VesselCrewManifest crew) => BuildHook != null ? BuildHook(ship) : throw new NotSupportedException();
         internal static ToolingManifest FromFile(string path, VesselCrewManifest crew) => throw new NotSupportedException();
         internal static ToolingManifest FromConfig(ConfigNode node, VesselCrewManifest crew) => throw new NotSupportedException();
     }
@@ -117,6 +122,34 @@ namespace LmpClient.Systems.Agency
         private static void TickBoarding() { }
         private static bool HandleBoarding(EconomyResult result) => false;
         private static bool HandleSplit(EconomyResult result) => false;
+        // Plan 40: the unlinked ToolingClient.Blueprints.cs members (KSP-bound) that ToolingClient.cs calls, with test hooks.
+        internal static string TestEditorHash, TestBlueprintFingerprint, TestCaptureName = "Test craft", TestCaptureEditor = "VAB";
+        internal static byte[] TestCaptureBytes;
+        internal static string[] TestMissingParts = Array.Empty<string>();
+        internal static readonly List<string> TestWrittenFiles = new List<string>();
+        internal static readonly List<Tuple<string, string>> TestLoads = new List<Tuple<string, string>>();
+        internal static int TestEditorHashCalls;
+        /// <summary>Serialized size the editor craft reports; 0 means "small". Over the limit, no hash is returned (as in production).</summary>
+        internal static long TestEditorBytes;
+        internal static void ResetBlueprintHooks()
+        {
+            TestEditorHash = null; TestBlueprintFingerprint = null; TestCaptureBytes = null; TestCaptureName = "Test craft"; TestCaptureEditor = "VAB";
+            TestMissingParts = Array.Empty<string>(); TestWrittenFiles.Clear(); TestLoads.Clear(); TestEditorHashCalls = 0; TestEditorBytes = 0;
+        }
+        private static bool CaptureEditorBlueprint(out byte[] bytes, out string editor, out string name)
+        { bytes = TestCaptureBytes; editor = bytes == null ? null : TestCaptureEditor; name = bytes == null ? null : TestCaptureName; return bytes != null; }
+        private static bool TryEditorBlueprintHash(out string hash, out long size)
+        {
+            TestEditorHashCalls++;
+            size = TestEditorBytes > 0 ? TestEditorBytes : 100;
+            hash = size > ToolingLimits.MaxToolingBlueprintBytes ? null : TestEditorHash;
+            return TestEditorHash != null || TestEditorBytes > 0;
+        }
+        private static string[] MissingBlueprintParts(byte[] bytes) => TestMissingParts;
+        private static string BlueprintFingerprint(byte[] bytes) => TestBlueprintFingerprint;
+        private static string WriteTooledCraftFile(ToolingBlueprintInfo info, byte[] bytes)
+        { var path = "Ships/" + info.Editor + "/Tooled-" + info.Fingerprint.Substring(0, 8) + ".craft"; TestWrittenFiles.Add(path); return path; }
+        private static void LoadTooledCraftFile(string path, string editor) => TestLoads.Add(Tuple.Create(path, editor));
     }
 }
 

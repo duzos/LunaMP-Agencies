@@ -502,6 +502,7 @@
     <Compile Include="Harmony\CommNetDenialLogGate.cs" />
     <Compile Include="Systems\Agency\CommNetState.cs" />
     <Compile Include="Systems\Agency\ToolingClient.cs" />
+    <Compile Include="Systems\Agency\ToolingClient.Blueprints.cs" />
     <Compile Include="Systems\Agency\TradeClient.cs" />
     <Compile Include="Systems\Agency\VisibilityContacts.cs" />
     <Compile Include="Windows\Agency\VisibilityContactOverlay.cs" />
@@ -512,6 +513,8 @@
     <Compile Include="Windows\Agency\VisibilityDrawer.cs" />
     <Compile Include="Harmony\AgencyTradeResearch.cs" />
     <Compile Include="Windows\Agency\TradeDrawer.cs" />
+    <Compile Include="Windows\Agency\AgencyDesignsDrawer.cs" />
+    <Compile Include="Windows\Agency\FrameRefreshGate.cs" />
     <Compile Include="Systems\Agency\ToolingBoarding.cs" />
     <Compile Include="Systems\Agency\ToolingSplit.cs" />
     <Compile Include="Systems\Agency\SplitOrbitSnapshot.cs" />

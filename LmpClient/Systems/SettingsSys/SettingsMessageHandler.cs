@@ -55,6 +55,9 @@ namespace LmpClient.Systems.SettingsSys
             SettingsSystem.ServerSettings.TooledLaunchMultiplier = msgData.TooledLaunchMultiplier;
             SettingsSystem.ServerSettings.ToolingCombineMultiplier = msgData.ToolingCombineMultiplier;
             SettingsSystem.ServerSettings.UntooledLaunchMultiplier = msgData.UntooledLaunchMultiplier;
+            var stockRates = LmpCommon.Agency.StockRates.Normalize(msgData.StockMaxDiscount, msgData.StockFullDiscountUnits);
+            SettingsSystem.ServerSettings.StockMaxDiscount = stockRates.MaxDiscount;
+            SettingsSystem.ServerSettings.StockFullDiscountUnits = stockRates.FullDiscountUnits;
             LmpClient.Harmony.CommNet_AgencyFilter.RequestRefresh();
             SettingsSystem.ServerSettings.AgencyLaunchSitesPerAgency = msgData.AgencyLaunchSitesPerAgency;
             SettingsSystem.ServerSettings.AgencyVesselOwnership = msgData.AgencyVesselOwnership;

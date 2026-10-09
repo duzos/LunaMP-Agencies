@@ -66,6 +66,11 @@ namespace LmpClient.Systems.Agency
         private sealed class PendingLaunch
         {
             internal Guid Request, Launch, Token, Voucher;
+            /// <summary>The stock lot this launch reserves, and its fingerprint, captured at BeginLaunch.</summary>
+            internal Guid StockLot;
+            internal string StockFingerprint;
+            /// <summary>Available units of that design when the launch began, for the "Using 1 of N stock" line.</summary>
+            internal int StockHeld;
             internal string Path, FileHash, Flag, Site, ManifestHash, Crew;
             internal ToolingManifest Manifest;
             internal VesselCrewManifest CrewManifest;
@@ -106,7 +111,18 @@ namespace LmpClient.Systems.Agency
                 if (!Ready || EditorQuote == null || !EditorQuote.Success || editorQuoteHash != ToolingPolicy.ManifestHash(manifest))
                     throw new InvalidOperationException("Craft changed or tooling is still syncing. Review the updated quote.");
                 LatestStatus = "Purchasing tooling...";
-                return Send(new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) });
+                // The craft blueprint makes the design loadable later; a failed capture still buys the tooling, without it.
+                byte[] bytes = null; string editor = null, name = null;
+                try { if (!CaptureEditorBlueprint(out bytes, out editor, out name)) bytes = null; }
+                catch (Exception e) { bytes = null; Diagnostics.PlaytestDiagnostics.Write("client.tooling.blueprint-capture", () => "failed=" + e.Message); }
+                if (bytes != null && bytes.Length > ToolingLimits.MaxToolingBlueprintBytes)
+                {
+                    LatestStatus = "Purchasing tooling without the saved craft. " + BlueprintTooLargeText(bytes.Length);
+                    bytes = null;
+                }
+                if (name == null) { try { name = EditorLogic.fetch?.ship?.shipName; } catch (Exception) { name = null; } }
+                return Send(new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest), DesignName = name,
+                    BlueprintData = bytes ?? Array.Empty<byte>(), BlueprintEditor = bytes == null ? null : editor });
             }
             catch (Exception e) { LatestStatus = e.Message; return Guid.Empty; }
         }
@@ -119,23 +135,30 @@ namespace LmpClient.Systems.Agency
         /// <summary>The agency's own price for a craft, ignoring any free-launch voucher.</summary>
         internal static ToolingQuote StandardQuote(ToolingManifest manifest)
         {
+            StandardQuoteCalls++;
             lock (stateLock)
                 return ToolingPolicy.Quote(manifest, snapshot?.Designs ?? Array.Empty<ToolingDesign>(), Rates());
         }
-        private static ToolingQuote Quote(ToolingManifest manifest) => Quote(manifest, out _);
-        /// <summary>The price the server will charge: a matching free-launch voucher turns the launch into inventory and top-up only.</summary>
-        private static ToolingQuote Quote(ToolingManifest manifest, out TradeEntitlement voucher)
+        private static ToolingQuote Quote(ToolingManifest manifest) => Quote(manifest, out _, out _);
+        /// <summary>
+        /// The price the server will charge. A matching free-launch voucher wins (it is a one-off gift); otherwise a cheaper held stock lot applies.
+        /// Either turns the launch into inventory and top-up only.
+        /// </summary>
+        private static ToolingQuote Quote(ToolingManifest manifest, out TradeEntitlement voucher, out DesignStockLot stockLot)
         {
             var standard = StandardQuote(manifest);
+            stockLot = null;
             voucher = TradeClient.SelectVoucher(standard);
-            if (voucher == null) return standard;
-            return new ToolingQuote
-            {
-                Success = standard.Success, Reason = standard.Reason, Fingerprint = standard.Fingerprint, ToolingCost = standard.ToolingCost,
-                ScienceCost = standard.ScienceCost, NonScienceCost = standard.NonScienceCost, CargoCost = standard.CargoCost, AlreadyTooled = standard.AlreadyTooled, CoverSearchExhausted = standard.CoverSearchExhausted, Matches = standard.Matches,
-                LaunchCost = TradePolicy.VoucherLaunchCharge(standard, voucher.PrepaidFunds, voucher.LaunchMultiplier)
-            };
+            if (voucher != null) return WithLaunchCost(standard, TradePolicy.VoucherLaunchCharge(standard, voucher.PrepaidFunds, voucher.LaunchMultiplier));
+            stockLot = SelectStock(standard);
+            return stockLot == null ? standard : WithLaunchCost(standard, StockPolicy.EffectiveLaunchCharge(standard, stockLot, UsesFunds, Rates().TooledLaunch, out _));
         }
+        private static ToolingQuote WithLaunchCost(ToolingQuote standard, double launchCost) => new ToolingQuote
+        {
+            Success = standard.Success, Reason = standard.Reason, Fingerprint = standard.Fingerprint, ToolingCost = standard.ToolingCost,
+            ScienceCost = standard.ScienceCost, NonScienceCost = standard.NonScienceCost, CargoCost = standard.CargoCost, AlreadyTooled = standard.AlreadyTooled, CoverSearchExhausted = standard.CoverSearchExhausted, Matches = standard.Matches,
+            LaunchCost = launchCost
+        };
         internal static bool HasTooling(string fingerprint)
         {
             lock (stateLock) return snapshot?.Designs != null && snapshot.Designs.Any(d => d.Fingerprint == fingerprint);
@@ -143,6 +166,302 @@ namespace LmpClient.Systems.Agency
         /// <summary>True while a launch is reserved or starting; its voucher, if any, is the only one that counts for research.</summary>
         internal static bool LaunchPending => pending != null;
         internal static Guid PendingVoucher => pending?.Voucher ?? Guid.Empty;
+        /// <summary>The stock lot the launch in progress reserved (compared by id even after the row is pruned), and its fingerprint.</summary>
+        internal static Guid PendingStockLot => pending?.StockLot ?? Guid.Empty;
+        internal static string PendingStockFingerprint => pending?.StockFingerprint;
+
+        // Plan 40 design stock: the pure client state. The KSP-bound half (capture, hashing, craft files, editor load) is ToolingClient.Blueprints.cs.
+        private static bool useStock = true;
+        private static Guid buildRequest, saveRequest;
+        private static DateTime buildDeadline, saveDeadline;
+        private static Guid loadRequest;
+        private static string loadFingerprint;
+        private static DateTime loadDeadline;
+        /// <summary>The scene, and whether the player confirmed replacing the editor craft, when the fetch in flight was sent.</summary>
+        private static GameScenes loadScene;
+        private static bool loadConfirmed;
+        /// <summary>Set when the editor craft changed (onEditorShipModified, a load or a scene change); the blueprint hash is recomputed only then.</summary>
+        private static bool blueprintRecheck = true;
+        private static string blueprintCheckKey;
+        private static readonly Dictionary<string, byte[]> blueprintCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        private const int FetchTimeoutSeconds = 15, BuildTimeoutSeconds = 30, SaveTimeoutSeconds = 30;
+        /// <summary>Test hook: counts StandardQuote calls, so a test can prove a check stayed on its cheap path.</summary>
+        internal static int StandardQuoteCalls;
+        private static bool UsesFunds => SettingsSystem.ServerSettings.GameMode == GameMode.Career;
+        /// <summary>The "Use stock" choice. On by default; a matching lot is applied automatically when it is cheaper.</summary>
+        public static bool UseStock
+        {
+            get => useStock;
+            set { if (useStock == value) return; useStock = value; RequestQuoteRefresh(); }
+        }
+        /// <summary>The stock lot the editor quote applies, or null.</summary>
+        public static DesignStockLot EditorStock { get; private set; }
+        /// <summary>True when the open editor craft is tooled and its saved blueprint is missing or differs. Computed in Tick, never in OnGUI.</summary>
+        public static bool EditorBlueprintNeedsSave { get; private set; }
+        /// <summary>Serialized size of the open editor craft when it exceeds the blueprint limit (it cannot be saved to tooling), otherwise 0.</summary>
+        public static long EditorBlueprintOversizeBytes { get; private set; }
+        /// <summary>True while a Save craft to tooling request waits for its result.</summary>
+        public static bool SaveBlueprintPending => saveRequest != Guid.Empty;
+        /// <summary>The player-facing text for a craft over the blueprint size limit.</summary>
+        public static string BlueprintTooLargeText(long bytes) =>
+            "This craft is " + KiB(bytes) + " KB; saved crafts are limited to " + KiB(ToolingLimits.MaxToolingBlueprintBytes) + " KB, so it cannot be saved to tooling.";
+        private static long KiB(long bytes) => (bytes + 1023) / 1024;
+        /// <summary>Marks the editor craft changed, so the next editor tick recomputes EditorBlueprintNeedsSave. Main thread only.</summary>
+        public static void MarkEditorCraftModified() { blueprintRecheck = true; }
+        /// <summary>Clears a NeedsConfirm load (the player cancelled the replace prompt).</summary>
+        public static void CancelLoadConfirm() { if (LoadState == DesignLoadState.NeedsConfirm) SetLoad(DesignLoadState.Idle, null); }
+        public static string LoadStatus { get; private set; }
+        /// <summary>Where the most recent LoadTooledDesign call is, and which design it is for.</summary>
+        public static DesignLoadState LoadState { get; private set; }
+        public static string LoadingFingerprint => loadFingerprint;
+        /// <summary>True while a BuildStock request waits for its result.</summary>
+        public static bool BuildPending => buildRequest != Guid.Empty;
+        /// <summary>Held units of a design, as the server counts them for the 999 cap (lots, escrow, Prepared and revertible stock launches).</summary>
+        public static int StockUnits(string fingerprint)
+        {
+            if (string.IsNullOrEmpty(fingerprint)) return 0;
+            lock (stateLock)
+            {
+                if (snapshot?.StockHeldByFingerprint != null && snapshot.StockHeldByFingerprint.TryGetValue(fingerprint, out var held)) return Math.Max(0, held);
+                return AvailableUnitsLocked(fingerprint);
+            }
+        }
+        /// <summary>Units of a design in this agency's own stock rows: what can be launched or put on offer now.</summary>
+        public static int AvailableStockUnits(string fingerprint)
+        {
+            if (string.IsNullOrEmpty(fingerprint)) return 0;
+            lock (stateLock) return AvailableUnitsLocked(fingerprint);
+        }
+        private static int AvailableUnitsLocked(string fingerprint) =>
+            (int)Math.Min(int.MaxValue, (snapshot?.Stock ?? Array.Empty<DesignStockLot>()).Where(l => l != null && l.Units > 0 && l.Fingerprint == fingerprint).Sum(l => (long)l.Units));
+        /// <summary>Units of a design in this agency's open outgoing stock offers.</summary>
+        public static int OfferedUnits(string fingerprint)
+        {
+            if (string.IsNullOrEmpty(fingerprint)) return 0;
+            lock (stateLock)
+            {
+                if (snapshot == null) return 0;
+                return (snapshot.Offers ?? Array.Empty<TradeOffer>()).Where(o => o != null && o.Status == TradeOfferStatus.Open && o.DesignMode == TradeDesignMode.Stock &&
+                    o.SellerAgencyId == snapshot.AgencyId && o.DesignFingerprint == fingerprint).Sum(o => Math.Max(0, o.StockUnits));
+            }
+        }
+        /// <summary>
+        /// A lower bound of the server's lot slots: stock rows plus at least one escrow row per open outgoing stock offer. Prepared stock launches
+        /// are not visible in the snapshot, so the server stays the authority (it refuses cleanly when full).
+        /// </summary>
+        public static int StockLotSlots()
+        {
+            lock (stateLock)
+            {
+                if (snapshot == null) return 0;
+                return (snapshot.Stock ?? Array.Empty<DesignStockLot>()).Count(l => l != null) + (snapshot.Offers ?? Array.Empty<TradeOffer>()).Count(o => o != null &&
+                    o.Status == TradeOfferStatus.Open && o.DesignMode == TradeDesignMode.Stock && o.SellerAgencyId == snapshot.AgencyId);
+            }
+        }
+        public static bool StockSlotsFull => StockLotSlots() >= StockDefaults.MaxLots;
+        public static IReadOnlyList<ToolingDesign> GetDesignsSnapshot()
+        {
+            lock (stateLock) return (snapshot?.Designs ?? Array.Empty<ToolingDesign>()).Where(d => d != null)
+                .Select(d => new ToolingDesign { Fingerprint = d.Fingerprint, Manifest = d.Manifest, ToolingBasis = d.ToolingBasis, Name = d.Name }).ToArray();
+        }
+        public static IReadOnlyList<DesignStockLot> GetStockSnapshot()
+        {
+            lock (stateLock) return (snapshot?.Stock ?? Array.Empty<DesignStockLot>()).Where(l => l != null).Select(CopyLot).ToArray();
+        }
+        private static DesignStockLot CopyLot(DesignStockLot l) => new DesignStockLot { LotId = l.LotId, Fingerprint = l.Fingerprint, Units = l.Units, PrepaidPerUnit = l.PrepaidPerUnit,
+            LaunchMultiplier = l.LaunchMultiplier, BuilderAgencyId = l.BuilderAgencyId, SourceAgencyId = l.SourceAgencyId, FundsBuilt = l.FundsBuilt, CreatedUtcTicks = l.CreatedUtcTicks };
+        /// <summary>The server's stock discount settings, normalized.</summary>
+        public static StockRates StockRates()
+        {
+            var settings = SettingsSystem.ServerSettings;
+            return LmpCommon.Agency.StockRates.Normalize(settings.StockMaxDiscount, settings.StockFullDiscountUnits);
+        }
+        /// <summary>The price of building units of a tooled design, from the stored manifest the server also prices from.</summary>
+        public static StockQuote QuoteBuild(string fingerprint, int units)
+        {
+            if (!Ready) return new StockQuote { Success = false, Reason = "Syncing tooled designs...", Fingerprint = fingerprint, Units = units };
+            ToolingDesign design;
+            lock (stateLock) design = (snapshot?.Designs ?? Array.Empty<ToolingDesign>()).FirstOrDefault(d => d != null && d.Fingerprint == fingerprint);
+            return StockPolicy.Quote(design, units, Rates(), StockRates());
+        }
+        /// <summary>
+        /// Builds stock of a tooled design. <paramref name="expectedCharge"/> is the total the player confirmed; it must still match the live quote.
+        /// The command carries the live total in Career and 0 otherwise, which is what the server compares against.
+        /// </summary>
+        public static Guid BuildStock(string fingerprint, int units, double expectedCharge)
+        {
+            try
+            {
+                if (!Ready) throw new InvalidOperationException("Waiting for agency economy.");
+                if (buildRequest != Guid.Empty) throw new InvalidOperationException("A stock build is already in progress.");
+                var quote = QuoteBuild(fingerprint, units);
+                if (!quote.Success) throw new InvalidOperationException(quote.Reason);
+                var charge = UsesFunds ? quote.Total : 0;
+                if (!SameCharge(expectedCharge, quote.Total) && !(!UsesFunds && expectedCharge == 0)) throw new InvalidOperationException("Price changed; review the new quote.");
+                if ((long)StockUnits(fingerprint) + units > StockDefaults.MaxHeldUnits) throw new InvalidOperationException("Stock limit is " + StockDefaults.MaxHeldUnits + " units per design.");
+                var request = Send(new EconomyCommand { Operation = EconomyOperation.BuildStock, StockFingerprint = fingerprint, StockUnits = units, ExpectedCharge = charge });
+                if (request == Guid.Empty) return Guid.Empty;
+                buildRequest = request; buildDeadline = DateTime.UtcNow.AddSeconds(BuildTimeoutSeconds);
+                LatestStatus = "Building " + units + " stock...";
+                return request;
+            }
+            catch (Exception e) { LatestStatus = e.Message; return Guid.Empty; }
+        }
+        private static bool SameCharge(double a, double b) => Math.Abs(a - b) <= 1e-6 * Math.Max(1, Math.Abs(b));
+        /// <summary>
+        /// The lot a launch of this quoted design would use: Ready, tooling on and Use stock on, then StockPolicy.SelectLot. When the agency's lot
+        /// slots are full only a 1-unit lot is chosen, because emptying a row frees the slot the Prepared launch takes; otherwise no lot applies.
+        /// </summary>
+        internal static DesignStockLot SelectStock(ToolingQuote quote)
+        {
+            if (!Ready || !useStock || quote == null || !quote.Success) return null;
+            DesignStockLot[] lots;
+            lock (stateLock) lots = (snapshot?.Stock ?? Array.Empty<DesignStockLot>()).Where(l => l != null).ToArray();
+            if (StockLotSlots() >= StockDefaults.MaxLots) lots = lots.Where(l => l.Units == 1).ToArray();
+            return StockPolicy.SelectLot(lots, quote, UsesFunds, Rates().TooledLaunch);
+        }
+        /// <summary>
+        /// True when held stock (or the pending stock launch) unlocks research for this exact part list. Needs only tooling and Use stock, not trade.
+        /// A pending launch counts by its reserved LotId even after the snapshot pruned the row; otherwise a held unit is required before any pricing.
+        /// </summary>
+        internal static bool HasStockResearch(ToolingManifest manifest)
+        {
+            if (!Ready || !useStock || manifest == null) return false;
+            string fingerprint;
+            try { fingerprint = ToolingPolicy.Fingerprint(manifest); }
+            catch (ArgumentException) { return false; }
+            var launch = pending;
+            if (launch != null) return launch.StockLot != Guid.Empty && launch.StockFingerprint == fingerprint;
+            lock (stateLock)
+                if (!(snapshot?.Stock ?? Array.Empty<DesignStockLot>()).Any(l => l != null && l.Units > 0 && l.Fingerprint == fingerprint)) return false;
+            return SelectStock(StandardQuote(manifest)) != null;
+        }
+        /// <summary>Saved-blueprint metadata for a tooled design, or null when none is saved.</summary>
+        public static ToolingBlueprintInfo BlueprintInfo(string fingerprint)
+        {
+            if (string.IsNullOrEmpty(fingerprint)) return null;
+            lock (stateLock)
+            {
+                var info = (snapshot?.DesignBlueprints ?? Array.Empty<ToolingBlueprintInfo>()).FirstOrDefault(b => b != null && b.Fingerprint == fingerprint);
+                return info == null ? null : new ToolingBlueprintInfo { Fingerprint = info.Fingerprint, Name = info.Name, Editor = info.Editor, Hash = info.Hash, Bytes = info.Bytes };
+            }
+        }
+        /// <summary>Sends a Tool command carrying the open editor craft's blueprint. Only for an already tooled craft, so it never charges.</summary>
+        public static Guid SaveBlueprintToTooling()
+        {
+            try
+            {
+                var manifest = CurrentManifest();
+                var hash = ToolingPolicy.ManifestHash(manifest);
+                if (!Ready || EditorQuote == null || !EditorQuote.Success || editorQuoteHash != hash) throw new InvalidOperationException("Craft changed or tooling is still syncing. Review the updated quote.");
+                if (!EditorQuote.AlreadyTooled) throw new InvalidOperationException("Tool this design first; saving the craft is free once it is tooled.");
+                if (saveRequest != Guid.Empty) throw new InvalidOperationException("The craft is already being saved to tooling.");
+                if (!CaptureEditorBlueprint(out var bytes, out var editor, out var name)) throw new InvalidOperationException("The craft could not be captured; check that its parts match the tooled design.");
+                if (bytes.Length > ToolingLimits.MaxToolingBlueprintBytes) throw new InvalidOperationException(BlueprintTooLargeText(bytes.Length));
+                LatestStatus = "Saving craft to tooling...";
+                var request = Send(new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = manifest, ManifestHash = hash, DesignName = name, BlueprintData = bytes, BlueprintEditor = editor });
+                if (request != Guid.Empty) { blueprintCheckKey = null; saveRequest = request; saveDeadline = DateTime.UtcNow.AddSeconds(SaveTimeoutSeconds); }
+                return request;
+            }
+            catch (Exception e) { LatestStatus = e.Message; return Guid.Empty; }
+        }
+        /// <summary>
+        /// Loads a tooled design's saved craft into the editor (plan 40 section 6.3): preconditions, replace confirm, fetch (cached per hash),
+        /// validation, missing-part check, library file, then the stock editor load. Returns where the load is; LoadStatus explains it.
+        /// </summary>
+        public static DesignLoadState LoadTooledDesign(string fingerprint, bool confirmedReplace)
+        {
+            if (LoadState == DesignLoadState.Fetching && loadRequest != Guid.Empty)
+            {
+                if (loadFingerprint == fingerprint) return DesignLoadState.Fetching;
+                LoadStatus = "Another design is still loading."; return DesignLoadState.Refused;
+            }
+            loadFingerprint = fingerprint;
+            if (!Ready) return SetLoad(DesignLoadState.Refused, "Waiting for agency economy.");
+            var info = BlueprintInfo(fingerprint);
+            if (info == null) return SetLoad(DesignLoadState.Refused, "Open this craft in the editor and press Save craft to tooling (free).");
+            if (!LoadSceneAllowed()) return SetLoad(DesignLoadState.Refused, "Return to the Space Center to load a design.");
+            if (!confirmedReplace && EditorHasCraft()) return SetLoad(DesignLoadState.NeedsConfirm, "Replace current editor craft? Unsaved changes are lost.");
+            byte[] cached;
+            lock (stateLock) blueprintCache.TryGetValue(CacheKey(info), out cached);
+            if (cached != null) return ContinueLoad(info, cached);
+            var request = Send(new EconomyCommand { Operation = EconomyOperation.FetchBlueprint, StockFingerprint = fingerprint });
+            if (request == Guid.Empty) return SetLoad(DesignLoadState.Failed, "Waiting for economy session.");
+            SetLoad(DesignLoadState.Fetching, "Fetching saved craft...");
+            loadRequest = request; loadDeadline = DateTime.UtcNow.AddSeconds(FetchTimeoutSeconds);
+            loadScene = HighLogic.LoadedScene; loadConfirmed = confirmedReplace;
+            return DesignLoadState.Fetching;
+        }
+        private static DesignLoadState SetLoad(DesignLoadState state, string status)
+        {
+            loadRequest = Guid.Empty; loadDeadline = default(DateTime);
+            LoadState = state; LoadStatus = status;
+            return state;
+        }
+        private static bool LoadSceneAllowed() => HighLogic.LoadedScene == GameScenes.SPACECENTER || HighLogic.LoadedScene == GameScenes.EDITOR;
+        private static bool EditorHasCraft() => HighLogic.LoadedSceneIsEditor && EditorLogic.fetch?.ship?.parts != null && EditorLogic.fetch.ship.parts.Count > 0;
+        private static string CacheKey(ToolingBlueprintInfo info) => info.Fingerprint + "|" + info.Hash;
+        internal static string HexHash(byte[] bytes)
+        {
+            using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", string.Empty).ToLowerInvariant();
+        }
+        private static void HandleFetchedBlueprint(EconomyResult result)
+        {
+            var fingerprint = loadFingerprint;
+            loadRequest = Guid.Empty;
+            try
+            {
+                if (!result.Success) { SetLoad(DesignLoadState.Failed, result.Reason ?? "Saved craft unavailable."); return; }
+                var info = BlueprintInfo(fingerprint);
+                var bytes = result.BlueprintData;
+                if (info == null || bytes == null || bytes.Length == 0 || bytes.Length > ToolingLimits.MaxToolingBlueprintBytes || (result.BlueprintEditor != "VAB" && result.BlueprintEditor != "SPH") ||
+                    !string.Equals(HexHash(bytes), info.Hash, StringComparison.Ordinal) || !string.Equals(result.BlueprintHash, info.Hash, StringComparison.OrdinalIgnoreCase))
+                { SetLoad(DesignLoadState.Failed, "Saved craft failed validation."); return; }
+                info.Editor = result.BlueprintEditor;
+                var missing = MissingBlueprintParts(bytes);
+                if (missing != null && missing.Length > 0) { SetLoad(DesignLoadState.Refused, MissingPartsText(missing)); return; }
+                if (BlueprintFingerprint(bytes) != fingerprint) { SetLoad(DesignLoadState.Failed, "Saved craft failed validation."); return; }
+                lock (stateLock) blueprintCache[CacheKey(info)] = bytes;
+                // The fetch took a while: never replace a craft the player did not agree to replace. The bytes are cached, so confirming loads at once.
+                if (HighLogic.LoadedScene != loadScene || !loadConfirmed && EditorHasCraft())
+                { SetLoad(DesignLoadState.NeedsConfirm, "Replace current editor craft? Unsaved changes are lost."); return; }
+                ContinueLoad(info, bytes);
+            }
+            catch (Exception e) { SetLoad(DesignLoadState.Failed, "Saved craft failed validation: " + e.Message); }
+        }
+        private static string MissingPartsText(string[] missing) =>
+            "Missing parts: " + string.Join(", ", missing.Take(8)) + (missing.Length > 8 ? " and " + (missing.Length - 8) + " more" : string.Empty) + " (install the mods or re-save the craft).";
+        private static DesignLoadState ContinueLoad(ToolingBlueprintInfo info, byte[] bytes)
+        {
+            try
+            {
+                if (!LoadSceneAllowed()) return SetLoad(DesignLoadState.Refused, "Return to the Space Center to load a design.");
+                var missing = MissingBlueprintParts(bytes);
+                if (missing != null && missing.Length > 0) return SetLoad(DesignLoadState.Refused, MissingPartsText(missing));
+                var path = WriteTooledCraftFile(info, bytes);
+                SetLoad(DesignLoadState.Loading, "Loading " + (string.IsNullOrEmpty(info.Name) ? "design" : info.Name) + "...");
+                LoadTooledCraftFile(path, info.Editor);
+                RequestQuoteRefresh();
+                return SetLoad(DesignLoadState.Loaded, "Loaded " + (string.IsNullOrEmpty(info.Name) ? "design" : info.Name) + " (" + info.Editor + ").");
+            }
+            catch (Exception e) { return SetLoad(DesignLoadState.Failed, "Could not load the saved craft: " + e.Message); }
+        }
+        /// <summary>
+        /// Recomputes EditorBlueprintNeedsSave from the 500 ms editor tick, but serializes and hashes the craft only when it changed
+        /// (onEditorShipModified, a load or a scene change, or a new part list) or the saved hash in the snapshot changed. No timer.
+        /// </summary>
+        private static void RefreshBlueprintNeedsSave(ToolingQuote quote)
+        {
+            if (quote == null || !quote.Success || !quote.AlreadyTooled) { EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0; blueprintCheckKey = null; return; }
+            var saved = BlueprintInfo(quote.Fingerprint)?.Hash;
+            var key = editorQuoteHash + "|" + saved;
+            if (key == blueprintCheckKey && !blueprintRecheck) return;
+            blueprintCheckKey = key; blueprintRecheck = false;
+            EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0;
+            if (!TryEditorBlueprintHash(out var hash, out var size)) return;
+            if (size > ToolingLimits.MaxToolingBlueprintBytes) { EditorBlueprintOversizeBytes = size; return; }
+            EditorBlueprintNeedsSave = saved == null || !string.Equals(hash, saved, StringComparison.OrdinalIgnoreCase);
+        }
         internal static ToolingQuote DisplayQuote(ShipConstruct ship, ShipTemplate template, VesselCrewManifest crew)
         {
             if (!Ready) return null;
@@ -158,12 +477,13 @@ namespace LmpClient.Systems.Agency
             {
                 if (!Ready) throw new InvalidOperationException("Waiting for agency economy.");
                 var manifest = ToolingManifestBuilder.FromFile(path, crew);
-                Quote(manifest, out var voucher);
+                Quote(manifest, out var voucher, out var stockLot);
                 pending = new PendingLaunch { Voucher = voucher?.EntitlementId ?? Guid.Empty, Request = Guid.NewGuid(), Launch = Guid.NewGuid(), Path = path, Flag = flag, Site = site,
+                    StockLot = stockLot?.LotId ?? Guid.Empty, StockFingerprint = stockLot?.Fingerprint, StockHeld = stockLot == null ? 0 : AvailableStockUnits(stockLot.Fingerprint),
                     FileHash = HashFile(path), Scene = HighLogic.LoadedScene, CraftIndices = CraftIndices(path), Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest), CrewManifest = crew,
                     Crew = CrewKey(crew), Deadline = DateTime.UtcNow.AddSeconds(45) };
                 Send(new EconomyCommand { RequestId = pending.Request, Operation = EconomyOperation.PrepareLaunch, LaunchId = pending.Launch, VoucherId = pending.Voucher,
-                    Manifest = manifest, ManifestHash = pending.ManifestHash });
+                    StockLotId = pending.StockLot, Manifest = manifest, ManifestHash = pending.ManifestHash });
                 InputLockManager.SetControlLock(ControlTypes.EDITOR_LAUNCH, LaunchLock);
                 LatestStatus = "Reserving launch funds...";
             }
@@ -186,6 +506,7 @@ namespace LmpClient.Systems.Agency
         internal static void SceneChanged(GameScenes scene)
         {
             if (pending != null && !pending.Started) CancelLaunch();
+            blueprintRecheck = true;
             ApplyCachedBalance();
             RequestQuoteRefresh();
         }
@@ -322,24 +643,39 @@ namespace LmpClient.Systems.Agency
                 return;
             }
             if (pending != null && (!Enabled || DateTime.UtcNow > pending.Deadline || !pending.Started && HighLogic.LoadedScene != pending.Scene)) CancelLaunch();
+            if (loadRequest != Guid.Empty && DateTime.UtcNow > loadDeadline) SetLoad(DesignLoadState.Failed, "The saved craft did not arrive. Try again.");
+            if (buildRequest != Guid.Empty && DateTime.UtcNow > buildDeadline)
+            { buildRequest = Guid.Empty; buildDeadline = default(DateTime); LatestStatus = "The stock build result did not arrive. Check your stock before building again."; }
+            if (saveRequest != Guid.Empty && DateTime.UtcNow > saveDeadline)
+            { saveRequest = Guid.Empty; saveDeadline = default(DateTime); LatestStatus = "Saving the craft to tooling got no answer. Try again."; }
             if (!Enabled || !HighLogic.LoadedSceneIsEditor || DateTime.UtcNow < nextQuote) return;
             nextQuote = DateTime.UtcNow.AddMilliseconds(500);
             try
             {
                 var manifest = Ready && EditorLogic.fetch?.ship != null ? CurrentManifest() : null;
-                TradeEntitlement voucher = null;
-                EditorQuote = manifest == null ? null : Quote(manifest, out voucher);
-                EditorVoucher = voucher;
+                TradeEntitlement voucher = null; DesignStockLot stockLot = null;
+                EditorQuote = manifest == null ? null : Quote(manifest, out voucher, out stockLot);
+                EditorVoucher = voucher; EditorStock = stockLot == null ? null : CopyLot(stockLot);
                 editorQuoteHash = manifest == null ? null : ToolingPolicy.ManifestHash(manifest);
             }
-            catch (Exception e) { EditorQuote = null; EditorVoucher = null; LatestStatus = e.Message; }
+            catch (Exception e) { EditorQuote = null; EditorVoucher = null; EditorStock = null; LatestStatus = e.Message; }
+            try { RefreshBlueprintNeedsSave(EditorQuote); }
+            catch (Exception) { EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0; }
             LmpClient.Harmony.AgencyCostDisplay.Refresh();
         }
         private static void Handle(EconomyResult result)
         {
             if (BalanceAuthorityEnabled && result.RecoveryRequired) { RecoveryDisconnect(result.Reason); return; }
             if (!Enabled) return;
+            if (result.Operation == EconomyOperation.FetchBlueprint)
+            {
+                // A read-only fetch never changes the economy status line; the load has its own.
+                if (loadRequest != Guid.Empty && result.RequestId == loadRequest) HandleFetchedBlueprint(result);
+                return;
+            }
             LatestStatus = result.Reason;
+            if (buildRequest != Guid.Empty && result.RequestId == buildRequest) { buildRequest = Guid.Empty; buildDeadline = default(DateTime); return; }
+            if (saveRequest != Guid.Empty && result.RequestId == saveRequest) { saveRequest = Guid.Empty; saveDeadline = default(DateTime); blueprintRecheck = true; return; }
             if (HandleBoarding(result) || HandleSplit(result)) return;
             if (result.Operation == EconomyOperation.Recover)
             {
@@ -365,9 +701,12 @@ namespace LmpClient.Systems.Agency
                 return;
             }
             if (pending == null || result.RequestId != pending.Request || result.Operation != EconomyOperation.PrepareLaunch) return;
-            if (!result.Success) { pending = null; InputLockManager.RemoveControlLock(LaunchLock); return; }
+            // A refused stock launch (for example the last unit went to another launch) falls back to normal pricing on the next quote.
+            if (!result.Success) { pending = null; InputLockManager.RemoveControlLock(LaunchLock); RequestQuoteRefresh(); return; }
             pending.Token = result.LaunchToken;
             if (result.Quote != null) { LastLaunchCharge = result.Quote.LaunchCost; LaunchChargeSerial++; }
+            if (pending.StockLot != Guid.Empty)
+                LatestStatus = "Using 1 of " + Math.Max(1, pending.StockHeld) + " stock" + (result.Quote != null && UsesFunds ? "; you pay " + result.Quote.LaunchCost.ToString("N0") + " (inventory/extra only)." : ".");
             try
             {
                 if (HighLogic.LoadedScene != pending.Scene || HashFile(pending.Path) != pending.FileHash || CrewKey(pending.CrewManifest) != pending.Crew ||
@@ -400,6 +739,11 @@ namespace LmpClient.Systems.Agency
             boarding = null; InputLockManager.RemoveControlLock(BoardingLock);
             splitting = null; splitQueue.Clear(); splitBytes = 0; InputLockManager.RemoveControlLock(SplitLock);
             pending = null; pendingRevert = Guid.Empty; resumeLaunch = resumeRevert = false; EditorQuote = null; EditorVoucher = null; LatestStatus = null;
+            EditorStock = null; EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0; blueprintCheckKey = null; blueprintRecheck = true;
+            buildRequest = saveRequest = Guid.Empty; buildDeadline = saveDeadline = default(DateTime);
+            loadRequest = Guid.Empty; loadDeadline = default(DateTime); loadFingerprint = null; loadScene = default(GameScenes); loadConfirmed = false;
+            LoadState = DesignLoadState.Idle; LoadStatus = null;
+            lock (stateLock) blueprintCache.Clear();
             InputLockManager.RemoveControlLock(LaunchLock);
         }
     }

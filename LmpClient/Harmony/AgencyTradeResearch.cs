@@ -15,6 +15,8 @@ namespace LmpClient.Harmony
         private sealed class TestContext {internal Func<ToolingManifest> Manifest;}
         private static readonly ConditionalWeakTable<PreFlightTests.ExperimentalPartsAvailable,TestContext> tests = new ConditionalWeakTable<PreFlightTests.ExperimentalPartsAvailable,TestContext>();
         public static bool Ready {get;private set;}
+        /// <summary>The hooks run while trade or tooling is on: held design stock unlocks research even when trade is off (plan 40 R1.4).</summary>
+        private static bool Active => TradeClient.Enabled || ToolingClient.Enabled;
         public static string DiagnosticReason {get;private set;}
         public static void Install(HarmonyLib.Harmony harmony)
         {
@@ -46,7 +48,7 @@ namespace LmpClient.Harmony
         private static void Load(ConfigNode __0,out HashSet<string> __state)
         {
             __state=allowedParts; allowedParts=null;
-            if(!TradeClient.Enabled || !Ready) return;
+            if(!Active || !Ready) return;
             try
             {
                 var manifest=ToolingManifestBuilder.FromConfig(__0,null);
@@ -56,7 +58,7 @@ namespace LmpClient.Harmony
         }
         private static Exception EndLoad(Exception __exception,HashSet<string> __state){allowedParts=__state;return __exception;}
         private static void PartAvailable(AvailablePart __0,ref bool __result)
-        {if(!__result && TradeClient.Enabled && Ready && __0!=null && allowedParts?.Contains(__0.name)==true) __result=true;}
+        {if(!__result && Active && Ready && __0!=null && allowedParts?.Contains(__0.name)==true) __result=true;}
         private static bool StockAllowed(string name)
         {
             var part=PartLoader.getPartInfoByName(name);
@@ -68,8 +70,8 @@ namespace LmpClient.Harmony
         internal static bool Validate(ToolingManifest manifest,out string reason)
         {
             reason=null;
-            if(!TradeClient.Enabled) return true;
-            if(!Ready || !TradeClient.Ready){reason=DiagnosticReason??"Waiting for purchased design permissions.";return false;}
+            if(!TradeClient.Enabled && !ToolingClient.HasStockResearch(manifest)) return true;
+            if(!Ready || TradeClient.Enabled && !TradeClient.Ready){reason=DiagnosticReason??"Waiting for purchased design permissions.";return false;}
             if(!CargoAllowed(manifest)){reason="Inventory contains an unresearched or unpurchased part.";return false;}
             if(manifest.Parts.All(p=>StockAllowed(p.Name)) || TradeClient.HasEntitlement(manifest)) return true;
             reason="Locked parts require the complete purchased design. Restore its part list or research the missing parts.";return false;
@@ -82,7 +84,7 @@ namespace LmpClient.Harmony
         {if(launchManifest!=null){tests.Remove(__instance);tests.Add(__instance,new TestContext{Manifest=launchManifest});}}
         private static void Test(PreFlightTests.ExperimentalPartsAvailable __instance,ref bool __result)
         {
-            if(!TradeClient.Enabled || !tests.TryGetValue(__instance,out var context)) return;
+            if(!Active || !tests.TryGetValue(__instance,out var context)) return;
             try {var manifest=context.Manifest();if(!Validate(manifest,out _)) __result=false;else if(TradeClient.HasEntitlement(manifest)) __result=true;}
             catch {__result=false;}
         }
@@ -95,7 +97,7 @@ namespace LmpClient.Harmony
         private static Exception EndSiteChecks(Exception __exception,Func<ToolingManifest> __state){launchManifest=__state;return __exception;}
         private static bool FinalLaunch(string __0,VesselCrewManifest __3)
         {
-            if(!TradeClient.Enabled) return true;
+            if(!Active) return true;
             try
             {
                 var manifest=ToolingManifestBuilder.FromFile(__0,__3);

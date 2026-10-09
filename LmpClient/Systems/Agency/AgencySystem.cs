@@ -88,15 +88,26 @@ namespace LmpClient.Systems.Agency
             base.OnEnabled();
             SetupRoutine(new RoutineDefinition(250, RoutineExecution.Update, AgencyIdentityClient.Update));
             GameEvents.onLevelWasLoadedGUIReady.Add(EconomySceneChanged);
+            GameEvents.onEditorShipModified.Add(EditorShipModified);
+            GameEvents.onEditorLoad.Add(EditorShipLoaded);
+            GameEvents.onEditorUndo.Add(EditorShipModified);
+            GameEvents.onEditorRedo.Add(EditorShipModified);
             LunaLog.Log("[Agency] Client AgencySystem enabled.");
         }
 
         // KSP's event wrapper requires a delegate target; static handlers fail at registration.
         private void EconomySceneChanged(GameScenes scene) => ToolingClient.SceneChanged(scene);
+        // The saved-blueprint check serializes the craft only after it changes (plan 40 review MED1). Undo and redo also fire this; KSP has no craft-rename event.
+        private void EditorShipModified(ShipConstruct ship) => ToolingClient.MarkEditorCraftModified();
+        private void EditorShipLoaded(ShipConstruct ship, KSP.UI.Screens.CraftBrowserDialog.LoadType loadType) => ToolingClient.MarkEditorCraftModified();
 
         protected override void OnDisabled()
         {
             GameEvents.onLevelWasLoadedGUIReady.Remove(EconomySceneChanged);
+            GameEvents.onEditorShipModified.Remove(EditorShipModified);
+            GameEvents.onEditorLoad.Remove(EditorShipLoaded);
+            GameEvents.onEditorUndo.Remove(EditorShipModified);
+            GameEvents.onEditorRedo.Remove(EditorShipModified);
             base.OnDisabled();
             AgencyIdentityClient.Clear();
             LmpClient.Windows.Agency.AgencyWindow.ResetIdentityEditor();

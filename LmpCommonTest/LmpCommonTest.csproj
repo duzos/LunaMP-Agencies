@@ -22,6 +22,7 @@
     <ProjectReference Include="..\LmpCommon\LmpCommon.csproj" />
     <Compile Include="..\LmpClient\Systems\AgenciesUpdate\MainThreadQueue.cs" Link="ClientLogic\MainThreadQueue.cs" />
     <Compile Include="..\LmpClient\Systems\Agency\ToolingClient.cs" Link="ClientLogic\ToolingClient.cs" />
+    <Compile Include="..\LmpClient\Windows\Agency\FrameRefreshGate.cs" Link="ClientLogic\FrameRefreshGate.cs" />
     <Compile Include="..\LmpClient\Systems\Agency\VesselPublicationGuard.cs" Link="ClientLogic\VesselPublicationGuard.cs" />
     <Compile Include="..\LmpClient\Systems\Agency\SplitOrbitSnapshot.cs" Link="ClientLogic\SplitOrbitSnapshot.cs" />
     <Compile Include="..\LmpClient\Harmony\ContractPreLoader_Filter.cs" Link="ClientLogic\ContractPreLoader_Filter.cs" />

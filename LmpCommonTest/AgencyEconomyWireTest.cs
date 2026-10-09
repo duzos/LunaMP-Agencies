@@ -160,5 +160,100 @@ namespace LmpCommonTest
             Assert.AreEqual(0, target.EconomyManifestIndices.Length);
             Assert.IsNull(target.EconomyCargo);
         }
+            [TestMethod]
+        public void DesignStockFieldsRoundtrip()
+        {
+            var peer = new NetClient(new NetPeerConfiguration("stock-wire"));
+            var lot = new DesignStockLot { LotId = Guid.NewGuid(), Fingerprint = "fp", Units = 7, PrepaidPerUnit = 12.5, LaunchMultiplier = .07,
+                BuilderAgencyId = Guid.NewGuid(), SourceAgencyId = Guid.NewGuid(), FundsBuilt = true, CreatedUtcTicks = 42 };
+            var snapshotSource = new ServerMessageFactory().CreateNewMessageData<AgencyEconomySnapshotMsgData>();
+            snapshotSource.Snapshot = new EconomySnapshot { Ready = true,
+                Designs = new[] { new ToolingDesign { Fingerprint = "fp", Name = "Mun Flyer", Manifest = new ToolingManifest() } },
+                Stock = new[] { lot },
+                DesignBlueprints = new[] { new ToolingBlueprintInfo { Fingerprint = "fp", Name = "Mun Flyer", Editor = "SPH", Hash = "abc", Bytes = 1234 } },
+                Offers = new[] { new TradeOffer { OfferId = Guid.NewGuid(), DesignMode = TradeDesignMode.Stock, StockUnits = 3, StockPrepaidTotal = 37.5 } },
+                Entitlements = new[] { new TradeEntitlement { EntitlementId = Guid.NewGuid(), Kind = TradeEntitlementKind.StockDesign, Fingerprint = "fp" } } };
+            snapshotSource.Snapshot.StockHeldByFingerprint["fp"] = 9;
+            var output = peer.CreateMessage(); snapshotSource.Serialize(output);
+            Assert.IsTrue(snapshotSource.GetMessageSize() >= output.LengthBytes);
+            var snapshot = new ServerMessageFactory().CreateNewMessageData<AgencyEconomySnapshotMsgData>();
+            snapshot.Deserialize(Incoming(peer, output));
+            var read = snapshot.Snapshot;
+            Assert.AreEqual("Mun Flyer", read.Designs[0].Name);
+            Assert.AreEqual(lot.LotId, read.Stock[0].LotId); Assert.AreEqual("fp", read.Stock[0].Fingerprint); Assert.AreEqual(7, read.Stock[0].Units);
+            Assert.AreEqual(12.5, read.Stock[0].PrepaidPerUnit); Assert.AreEqual(.07, read.Stock[0].LaunchMultiplier);
+            Assert.AreEqual(lot.BuilderAgencyId, read.Stock[0].BuilderAgencyId); Assert.AreEqual(lot.SourceAgencyId, read.Stock[0].SourceAgencyId);
+            Assert.IsTrue(read.Stock[0].FundsBuilt); Assert.AreEqual(42L, read.Stock[0].CreatedUtcTicks);
+            Assert.AreEqual("SPH", read.DesignBlueprints[0].Editor); Assert.AreEqual("abc", read.DesignBlueprints[0].Hash); Assert.AreEqual(1234, read.DesignBlueprints[0].Bytes);
+            Assert.AreEqual(TradeDesignMode.Stock, read.Offers[0].DesignMode); Assert.AreEqual(3, read.Offers[0].StockUnits); Assert.AreEqual(37.5, read.Offers[0].StockPrepaidTotal);
+            Assert.AreEqual(TradeEntitlementKind.StockDesign, read.Entitlements[0].Kind);
+            Assert.AreEqual(9, read.StockHeldByFingerprint["fp"]);
+
+            var commandSource = new ClientMessageFactory().CreateNewMessageData<AgencyEconomyCommandMsgData>();
+            var lotId = Guid.NewGuid();
+            commandSource.Command = new EconomyCommand { RequestId = Guid.NewGuid(), Operation = EconomyOperation.BuildStock, StockLotId = lotId, StockFingerprint = "fp", StockUnits = 10,
+                ExpectedCharge = 650.25, DesignName = "Mun Flyer", BlueprintData = new byte[] { 4, 5, 6 }, BlueprintEditor = "VAB",
+                Trade = new TradeCommand { DesignMode = TradeDesignMode.Stock, StockUnits = 4 } };
+            output = peer.CreateMessage(); commandSource.Serialize(output);
+            var command = new ClientMessageFactory().CreateNewMessageData<AgencyEconomyCommandMsgData>(); command.Deserialize(Incoming(peer, output));
+            Assert.AreEqual(EconomyOperation.BuildStock, command.Command.Operation);
+            Assert.AreEqual(lotId, command.Command.StockLotId); Assert.AreEqual("fp", command.Command.StockFingerprint); Assert.AreEqual(10, command.Command.StockUnits);
+            Assert.AreEqual(650.25, command.Command.ExpectedCharge); Assert.AreEqual("Mun Flyer", command.Command.DesignName);
+            CollectionAssert.AreEqual(new byte[] { 4, 5, 6 }, command.Command.BlueprintData); Assert.AreEqual("VAB", command.Command.BlueprintEditor);
+            Assert.AreEqual(TradeDesignMode.Stock, command.Command.Trade.DesignMode); Assert.AreEqual(4, command.Command.Trade.StockUnits);
+
+            var resultSource = new ServerMessageFactory().CreateNewMessageData<AgencyEconomyResultMsgData>();
+            resultSource.Result = new EconomyResult { RequestId = Guid.NewGuid(), Operation = EconomyOperation.FetchBlueprint, Success = true,
+                BlueprintData = new byte[] { 9, 8 }, BlueprintEditor = "SPH", BlueprintName = "Mun Flyer", BlueprintHash = "hash" };
+            output = peer.CreateMessage(); resultSource.Serialize(output);
+            var result = new ServerMessageFactory().CreateNewMessageData<AgencyEconomyResultMsgData>(); result.Deserialize(Incoming(peer, output));
+            Assert.AreEqual(EconomyOperation.FetchBlueprint, result.Result.Operation);
+            CollectionAssert.AreEqual(new byte[] { 9, 8 }, result.Result.BlueprintData);
+            Assert.AreEqual("SPH", result.Result.BlueprintEditor); Assert.AreEqual("Mun Flyer", result.Result.BlueprintName); Assert.AreEqual("hash", result.Result.BlueprintHash);
+        }
+
+        [TestMethod]
+        public void NewEconomyOperationsAreAppendedAfterTheTradeRange()
+        {
+            Assert.AreEqual(15, (int)EconomyOperation.TradeDelivered, "Existing operation byte values must not move.");
+            Assert.AreEqual(16, (int)EconomyOperation.BuildStock);
+            Assert.AreEqual(17, (int)EconomyOperation.FetchBlueprint);
+            Assert.AreEqual(2, (int)TradeDesignMode.Stock);
+            Assert.AreEqual(2, (int)TradeEntitlementKind.StockDesign);
+        }
+
+        [TestMethod]
+        public void LegacyJsonWithoutStockFieldsReadsDefaults()
+        {
+            var legacy = Newtonsoft.Json.JsonConvert.DeserializeObject<EconomySnapshot>("{\"Ready\":true,\"Funds\":5.0}");
+            Assert.AreEqual(0, legacy.Stock.Length);
+            Assert.AreEqual(0, legacy.DesignBlueprints.Length);
+            Assert.IsNotNull(legacy.StockHeldByFingerprint);
+            Assert.AreEqual(0, legacy.StockHeldByFingerprint.Count);
+            var command = Newtonsoft.Json.JsonConvert.DeserializeObject<EconomyCommand>("{}");
+            Assert.AreEqual(Guid.Empty, command.StockLotId); Assert.IsNull(command.StockFingerprint); Assert.AreEqual(0, command.StockUnits);
+            Assert.AreEqual(0d, command.ExpectedCharge); Assert.IsNull(command.DesignName); Assert.AreEqual(0, command.BlueprintData.Length); Assert.IsNull(command.BlueprintEditor);
+            var result = Newtonsoft.Json.JsonConvert.DeserializeObject<EconomyResult>("{}");
+            Assert.AreEqual(0, result.BlueprintData.Length); Assert.IsNull(result.BlueprintHash);
+            var offer = Newtonsoft.Json.JsonConvert.DeserializeObject<TradeOffer>("{}");
+            Assert.AreEqual(0, offer.StockUnits); Assert.AreEqual(0d, offer.StockPrepaidTotal);
+            Assert.AreEqual(0, Newtonsoft.Json.JsonConvert.DeserializeObject<TradeCommand>("{}").StockUnits);
+            Assert.IsNull(Newtonsoft.Json.JsonConvert.DeserializeObject<ToolingDesign>("{\"Fingerprint\":\"x\"}").Name);
+        }
+
+        [TestMethod]
+        public void StockHeldMapIsNeverNullAndIsCappedOnRead()
+        {
+            var peer = new NetClient(new NetPeerConfiguration("stock-held-wire"));
+            var explicitNull = Newtonsoft.Json.JsonConvert.DeserializeObject<EconomySnapshot>("{\"StockHeldByFingerprint\":null}");
+            Assert.IsNotNull(explicitNull.StockHeldByFingerprint);
+            var source = new ServerMessageFactory().CreateNewMessageData<AgencyEconomySnapshotMsgData>();
+            source.Snapshot = new EconomySnapshot { Ready = true };
+            for (var i = 0; i < EconomySnapshot.MaxStockHeldEntries + 5; i++) source.Snapshot.StockHeldByFingerprint[i.ToString("D5")] = i;
+            var output = peer.CreateMessage(); source.Serialize(output);
+            var target = new ServerMessageFactory().CreateNewMessageData<AgencyEconomySnapshotMsgData>(); target.Deserialize(Incoming(peer, output));
+            Assert.AreEqual(EconomySnapshot.MaxStockHeldEntries, target.Snapshot.StockHeldByFingerprint.Count);
+            Assert.AreEqual(0, target.Snapshot.StockHeldByFingerprint["00000"]);
+        }
     }
 }

@@ -185,11 +185,11 @@ internal sealed class BotClient : IAsyncDisposable
         Send<AgencyCliMsg, AgencyCommNetCommandMsgData>(d => { d.RequestId = request; d.Operation = operation; d.VesselId = vessel; d.TargetVesselId = target; d.Enabled = enabled; });
         return request;
     }
-    public void UploadPaidVessel(Guid vessel, string text, Guid launch, Guid token, int[] indices)
+    public void UploadPaidVessel(Guid vessel, string text, Guid launch, Guid token, int[] indices, Guid tradeEntitlement = default)
         => Send<VesselCliMsg, VesselProtoMsgData>(d =>
         {
             d.VesselId = vessel; d.Data = Encoding.UTF8.GetBytes(text); d.NumBytes = d.Data.Length; d.ForceReload = false; d.Reason = "Headless paid launch";
-            d.EconomyLaunchId = launch; d.EconomyLaunchToken = token; d.EconomyManifestIndices = indices;
+            d.EconomyLaunchId = launch; d.EconomyLaunchToken = token; d.EconomyManifestIndices = indices; d.TradeEntitlementId = tradeEntitlement;
         });
     private Guid _economySession;
     private long _economySequence;

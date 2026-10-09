@@ -56,10 +56,22 @@ namespace LmpCommonTest
         [TestMethod]
         public void ModFlagUrlsAreSafeAndBadOnesAreRejected()
         {
-            foreach (var url in new[] { "FlagPack/Flags/United_Kingdom", "FlagPack/Flags/Zimbabwe-2", "Squad/Flags/B612_Foundation_flag", "SomeMod/Textures/Flags/a1", "Mod/FlagsOrganization/x" })
+            foreach (var url in new[] { "FlagPack/Flags/United_Kingdom", "FlagPack/Flags/Zimbabwe-2", "Squad/Flags/B612_Foundation_flag", "SomeMod/Textures/Flags/a1", "Mod/FlagsOrganization/x",
+                         // Real FlagPack / PlusFlags / stock agency names the stock flag browser lists.
+                         "FlagPack/Flags/my flag", "FlagPack/Flags/Kerbin flag (blue)", "FlagPack/Flags/Czech Rep.", "FlagPack/Flags/Krikler7's UK flag (fixed for Wales)",
+                         "FlagPack/Flags/Imperial Aquila from Warhammer 40,000", "PlusFlags/Flags/Space & Upper Atmosphere Research Commission of Pakistan",
+                         "PlusFlags/Flags/National Space Agency of the Republic of Kazakhstan.pgn", "Squad/Agencies/R&D", "JSIA Vision/Flags/JSIA" })
                 Assert.IsTrue(AgencyIdentityDefaults.IsSafeFlagUrl(url), url);
-            foreach (var url in new[] { "", null, "FlagPack/../Flags/x", "..", "FlagPack/Flags/x.png", "FlagPack/Flags/my flag", "FlagPack/Flags/\u00e9", @"C:\Flags\x", "/FlagPack/Flags/x", "FlagPack/Flags/", @"FlagPack\Flags\x" })
+            foreach (var url in new[] { "", null, "FlagPack/../Flags/x", "..", "FlagPack/Flags/x.png", "FlagPack/Flags/x.DDS", "FlagPack/Flags/\u00e9", @"C:\Flags\x", "/FlagPack/Flags/x", "FlagPack/Flags/", @"FlagPack\Flags\x",
+                         "FlagPack/Flags/trailing ", " FlagPack/Flags/x", "FlagPack/ /x", "FlagPack/ Flags/x", "FlagPack/./x", "A//B", "A/B=C", "A/{B}", "A/B$C", "A/B\tC", "A/B|C", "A/B?" })
                 Assert.IsFalse(AgencyIdentityDefaults.IsSafeFlagUrl(url), url);
+        }
+        [TestMethod]
+        public void OnlyServerUploadNamesAreUploadable()
+        {
+            Assert.IsTrue(AgencyIdentityDefaults.IsUploadableFlagName("Custom/Flags/flag_one-2"));
+            foreach (var url in new[] { "FlagPack/Flags/Kerbin flag (blue)", "Squad/Agencies/R&D", "FlagPack/Flags/Czech Rep.", "../x", "", null })
+                Assert.IsFalse(AgencyIdentityDefaults.IsUploadableFlagName(url), url);
         }
         [TestMethod]
         public void UnsafeFlagPathsAreRejected()

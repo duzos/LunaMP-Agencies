@@ -76,8 +76,16 @@ namespace Server.Agency
         {
             if (!AgencyIdentityDefaults.IsSafeFlagUrl(url)) return false;
             if (AgencyIdentityDefaults.IsStockFlag(url)) return true;
-            if (expectedHash == null || expectedHash.Length != 64 || expectedHash.Any(c => !Uri.IsHexDigit(c)) || !Directory.Exists(FlagSystem.FlagPath)) return false;
             var filename = url.Replace('/', '$') + ".png";
+            if (string.IsNullOrEmpty(expectedHash))
+            {
+                // Reference to a mod flag the owner has installed but could not upload (non-PNG, over 1 MB, or a name the
+                // flag upload rejects): only players with that mod see it. Refused when a synchronized file of that name
+                // exists, so a reference can never silently stand in for an uploaded flag with different content.
+                return !Directory.Exists(FlagSystem.FlagPath) ||
+                       !Directory.EnumerateFiles(FlagSystem.FlagPath, "*.png", SearchOption.AllDirectories).Any(p => string.Equals(Path.GetFileName(p), filename, StringComparison.Ordinal));
+            }
+            if (expectedHash.Length != 64 || expectedHash.Any(c => !Uri.IsHexDigit(c)) || !Directory.Exists(FlagSystem.FlagPath)) return false;
             var found = false;
             foreach (var path in Directory.EnumerateFiles(FlagSystem.FlagPath, "*.png", SearchOption.AllDirectories).Where(p => string.Equals(Path.GetFileName(p), filename, StringComparison.Ordinal)))
             {

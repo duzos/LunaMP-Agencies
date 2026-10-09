@@ -124,9 +124,12 @@ namespace LmpClient.Windows.Agency
             GUILayout.EndHorizontal();
             return value;
         }
-        // Every flag texture KSP loaded from a "Flags" folder (what the stock flag browser lists via
-        // GameDatabase.GetAllTexturesInFolderType("Flags", true)), plus stock defaults and server-synced flags.
+        // Exactly what the stock FlagBrowser lists (textures in Flags, FlagsOrganization and FlagsAgency folders plus
+        // contract agency logos), plus installed stock defaults and server-synced flags.
         private static string[] flagChoices = new string[0], flagFiltered = new string[0];
+        private static readonly string[] BrowserFlagFolders = { "Flags", "FlagsOrganization", "FlagsAgency" };
+        // Flags that can be neither uploaded nor found on the server: only players with the same mod see them.
+        private static System.Collections.Generic.HashSet<string> flagModOnly = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
         private static System.Collections.Generic.Dictionary<string, Texture2D> flagThumbs = new System.Collections.Generic.Dictionary<string, Texture2D>();
         private static string pendingFlagUrl;
         private static float pendingFlagSince;
@@ -134,25 +137,65 @@ namespace LmpClient.Windows.Agency
         private static int flagCacheServerCount = -1, flagCacheTextureCount = -1;
         private static string identityFlagQuery = string.Empty, flagAppliedQuery;
 
-        // Offer stock flags, flags already on the server, and local PNG flags the server will accept (<= 1 MB).
+        // Same folder test as GameDatabase.GetAllTexturesInFolderType(folder, true), done in one pass and without its
+        // exception on a texture name that has no '/'.
+        private static bool IsBrowserFlagFolder(string url)
+        {
+            var slash = url.LastIndexOf('/');
+            if (slash <= 0) return false;
+            var folder = url.Substring(0, slash);
+            folder = folder.Substring(folder.LastIndexOf('/') + 1);
+            return BrowserFlagFolders.Any(f => string.Equals(f, folder, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Every flag the stock flag browser shows, whatever its format or size. PNGs of 1 MB or less with an uploadable
+        // name are shared on save; the rest are saved as a reference that only players with the same mod can see.
         // File checks run only when the cache is rebuilt, never per frame.
         internal static string[] BuildFlagChoices()
         {
-            var urls = new System.Collections.Generic.HashSet<string>(DefaultFlags.DefaultFlagList, StringComparer.Ordinal);
-            foreach (var key in FlagSystem.Singleton.ServerFlags.Keys) urls.Add(key);
+            var urls = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
             var thumbs = new System.Collections.Generic.Dictionary<string, Texture2D>(StringComparer.Ordinal);
             var db = GameDatabase.Instance;
-            if (db != null)
-                foreach (var info in db.GetAllTexturesInFolderType("Flags", true))
+            if (db?.databaseTexture != null)
+            {
+                foreach (var info in db.databaseTexture)
                 {
-                    if (info == null || info.isNormalMap || info.name == null) continue;
-                    thumbs[info.name] = info.texture;
-                    if (!urls.Contains(info.name) && AgencyIdentityDefaults.IsSafeFlagUrl(info.name) && FlagSystem.IsShareableLocalFlag(info.name))
-                        urls.Add(info.name);
+                    if (info?.name == null || !IsBrowserFlagFolder(info.name)) continue;
+                    thumbs[info.name] = info.texture; urls.Add(info.name);
                 }
+                // Stock FlagBrowser.Start also lists contract agency logos and drops their _scaled copies.
+                var agents = Contracts.Agents.AgentList.Instance?.Agencies;
+                if (agents != null)
+                    foreach (var agent in agents)
+                    {
+                        if (agent == null) continue;
+                        if (agent.LogoScaled)
+                            foreach (var scaled in thumbs.Where(p => p.Value == agent.LogoScaled && p.Value != agent.Logo).Select(p => p.Key).ToList())
+                                urls.Remove(scaled);
+                        var logo = string.IsNullOrEmpty(agent.LogoURL) ? null : db.GetTextureInfo(agent.LogoURL);
+                        if (logo?.name == null) continue;
+                        thumbs[logo.name] = logo.texture; urls.Add(logo.name);
+                    }
+                foreach (var url in DefaultFlags.DefaultFlagList.Concat(FlagSystem.Singleton.ServerFlags.Keys))
+                {
+                    if (urls.Contains(url)) continue;
+                    var texture = db.GetTexture(url, false);
+                    if (texture) { thumbs[url] = texture; urls.Add(url); }
+                    else if (FlagSystem.Singleton.ServerFlags.ContainsKey(url)) urls.Add(url);
+                }
+            }
+            var modOnly = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+            var choices = urls.Where(AgencyIdentityDefaults.IsSafeFlagUrl).OrderBy(v => v, StringComparer.Ordinal).ToArray();
+            foreach (var url in choices)
+                if (!IsSharedOrUploadable(url)) modOnly.Add(url);
             flagThumbs = thumbs;
-            return urls.Where(AgencyIdentityDefaults.IsSafeFlagUrl).OrderBy(v => v, StringComparer.Ordinal).ToArray();
+            flagModOnly = modOnly;
+            return choices;
         }
+
+        private static bool IsSharedOrUploadable(string url) =>
+            AgencyIdentityDefaults.IsStockFlag(url) || FlagSystem.Singleton.ServerFlags.ContainsKey(url) ||
+            AgencyIdentityDefaults.IsUploadableFlagName(url) && FlagSystem.IsShareableLocalFlag(url);
 
         // Called on Layout from the editor: completes or fails a save that was waiting for a flag upload.
         private static void CheckPendingFlagUpload(Guid agencyId)
@@ -208,6 +251,7 @@ namespace LmpClient.Windows.Agency
                 flagThumbs.TryGetValue(url, out var texture);
                 GUILayout.Label(texture ? (Texture)texture : Texture2D.blackTexture, GUILayout.Width(32), GUILayout.Height(20));
                 if (GUILayout.Button(url)) { identityFlag = url; identityFlags = false; }
+                if (flagModOnly.Contains(url)) GUILayout.Label("others need this mod", GUILayout.ExpandWidth(false));
                 GUILayout.EndHorizontal();
             }
             GUILayout.BeginHorizontal();
@@ -215,25 +259,33 @@ namespace LmpClient.Windows.Agency
             GUILayout.Label((identityFlagPage + 1) + " / " + pages);
             if (GUILayout.Button("Next")) identityFlagPage = Math.Min(pages - 1, identityFlagPage + 1);
             GUILayout.EndHorizontal();
-            GUILayout.Label("Only PNG flags of 1 MB or less can be shared; new ones upload when you save.");
+            GUILayout.Label("PNG flags of 1 MB or less upload when you save. Other flags are saved by name, so only players with the same mod see them.");
         }
         private static void SaveIdentity(Guid id)
         {
             if (!AgencyIdentityClient.Supported || id != AgencySystem.Singleton.MyAgencyId || !AgencySystem.Singleton.AmIOwnerOfMine()) return;
             var hash = string.Empty;
+            var modReference = false;
             if (!AgencyIdentityDefaults.IsStockFlag(identityFlag))
             {
                 if (!FlagSystem.Singleton.ServerFlags.TryGetValue(identityFlag, out var flag))
                 {
                     // Installed locally but not yet on the server: upload once, then finish the save when the server echoes it.
                     if (pendingFlagUrl == identityFlag) return;
-                    if (!FlagSystem.IsShareableLocalFlag(identityFlag) || !FlagSystem.Singleton.TrySendFlag(identityFlag))
-                    { identityStatus = "This flag can't be shared (only PNG flags of 1 MB or less)."; return; }
-                    pendingFlagUrl = identityFlag; pendingFlagSince = Time.realtimeSinceStartup;
-                    identityStatus = "Uploading flag to the server; the appearance saves automatically.";
-                    return;
+                    if (AgencyIdentityDefaults.IsUploadableFlagName(identityFlag) && FlagSystem.IsShareableLocalFlag(identityFlag))
+                    {
+                        if (!FlagSystem.Singleton.TrySendFlag(identityFlag))
+                        { identityStatus = "This flag couldn't be uploaded; choose another flag."; return; }
+                        pendingFlagUrl = identityFlag; pendingFlagSince = Time.realtimeSinceStartup;
+                        identityStatus = "Uploading flag to the server; the appearance saves automatically.";
+                        return;
+                    }
+                    // Not uploadable (format, size or name): reference it by URL, which the server accepts with no hash.
+                    if (GameDatabase.Instance == null || !GameDatabase.Instance.ExistsTexture(identityFlag))
+                    { identityStatus = "This flag isn't installed; choose another flag."; return; }
+                    modReference = true;
                 }
-                hash = flag.ShaSum.Replace("-", string.Empty);
+                else hash = flag.ShaSum.Replace("-", string.Empty);
             }
             var colour = (Color32)identityColour;
             var data = NetworkMain.CliMsgFactory.CreateNewMessageData<AgencySetIdentityMsgData>();
@@ -245,7 +297,9 @@ namespace LmpClient.Windows.Agency
             identitySubmitted = new AgencyIdentityInfo { AgencyId = id, Revision = identityDraftRevision,
                 HasColour = identityHasColour, Red = colour.r, Green = colour.g, Blue = colour.b, FlagUrl = identityFlag };
             AgencySystem.Singleton.MessageSender.SendMessage(data);
-            identityStatus = "Appearance request sent; the server reply appears above.";
+            identityStatus = modReference
+                ? "Appearance request sent. The server can't share this flag, so players without its mod won't see it."
+                : "Appearance request sent; the server reply appears above.";
         }
     }
 }

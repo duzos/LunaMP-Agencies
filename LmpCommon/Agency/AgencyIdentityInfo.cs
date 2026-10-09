@@ -21,8 +21,28 @@ namespace LmpCommon.Agency
         public const int ProtocolVersion = 1, MaxFlagUrlLength = 256, MaxIdentities = 4096;
         public const string DefaultFlagUrl = "Squad/Flags/default";
         public static bool IsStockFlag(string url) => DefaultFlags.DefaultFlagList.Contains(url);
-        public static bool IsSafeFlagUrl(string url) => !string.IsNullOrEmpty(url) && url.Length <= MaxFlagUrlLength &&
-            url.Split('/').All(p => p.Length > 0 && p.All(c => c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'));
+        // Characters that would break a path, the server's '$'-flattened flag file names, or a ConfigNode value.
+        private const string ForbiddenFlagUrlChars = "\\:*?\"<>|{}=$";
+        private static readonly string[] ImageExtensions = { ".png", ".dds", ".jpg", ".jpeg", ".tga", ".mbm", ".truecolor" };
+
+        /// <summary>
+        /// A GameDatabase texture URL that is safe to store and broadcast as an agency flag. Printable ASCII only, so mod
+        /// flag names with spaces, brackets, commas or dots (FlagPack, PlusFlags) are allowed; traversal segments, path
+        /// and ConfigNode metacharacters, surrounding whitespace and file extensions are not.
+        /// </summary>
+        public static bool IsSafeFlagUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url) || url.Length > MaxFlagUrlLength || url.Trim().Length != url.Length) return false;
+            if (url.Any(c => c < ' ' || c > '~' || ForbiddenFlagUrlChars.IndexOf(c) >= 0)) return false;
+            var parts = url.Split('/');
+            if (parts.Any(p => p.Trim().Length == 0 || p[0] == ' ' || p.All(c => c == '.'))) return false;
+            var last = parts[parts.Length - 1];
+            return !ImageExtensions.Any(e => last.EndsWith(e, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>Names the server's flag upload accepts (Server FlagSystem.ValidationRegex); anything else is referenced by URL only.</summary>
+        public static bool IsUploadableFlagName(string url) => !string.IsNullOrEmpty(url) && url.Length <= MaxFlagUrlLength &&
+            url.All(c => c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '/') && IsSafeFlagUrl(url);
     }
 
     public static class AgencyIdentityWire

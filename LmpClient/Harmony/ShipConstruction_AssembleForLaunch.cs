@@ -30,7 +30,9 @@ namespace LmpClient.Harmony
         {
             if (fromShipAssembly && ship != null)
             {
-                ApplyAgencyFlag(ref flagURL);
+                // Player launches only: contract and mission spawns (ContractSystem, MissionSystem) also come through here
+                // with fromShipAssembly but never set the active vessel.
+                if (setActiveVessel) ApplyAgencyFlag(ref flagURL, ship.missionFlag);
                 VesselAssemblyEvent.onAssemblingVessel.Fire(ship);
             }
         }
@@ -45,10 +47,12 @@ namespace LmpClient.Harmony
         }
 
         /// <summary>
-        /// Launch default-flag craft with the agency flag. Only the part flagURL changes: ship.missionFlag is left alone,
-        /// and the tooling/trade fingerprints come from the craft file, so they are unaffected.
+        /// Launch craft that are still on the stock default flag with the agency flag. Stock AssembleForLaunch copies
+        /// this one flagURL onto every part's Part.flagURL (what FlagDecal shows), so swapping it here is the same as
+        /// choosing the mission flag. Flag parts keep their own FlagDecalBackground.currentflagUrl and are never touched.
+        /// ship.missionFlag is left alone, and the tooling/trade fingerprints come from the craft file.
         /// </summary>
-        private static void ApplyAgencyFlag(ref string flagURL)
+        private static void ApplyAgencyFlag(ref string flagURL, string craftMissionFlag)
         {
             try
             {
@@ -59,8 +63,7 @@ namespace LmpClient.Harmony
                 var agencyFlag = AgencyIdentityClient.Get(agencyId).FlagUrl;
                 var database = GameDatabase.Instance;
                 var installed = database != null && !string.IsNullOrEmpty(agencyFlag) && database.ExistsTexture(agencyFlag);
-                var gameFlag = HighLogic.CurrentGame?.flagURL;
-                if (!AgencyCraftFlagPolicy.ShouldApply(true, agencyId, agencyFlag, installed, flagURL, settings.SelectedFlag, gameFlag))
+                if (!AgencyCraftFlagPolicy.ShouldApply(true, agencyId, agencyFlag, installed, flagURL, craftMissionFlag))
                 {
                     if (!installed && !notInstalledLogged && !string.IsNullOrEmpty(agencyFlag) &&
                         !string.Equals(agencyFlag, AgencyIdentityDefaults.DefaultFlagUrl, StringComparison.OrdinalIgnoreCase))

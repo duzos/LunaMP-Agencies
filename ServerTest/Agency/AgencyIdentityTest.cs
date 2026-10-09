@@ -101,6 +101,37 @@ namespace ServerTest.Agency
         }
 
         [TestMethod]
+        public void UnuploadedModFlagsAreAcceptedByReferenceUnlessASyncedFileHasThatName()
+        {
+            using (var scope = new AgencyTestScope())
+            {
+                // No Flags directory at all yet.
+                Assert.IsTrue(AgencyIdentitySystem.ValidateFlag("FlagPack/Flags/Kerbin flag (blue)", string.Empty));
+                var folder = Path.Combine(FlagSystem.FlagPath, "one"); Directory.CreateDirectory(folder);
+                File.WriteAllBytes(Path.Combine(folder, "Custom$Flags$test.png"), new byte[] { 1 });
+                Assert.IsTrue(AgencyIdentitySystem.ValidateFlag("SCANsat/Flags/SCANsat_Flag", string.Empty));
+                Assert.IsTrue(AgencyIdentitySystem.ValidateFlag("Squad/Agencies/R&D", null));
+                Assert.IsFalse(AgencyIdentitySystem.ValidateFlag("Custom/Flags/test", string.Empty));
+                Assert.IsFalse(AgencyIdentitySystem.ValidateFlag("../x", string.Empty));
+                Assert.IsFalse(AgencyIdentitySystem.ValidateFlag("FlagPack/Flags/x.png", string.Empty));
+            }
+        }
+
+        [TestMethod]
+        public void ModFlagReferenceWithSpacesAndPunctuationSurvivesReload()
+        {
+            const string url = "FlagPack/Flags/Krikler7's UK flag (fixed for Wales), v1.2 & co.";
+            using (var f = new AgencyEconomyTest.Fixture())
+            {
+                f.Client.AgencyIdentityProtocol = 1;
+                var cmd = Command(f); cmd.FlagUrl = url; cmd.FlagSha256 = string.Empty;
+                var result = AgencyIdentitySystem.Set(f.Client, cmd); Assert.IsTrue(result.Success, result.Message);
+                var id = f.Client.AgencyId; AgencyStore.Agencies.Clear(); AgencyStore.LoadExistingAgencies();
+                Assert.AreEqual(url, AgencyStore.Agencies[id].ToIdentity().FlagUrl);
+            }
+        }
+
+        [TestMethod]
         public void LegacyMetadataHasDefaultIdentity()
         {
             using (var scope = new AgencyTestScope())

@@ -103,7 +103,7 @@ namespace LmpClient.Windows.Options
 
         private static bool _showAgencyDisplaySettings;
         private static readonly GUIContent AutoCraftFlagContent = new GUIContent("Launch default-flag craft with agency flag",
-            "The agency flag is painted on the craft's flag parts, so every player who sees the craft sees it.");
+            "Craft still on the stock default flag launch with the agency flag. A flag you picked yourself, and flag parts, are kept.");
         private static bool _nameplateRangeDirty;
         private static float _nameplateRangeSaved = float.NaN;
 

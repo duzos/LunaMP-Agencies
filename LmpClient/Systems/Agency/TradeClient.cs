@@ -218,7 +218,8 @@ namespace LmpClient.Systems.Agency
                 if (fingerprint != draft.DesignFingerprint) { LatestStatus = "The chosen craft does not match the stock design."; return Guid.Empty; }
                 var available = ToolingClient.AvailableStockUnits(fingerprint);
                 if (draft.StockUnits < 1 || draft.StockUnits > available) { LatestStatus = "Sell between 1 and " + available + " units of this design."; return Guid.Empty; }
-                return Send(EconomyOperation.TradeCreate, draft);
+                // The manifest tells the server which of the craft file's parts are science parts, which are not part of the design fingerprint.
+                return Send(EconomyOperation.TradeCreate, draft, manifest);
             }
             if (draft.DesignMode == TradeDesignMode.SingleLaunch)
             {
@@ -227,7 +228,7 @@ namespace LmpClient.Systems.Agency
                 if (manifest == null) { LatestStatus = "Choose a design to sell one launch of."; return Guid.Empty; }
                 if (!AgencyTradeResearch.Validate(manifest, out var reason)) { LatestStatus = "You can only sell a launch you could make yourself. " + reason; return Guid.Empty; }
             }
-            return Send(EconomyOperation.TradeCreate, draft, draft.DesignMode == TradeDesignMode.SingleLaunch ? manifest : null);
+            return Send(EconomyOperation.TradeCreate, draft, draft.DesignMode == TradeDesignMode.SingleLaunch || !string.IsNullOrEmpty(draft.DesignFingerprint) ? manifest : null);
         }
         public static Guid RespondOffer(Guid id, long expectedRevision, bool accept) => Send(accept ? EconomyOperation.TradeAccept : EconomyOperation.TradeDecline,
             new TradeCommand {OfferId=id, ExpectedRevision=expectedRevision});

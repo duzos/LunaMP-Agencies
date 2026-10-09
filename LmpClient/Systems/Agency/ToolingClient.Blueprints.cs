@@ -130,6 +130,14 @@ namespace LmpClient.Systems.Agency
             string[] directories;
             try { directories = new[] { TradeClient.CraftDirectory("VAB"), TradeClient.CraftDirectory("SPH") }; }
             catch (Exception) { lock (localCraftLock) localCraftScanning = false; return null; }
+            // Science parts are not part of a design's fingerprint. The set is read here on the main thread; the scan below runs off it.
+            var science = new HashSet<string>(StringComparer.Ordinal);
+            try
+            {
+                foreach (var info in PartLoader.LoadedPartsList)
+                    if (info != null && info.category == PartCategories.Science && !string.IsNullOrEmpty(info.name)) science.Add(info.name);
+            }
+            catch (Exception) { }
             System.Threading.Tasks.Task.Run(() =>
             {
                 var names = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -145,7 +153,7 @@ namespace LmpClient.Systems.Agency
                             var info = new System.IO.FileInfo(file);
                             if (!info.Exists || info.Length == 0 || info.Length > ToolingLimits.MaxToolingBlueprintBytes) continue;
                             var text = System.IO.File.ReadAllText(file, Encoding.UTF8);
-                            var fp = ToolingDesignNames.CraftFingerprint(text);
+                            var fp = ToolingDesignNames.CraftFingerprint(text, science.Contains);
                             var name = ToolingDesignNames.ShipNameFromCraft(text);
                             // On a collision the ordinally smallest name wins, so the choice is stable between scans.
                             if (fp != null && name != null && (!names.TryGetValue(fp, out var held) || string.CompareOrdinal(name, held) < 0)) names[fp] = name;

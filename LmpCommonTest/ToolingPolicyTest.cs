@@ -23,6 +23,50 @@ namespace LmpCommonTest
             Assert.AreNotEqual(ToolingPolicy.Fingerprint(Craft(Part("a|b", 1))), ToolingPolicy.Fingerprint(Craft(Part("a", 1), Part("b", 1))));
         }
         [TestMethod]
+        public void SciencePartsNeverChangeTheDesignFingerprint()
+        {
+            var bare = Craft(Part("tank", 100), Part("engine", 200));
+            var goo = Craft(Part("tank", 100), Part("goo", 800, true), Part("engine", 200));
+            var swapped = Craft(Part("thermometer", 900, true), Part("tank", 100), Part("engine", 200), Part("thermometer", 900, true));
+            Assert.AreEqual(ToolingPolicy.Fingerprint(bare), ToolingPolicy.Fingerprint(goo));
+            Assert.AreEqual(ToolingPolicy.Fingerprint(bare), ToolingPolicy.Fingerprint(swapped));
+            // Unchanged for a craft without science parts, so designs, stock and vouchers saved by earlier builds keep matching.
+            Assert.AreEqual(ToolingPolicy.LegacyFingerprint(bare), ToolingPolicy.Fingerprint(bare));
+            Assert.AreNotEqual(ToolingPolicy.LegacyFingerprint(goo), ToolingPolicy.Fingerprint(goo));
+            Assert.AreNotEqual(ToolingPolicy.Fingerprint(bare), ToolingPolicy.Fingerprint(Craft(Part("tank", 100), Part("goo", 800))), "The same name priced as an ordinary part still counts.");
+
+            var named = Craft(Part("tank", 1), Part("goo", 1));
+            var classified = ToolingPolicy.Classify(named, n => n == "goo");
+            Assert.IsFalse(named.Parts[1].IsScience, "Classify copies; it never edits its input.");
+            Assert.AreEqual(ToolingPolicy.Fingerprint(Craft(Part("tank", 1))), ToolingPolicy.Fingerprint(classified));
+        }
+        [TestMethod]
+        public void SciencePartsNeverCostToolingAndATooledDesignStaysTooledWhateverScienceItCarries()
+        {
+            var rates = new ToolingRates(5, .1, 2, .1);
+            var design = Craft(Part("probe", 100), Part("tank", 400), Part("goo", 800, true));
+            var fresh = ToolingPolicy.Quote(design, Array.Empty<ToolingDesign>(), rates);
+            Assert.AreEqual(500d * 5, fresh.ToolingCost, 1e-9, "Tooling is the non-science parts only.");
+            Assert.AreEqual(800d + 500 * 2, fresh.LaunchCost, 1e-9, "Untooled: science added at raw cost.");
+
+            var saved = new[] { Design(design, fresh.ToolingCost) };
+            var other = Craft(Part("probe", 100), Part("tank", 400), Part("thermometer", 900, true), Part("thermometer", 900, true));
+            var tooled = ToolingPolicy.Quote(other, saved, rates);
+            Assert.IsTrue(tooled.AlreadyTooled, "Swapping science parts keeps the craft tooled.");
+            Assert.AreEqual(0d, tooled.ToolingCost);
+            Assert.AreEqual(1800d + 500 * .1, tooled.LaunchCost, 1e-9, "Tooled: science added at raw cost.");
+            var none = ToolingPolicy.Quote(Craft(Part("probe", 100), Part("tank", 400)), saved, rates);
+            Assert.IsTrue(none.AlreadyTooled);
+            Assert.AreEqual(50d, none.LaunchCost, 1e-9);
+
+            // A saved design that carries science still covers a bigger craft with different science as a sub-assembly.
+            var bigger = Craft(Part("probe", 100), Part("tank", 400), Part("engine", 300), Part("thermometer", 900, true));
+            var combined = ToolingPolicy.Quote(bigger, saved, rates);
+            Assert.IsFalse(combined.AlreadyTooled);
+            Assert.AreEqual(1, combined.Matches.Length);
+            Assert.AreEqual(300d * 5 + 500 * 5 * .1, combined.ToolingCost, 1e-9);
+        }
+        [TestMethod]
         public void CargoContainerAndCrewChangePriceIdentityButNotDesignFingerprint()
         {
             var craft = Craft(Part("pod", 100), Part("box", 20));

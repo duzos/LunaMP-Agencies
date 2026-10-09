@@ -44,6 +44,8 @@ namespace LmpCommonTest
             CollectionAssert.AreEqual(new[] { "probeCoreOcto_4294", "fuelTank_12", "fuelTank_13" }, ToolingDesignNames.PartIdsFromCraft(Craft));
             Assert.AreEqual(ToolingPolicy.Fingerprint(manifest), ToolingDesignNames.CraftFingerprint(Craft), "Stored inventory parts are not physical parts.");
             Assert.IsNull(ToolingDesignNames.CraftFingerprint("ship = Empty\ntype = VAB\n"));
+            var probeOnly = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "fuelTank" }, new ToolingPart { Name = "fuelTank" } } };
+            Assert.AreEqual(ToolingPolicy.Fingerprint(probeOnly), ToolingDesignNames.CraftFingerprint(Craft, n => n == "probeCoreOcto"), "Names the classifier marks as science are left out.");
         }
 
         [TestMethod]

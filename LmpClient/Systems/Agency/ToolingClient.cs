@@ -66,6 +66,9 @@ namespace LmpClient.Systems.Agency
         private sealed class PendingLaunch
         {
             internal Guid Request, Launch, Token, Voucher;
+            /// <summary>The stock lot this launch reserves, and its fingerprint, captured at BeginLaunch.</summary>
+            internal Guid StockLot;
+            internal string StockFingerprint;
             internal string Path, FileHash, Flag, Site, ManifestHash, Crew;
             internal ToolingManifest Manifest;
             internal VesselCrewManifest CrewManifest;
@@ -143,6 +146,47 @@ namespace LmpClient.Systems.Agency
         /// <summary>True while a launch is reserved or starting; its voucher, if any, is the only one that counts for research.</summary>
         internal static bool LaunchPending => pending != null;
         internal static Guid PendingVoucher => pending?.Voucher ?? Guid.Empty;
+        /// <summary>The stock lot the launch in progress reserved (compared by id even after the row is pruned), and its fingerprint.</summary>
+        internal static Guid PendingStockLot => pending?.StockLot ?? Guid.Empty;
+        internal static string PendingStockFingerprint => pending?.StockFingerprint;
+
+        // Plan 40 design stock. Signatures frozen by slice S0; slice S3 owns the bodies.
+        private static bool useStock = true;
+        /// <summary>The "Use stock" choice. On by default; a matching lot is applied automatically when it is cheaper.</summary>
+        public static bool UseStock
+        {
+            get => useStock;
+            set { if (useStock == value) return; useStock = value; RequestQuoteRefresh(); }
+        }
+        /// <summary>The stock lot the editor quote applies, or null.</summary>
+        public static DesignStockLot EditorStock { get; private set; }
+        /// <summary>True when the open editor craft is tooled and its saved blueprint is missing or differs. Computed in Tick, never in OnGUI.</summary>
+        public static bool EditorBlueprintNeedsSave { get; private set; }
+        public static string LoadStatus { get; private set; }
+        /// <summary>Held units of a design, as the server counts them for the 999 cap.</summary>
+        public static int StockUnits(string fingerprint) => throw new NotImplementedException("StockUnits is implemented by plan 40 slice S3.");
+        /// <summary>Units of a design in this agency's open outgoing stock offers.</summary>
+        public static int OfferedUnits(string fingerprint) => throw new NotImplementedException("OfferedUnits is implemented by plan 40 slice S3.");
+        public static IReadOnlyList<ToolingDesign> GetDesignsSnapshot() => throw new NotImplementedException("GetDesignsSnapshot is implemented by plan 40 slice S3.");
+        public static IReadOnlyList<DesignStockLot> GetStockSnapshot() => throw new NotImplementedException("GetStockSnapshot is implemented by plan 40 slice S3.");
+        /// <summary>The server's stock discount settings, normalized.</summary>
+        public static StockRates StockRates()
+        {
+            var settings = SettingsSystem.ServerSettings;
+            return LmpCommon.Agency.StockRates.Normalize(settings.StockMaxDiscount, settings.StockFullDiscountUnits);
+        }
+        public static StockQuote QuoteBuild(string fingerprint, int units) => throw new NotImplementedException("QuoteBuild is implemented by plan 40 slice S3.");
+        public static Guid BuildStock(string fingerprint, int units, double expectedCharge) => throw new NotImplementedException("BuildStock is implemented by plan 40 slice S3.");
+        /// <summary>The lot a launch of this quoted design would use: Ready, tooling on and Use stock on, then StockPolicy.SelectLot.</summary>
+        internal static DesignStockLot SelectStock(ToolingQuote quote) => throw new NotImplementedException("SelectStock is implemented by plan 40 slice S3.");
+        /// <summary>True when held stock (or the pending stock launch) unlocks research for this exact part list.</summary>
+        internal static bool HasStockResearch(ToolingManifest manifest) => throw new NotImplementedException("HasStockResearch is implemented by plan 40 slice S3.");
+        /// <summary>Saved-blueprint metadata for a tooled design, or null when none is saved.</summary>
+        public static ToolingBlueprintInfo BlueprintInfo(string fingerprint) => throw new NotImplementedException("BlueprintInfo is implemented by plan 40 slice S3.");
+        /// <summary>Sends a Tool command carrying the open editor craft's blueprint (free when already tooled).</summary>
+        public static Guid SaveBlueprintToTooling() => throw new NotImplementedException("SaveBlueprintToTooling is implemented by plan 40 slice S3.");
+        /// <summary>Loads a tooled design's saved craft into the editor (plan 40 section 6.3).</summary>
+        public static DesignLoadState LoadTooledDesign(string fingerprint, bool confirmedReplace) => throw new NotImplementedException("LoadTooledDesign is implemented by plan 40 slice S3.");
         internal static ToolingQuote DisplayQuote(ShipConstruct ship, ShipTemplate template, VesselCrewManifest crew)
         {
             if (!Ready) return null;

@@ -68,6 +68,8 @@ namespace LmpClient.Systems.SettingsSys
         internal bool AgencyTooling, AgencyTrade;
         internal bool CanRevert = true;
         internal double ToolingCostMultiplier = ToolingDefaults.ToolingCost, TooledLaunchMultiplier = ToolingDefaults.TooledLaunch, UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch, ToolingCombineMultiplier = ToolingDefaults.Combine;
+        internal double StockMaxDiscount = StockDefaults.MaxDiscount;
+        internal int StockFullDiscountUnits = StockDefaults.FullDiscountUnits;
     }
     internal static class SettingsSystem { internal static TestSettings ServerSettings = new TestSettings(); }
 }
@@ -117,6 +119,14 @@ namespace LmpClient.Systems.Agency
         private static void TickBoarding() { }
         private static bool HandleBoarding(EconomyResult result) => false;
         private static bool HandleSplit(EconomyResult result) => false;
+        // Plan 40: the unlinked ToolingClient.Blueprints.cs members (KSP-bound) that ToolingClient.cs may call.
+        private static bool CaptureEditorBlueprint(out byte[] bytes, out string editor, out string name) { bytes = null; editor = null; name = null; return false; }
+        private static bool TryEditorBlueprintHash(out string hash) { hash = null; return false; }
+        private static string[] MissingBlueprintParts(byte[] bytes) => Array.Empty<string>();
+        private static string WriteTooledCraftFile(ToolingBlueprintInfo info, byte[] bytes) => throw new NotSupportedException();
+        private static void LoadTooledCraftFile(string path, string editor) => throw new NotSupportedException();
+        private static void TickBlueprints() { }
+        private static bool HandleBlueprintResult(EconomyResult result) => false;
     }
 }
 

@@ -27,6 +27,8 @@ namespace LmpClient.Systems.Agency
         public bool Redeemed { get; internal set; }
         public bool Reserved { get; internal set; }
         public double PrepaidFunds { get; internal set; }
+        /// <summary>Held stock units for this design's fingerprint (from ToolingClient.StockUnits).</summary>
+        public int StockUnits { get; internal set; }
     }
     public static class TradeClient
     {
@@ -63,6 +65,11 @@ namespace LmpClient.Systems.Agency
         public static bool HasUnusedVoucher(string fingerprint)
         {
             lock (gate) return entitlements.Any(e => e.Kind == TradeEntitlementKind.SingleLaunch && !e.Redeemed && e.LaunchId == Guid.Empty && e.Fingerprint == fingerprint);
+        }
+        /// <summary>The StockDesign delivery (bought-stock craft file) for a fingerprint, or null.</summary>
+        public static ReceivedTradeDesign StockDesignFor(string fingerprint)
+        {
+            throw new NotImplementedException("StockDesignFor is implemented by plan 40 slice S3.");
         }
         public static TradeEntitlement VoucherById(Guid id)
         {

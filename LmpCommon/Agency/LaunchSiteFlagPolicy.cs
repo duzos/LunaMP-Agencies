@@ -15,6 +15,24 @@ namespace LmpCommon.Agency
         public static bool ShouldShow(bool featureOn, bool perAgencySites, bool ready, Guid assigned, bool kkHidden) =>
             featureOn && perAgencySites && ready && assigned != Guid.Empty && !kkHidden;
 
+        /// <summary>The stock KSC pad and runway, which KK also lists but never owns.</summary>
+        public static bool IsStockKscSite(string id) => id == "LaunchPad" || id == "Runway";
+
+        /// <summary>
+        /// Whether the stock / Making History pass may add a mark for <paramref name="id"/>. Kerbal Konstructs
+        /// registers every KK site, hidden ones included, as a stock <c>SpaceCenterFacility</c>, so a KK site must
+        /// only ever be marked by the KK pass (which carries the hidden flag). While KK is installed but its
+        /// catalog is unknown (still loading or unsupported), only positively stock sites pass: fail closed.
+        /// </summary>
+        public static bool AllowNonKkMark(string id, bool kkInstalled, bool kkCatalogKnown, bool isKkSite, bool isMakingHistorySite)
+        {
+            if (string.IsNullOrEmpty(id)) return false;
+            if (IsStockKscSite(id)) return true;
+            if (!kkInstalled) return true;
+            if (!kkCatalogKnown) return isMakingHistorySite;
+            return !isKkSite;
+        }
+
         /// <summary>
         /// True when the site is not hidden behind the body sphere as seen from the camera (ray-sphere test of the
         /// segment camera to site). Each point is {x, y, z}. A degenerate input is treated as visible.

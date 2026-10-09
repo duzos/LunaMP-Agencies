@@ -34,7 +34,11 @@ namespace LmpClient.Systems.Agency
         private static object lastCatalog;
         private static GameScenes lastScene = (GameScenes)(-1);
         private static float nextRetry, nextHiddenCheck;
-        private static bool retry;
+        private static bool retryRebuild;
+        private static int placeAttempts;
+        private const int MaxPlaceAttempts = 30;
+        private static readonly HashSet<string> KkIds = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> MhIds = new HashSet<string>(StringComparer.Ordinal);
 
         private static bool kkResolved, kkUsable;
         private static FieldInfo kkBody, kkStatic, kkLat, kkLon, kkAlt, siGameObject;
@@ -49,18 +53,28 @@ namespace LmpClient.Systems.Agency
             var catalog = LaunchSiteCatalog.GetSnapshot();
             var now = Time.unscaledTime;
             var changed = !ReferenceEquals(snapshot, lastSnapshot) || !ReferenceEquals(catalog, lastCatalog) || lastScene != HighLogic.LoadedScene;
-            if (changed || (retry && now >= nextRetry))
+            if (changed || (retryRebuild && now >= nextRetry))
             {
                 lastSnapshot = snapshot; lastCatalog = catalog; lastScene = HighLogic.LoadedScene;
                 nextRetry = now + 1f;
+                placeAttempts = 0;
                 try { Rebuild(snapshot); }
                 catch (Exception e)
                 {
                     Marks.Clear();
                     LunaLog.LogWarning("[AgencySiteFlags] Could not locate launch sites: " + e.Message);
                 }
-                // Retry (at most once a second) while KK has not built its catalog or a KK site is only roughly placed.
-                retry = KkLaunchSiteIntegration.CatalogPending || HasImprecise();
+                // Rebuild (at most once a second) while KK has not built its catalog: until then custom
+                // facilities cannot be told apart from KK sites and are left out (fail closed).
+                retryRebuild = KkLaunchSiteIntegration.State != KkIntegrationState.Absent && KkLaunchSiteIntegration.CatalogPending;
+            }
+            else if (now >= nextRetry && placeAttempts < MaxPlaceAttempts && HasImprecise())
+            {
+                // Only roughly placed KK marks are retried, a bounded number of times, without a full rebuild.
+                nextRetry = now + 1f;
+                placeAttempts++;
+                try { RetryImprecise(); }
+                catch (Exception e) { placeAttempts = MaxPlaceAttempts; LunaLog.LogWarning("[AgencySiteFlags] Could not place KK sites: " + e.Message); }
             }
             if (now >= nextHiddenCheck)
             {
@@ -84,14 +98,42 @@ namespace LmpClient.Systems.Agency
                 if (Marks[i].Kk != null) Marks[i].Hidden = ReadHidden(Marks[i].Kk);
         }
 
+        private static void RetryImprecise()
+        {
+            if (!kkUsable) return;
+            for (var i = 0; i < Marks.Count; i++)
+            {
+                var mark = Marks[i];
+                if (!mark.Precise && mark.Kk != null && TryPlaceFromStatic(mark.Kk, mark)) mark.Precise = true;
+            }
+        }
+
         private static void Rebuild(AgencyLaunchSiteSnapshot snapshot)
         {
             Marks.Clear();
+            KkIds.Clear();
+            MhIds.Clear();
             if (!snapshot.Ready || snapshot.Assignments.Count == 0 || PSystemSetup.Instance == null) return;
             var assignments = snapshot.Assignments;
-            AddStock(assignments, LaunchSiteCatalog.ReadMember(PSystemSetup.Instance, "SpaceCenterFacilities") as IEnumerable, "hostBody");
-            AddStock(assignments, LaunchSiteCatalog.ReadMember(PSystemSetup.Instance, "LaunchSites") as IEnumerable, "Body");
-            AddKk(assignments);
+            // KK first: KK registers every site (hidden ones too) as a SpaceCenterFacility, so the stock pass must
+            // never claim a KK site, or it would get a mark without the KK hidden flag.
+            var kkInstalled = KkLaunchSiteIntegration.State != KkIntegrationState.Absent;
+            var kkCatalogKnown = KkLaunchSiteIntegration.State == KkIntegrationState.Ready && !KkLaunchSiteIntegration.CatalogPending;
+            if (kkCatalogKnown)
+            {
+                foreach (var site in KkLaunchSiteIntegration.Sites())
+                {
+                    var id = KkLaunchSiteIntegration.SiteId(site);
+                    if (!string.IsNullOrEmpty(id)) KkIds.Add(id);
+                }
+                AddKk(assignments);
+            }
+            var mh = LaunchSiteCatalog.ReadMember(PSystemSetup.Instance, "LaunchSites") as IEnumerable;
+            if (mh != null)
+                foreach (var site in mh)
+                    if (LaunchSiteCatalog.ReadMember(site, "name") is string id && !string.IsNullOrEmpty(id)) MhIds.Add(id);
+            AddStock(assignments, LaunchSiteCatalog.ReadMember(PSystemSetup.Instance, "SpaceCenterFacilities") as IEnumerable, "hostBody", kkInstalled, kkCatalogKnown);
+            AddStock(assignments, mh, "Body", kkInstalled, kkCatalogKnown);
         }
 
         private static bool Has(string id)
@@ -100,13 +142,14 @@ namespace LmpClient.Systems.Agency
             return false;
         }
 
-        private static void AddStock(IReadOnlyDictionary<string, Guid> assignments, IEnumerable sites, string bodyMember)
+        private static void AddStock(IReadOnlyDictionary<string, Guid> assignments, IEnumerable sites, string bodyMember, bool kkInstalled, bool kkCatalogKnown)
         {
             if (sites == null) return;
             foreach (var site in sites)
             {
                 var id = LaunchSiteCatalog.ReadMember(site, "name") as string;
                 if (string.IsNullOrEmpty(id) || !assignments.TryGetValue(id, out var agency) || Has(id)) continue;
+                if (!LaunchSiteFlagPolicy.AllowNonKkMark(id, kkInstalled, kkCatalogKnown, KkIds.Contains(id), MhIds.Contains(id))) continue;
                 var body = LaunchSiteCatalog.ReadMember(site, bodyMember) as CelestialBody;
                 if (!body) continue;
                 var spawns = LaunchSiteCatalog.ReadMember(site, "spawnPoints") as Array;
@@ -126,12 +169,12 @@ namespace LmpClient.Systems.Agency
 
         private static void AddKk(IReadOnlyDictionary<string, Guid> assignments)
         {
-            if (KkLaunchSiteIntegration.State == KkIntegrationState.Absent) return;
+            // Unresolvable KK members: KK sites get no marks at all (the stock pass still skips them).
             if (!ResolveKk()) return;
             foreach (var site in KkLaunchSiteIntegration.Sites())
             {
                 var id = KkLaunchSiteIntegration.SiteId(site);
-                if (string.IsNullOrEmpty(id) || id == "LaunchPad" || id == "Runway" || !assignments.TryGetValue(id, out var agency) || Has(id)) continue;
+                if (string.IsNullOrEmpty(id) || LaunchSiteFlagPolicy.IsStockKscSite(id) || !assignments.TryGetValue(id, out var agency) || Has(id)) continue;
                 var body = kkBody.GetValue(site) as CelestialBody;
                 if (!body) continue;
                 var mark = new SiteMark { Id = id, Body = body, Agency = agency, Kk = site, Hidden = ReadHidden(site) };

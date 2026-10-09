@@ -21,6 +21,37 @@ namespace LmpCommonTest
         }
 
         [TestMethod]
+        public void StockPassNeverClaimsKkSites()
+        {
+            // KK catalog known: a KK site (hidden or not) is left to the KK pass.
+            Assert.IsFalse(LaunchSiteFlagPolicy.AllowNonKkMark("HiddenBase", true, true, true, false));
+            Assert.IsTrue(LaunchSiteFlagPolicy.AllowNonKkMark("Desert_Launch_Site", true, true, false, true));
+            Assert.IsTrue(LaunchSiteFlagPolicy.AllowNonKkMark("OtherModFacility", true, true, false, false));
+            // KK pad/runway entries never block the stock KSC sites.
+            Assert.IsTrue(LaunchSiteFlagPolicy.AllowNonKkMark("LaunchPad", true, true, true, false));
+            Assert.IsTrue(LaunchSiteFlagPolicy.AllowNonKkMark("Runway", true, false, true, false));
+        }
+
+        [TestMethod]
+        public void UnknownKkCatalogFailsClosed()
+        {
+            Assert.IsFalse(LaunchSiteFlagPolicy.AllowNonKkMark("HiddenBase", true, false, false, false));
+            Assert.IsTrue(LaunchSiteFlagPolicy.AllowNonKkMark("Woomerang_Launch_Site", true, false, false, true));
+            Assert.IsTrue(LaunchSiteFlagPolicy.AllowNonKkMark("LaunchPad", true, false, false, false));
+            Assert.IsFalse(LaunchSiteFlagPolicy.AllowNonKkMark(null, false, false, false, false));
+            Assert.IsFalse(LaunchSiteFlagPolicy.AllowNonKkMark("", false, false, false, false));
+        }
+
+        [TestMethod]
+        public void WithoutKkEverySiteIsStock()
+        {
+            Assert.IsTrue(LaunchSiteFlagPolicy.AllowNonKkMark("AnyFacility", false, false, false, false));
+            Assert.IsTrue(LaunchSiteFlagPolicy.IsStockKscSite("LaunchPad"));
+            Assert.IsTrue(LaunchSiteFlagPolicy.IsStockKscSite("Runway"));
+            Assert.IsFalse(LaunchSiteFlagPolicy.IsStockKscSite("launchpad"));
+        }
+
+        [TestMethod]
         public void HorizonBlocksTheFarSideOfTheBody()
         {
             var centre = new[] { 0d, 0, 0 };

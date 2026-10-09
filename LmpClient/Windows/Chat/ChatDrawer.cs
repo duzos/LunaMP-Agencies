@@ -1,6 +1,9 @@
 ﻿using LmpClient.Localization;
 using LmpClient.Systems.Chat;
+using LmpClient.Systems.Agency;
 using LmpClient.Systems.PlayerColorSys;
+using LmpClient.Systems.SettingsSys;
+using LmpClient.Windows.Agency;
 using LmpCommon.Message.Types;
 using UnityEngine;
 
@@ -42,10 +45,34 @@ namespace LmpClient.Windows.Chat
             GUILayout.BeginVertical();
             GUILayout.FlexibleSpace();
 
+            var agenciesOn = SettingsSystem.CurrentSettings.AgencyChatPlayerList;
+            var consoleId = SettingsSystem.ServerSettings.ConsoleIdentifier;
+
             foreach (var chatMsg in ChatSystem.Singleton.ChatMessages)
             {
-                _playerNameStyle.normal.textColor = PlayerColorSystem.Singleton.GetPlayerColor(chatMsg.Item1);
-                GUILayout.Label(chatMsg.Item3, _playerNameStyle);
+                var styled = false;
+                AgencyStyle agencyStyle = null;
+                if (agenciesOn && chatMsg.Item1 != consoleId)
+                {
+                    var agency = AgencyPresentation.GetPlayerAgency(chatMsg.Item1);
+                    styled = agency != System.Guid.Empty && AgencyPresentation.TryGetAgencyStyle(agency, out agencyStyle);
+                }
+
+                _playerNameStyle.normal.textColor = styled && agencyStyle.HasColour
+                    ? agencyStyle.TextColour
+                    : PlayerColorSystem.Singleton.GetPlayerColor(chatMsg.Item1);
+
+                if (styled)
+                {
+                    GUILayout.BeginHorizontal();
+                    AgencyBadge.DrawFlag(agencyStyle.AgencyId, 16, 10);
+                    GUILayout.Label(chatMsg.Item3, _playerNameStyle, GUILayout.ExpandWidth(true));
+                    GUILayout.EndHorizontal();
+                }
+                else
+                {
+                    GUILayout.Label(chatMsg.Item3, _playerNameStyle);
+                }
             }
 
             GUILayout.EndVertical();

@@ -1,4 +1,5 @@
-﻿using LmpClient.Systems.Chat;
+﻿using LmpClient.Systems.Agency;
+using LmpClient.Systems.Chat;
 using LmpClient.Systems.CraftLibrary;
 using LmpClient.Systems.PlayerColorSys;
 using LmpClient.Systems.Screenshot;
@@ -15,6 +16,7 @@ using LmpClient.Windows.Screenshots;
 using LmpClient.Windows.Systems;
 using LmpClient.Windows.Vessels;
 using LmpCommon;
+using System;
 using UnityEngine;
 
 namespace LmpClient.Windows.Status
@@ -123,19 +125,40 @@ namespace LmpClient.Windows.Status
             if (playerStatus == null)
                 return;
             GUILayout.BeginHorizontal();
-            if (!_playerNameStyle.ContainsKey(playerStatus.PlayerName))
+
+            AgencyStyle agencyStyle = null;
+            var agency = Guid.Empty;
+            if (SettingsSystem.CurrentSettings.AgencyChatPlayerList)
             {
-                _playerNameStyle[playerStatus.PlayerName] = new GUIStyle(GUI.skin.label)
-                {
-                    normal = { textColor = PlayerColorSystem.Singleton.GetPlayerColor(playerStatus.PlayerName) },
-                    hover = { textColor = PlayerColorSystem.Singleton.GetPlayerColor(playerStatus.PlayerName) },
-                    active = { textColor = PlayerColorSystem.Singleton.GetPlayerColor(playerStatus.PlayerName) },
-                    fontStyle = FontStyle.Bold,
-                    stretchWidth = true,
-                    wordWrap = false
-                };
+                agency = AgencyPresentation.GetPlayerAgency(playerStatus.PlayerName);
+                if (agency != Guid.Empty && !AgencyPresentation.TryGetAgencyStyle(agency, out agencyStyle)) agency = Guid.Empty;
             }
-            GUILayout.Label(playerStatus.PlayerName, _playerNameStyle[playerStatus.PlayerName]);
+
+            var version = AgencyIdentityClient.Version;
+            var useAgencyColour = agencyStyle != null && agencyStyle.HasColour;
+            var colourAgency = useAgencyColour ? agency : Guid.Empty;
+            if (!_playerNameStyle.TryGetValue(playerStatus.PlayerName, out var entry) || entry.Version != version || entry.Agency != colourAgency)
+            {
+                var colour = useAgencyColour ? agencyStyle.TextColour : PlayerColorSystem.Singleton.GetPlayerColor(playerStatus.PlayerName);
+                entry = new PlayerNameStyle
+                {
+                    Version = version,
+                    Agency = colourAgency,
+                    Style = new GUIStyle(GUI.skin.label)
+                    {
+                        normal = { textColor = colour },
+                        hover = { textColor = colour },
+                        active = { textColor = colour },
+                        fontStyle = FontStyle.Bold,
+                        stretchWidth = true,
+                        wordWrap = false
+                    }
+                };
+                _playerNameStyle[playerStatus.PlayerName] = entry;
+            }
+
+            if (agencyStyle != null) AgencyBadge.DrawFlag(agency, 20, 12);
+            GUILayout.Label(playerStatus.PlayerName, entry.Style);
             GUILayout.FlexibleSpace();
             GUILayout.Label(playerStatus.DisplayText, _stateTextStyle);
             GUILayout.EndHorizontal();

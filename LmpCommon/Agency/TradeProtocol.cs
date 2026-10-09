@@ -3,9 +3,9 @@ namespace LmpCommon.Agency
 {
     public enum TradeOfferStatus : byte { Open, Accepted, Declined, Cancelled, Expired, Invalidated }
     /// <summary>What the buyer receives with a design. The zero value keeps persisted offers meaning tooling plus design.</summary>
-    public enum TradeDesignMode : byte { ToolingAndDesign = 0, SingleLaunch = 1 }
-    /// <summary>A permanent research allowance for an exact part list, or one prepaid launch of it.</summary>
-    public enum TradeEntitlementKind : byte { Permanent = 0, SingleLaunch = 1 }
+    public enum TradeDesignMode : byte { ToolingAndDesign = 0, SingleLaunch = 1, Stock = 2 }
+    /// <summary>A permanent research allowance for an exact part list, one prepaid launch of it, or the craft file of bought stock (which grants no research by itself).</summary>
+    public enum TradeEntitlementKind : byte { Permanent = 0, SingleLaunch = 1, StockDesign = 2 }
     public sealed class TradeCommand
     {
         public Guid OfferId, BuyerAgencyId, VesselId, EntitlementId;
@@ -14,6 +14,8 @@ namespace LmpCommon.Agency
         public string DesignFingerprint, BlueprintName, Editor;
         public byte[] BlueprintData = Array.Empty<byte>();
         public TradeDesignMode DesignMode;
+        /// <summary>Stock only: the units to sell.</summary>
+        public int StockUnits;
     }
     public sealed class TradeOffer
     {
@@ -25,6 +27,9 @@ namespace LmpCommon.Agency
         public TradeDesignMode DesignMode;
         /// <summary>Single launch only: what the seller's agency pays at accept so the buyer's launch is cheap. Frozen at creation.</summary>
         public double PrepaidLaunchFunds, LaunchMultiplier;
+        /// <summary>Stock only: the escrowed units and the sum of their prepayments.</summary>
+        public int StockUnits;
+        public double StockPrepaidTotal;
     }
     public sealed class TradeEntitlement
     {

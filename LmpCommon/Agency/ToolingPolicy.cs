@@ -33,6 +33,8 @@ namespace LmpCommon.Agency
         public string Fingerprint;
         public ToolingManifest Manifest;
         public double ToolingBasis;
+        /// <summary>Optional display name; not part of the fingerprint.</summary>
+        public string Name;
     }
     public sealed class ToolingMatch
     {

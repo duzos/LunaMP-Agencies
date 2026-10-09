@@ -262,7 +262,15 @@ namespace LmpCommonTest
             Assert.IsTrue(ToolingClient.EditorBlueprintNeedsSave);
 
             ToolingClient.RequestQuoteRefresh(); ToolingClient.Tick();
-            Assert.AreEqual(1, ToolingClient.TestEditorHashCalls, "Unchanged craft and saved hash: no recapture within 2 s.");
+            Assert.AreEqual(1, ToolingClient.TestEditorHashCalls, "Unchanged craft and saved hash: no recapture, however many ticks pass.");
+            ToolingClient.RequestQuoteRefresh(); ToolingClient.Tick();
+            Assert.AreEqual(1, ToolingClient.TestEditorHashCalls, "There is no timer.");
+
+            ToolingClient.MarkEditorCraftModified();
+            ToolingClient.RequestQuoteRefresh(); ToolingClient.Tick();
+            Assert.AreEqual(2, ToolingClient.TestEditorHashCalls, "onEditorShipModified triggers one recapture.");
+            ToolingClient.RequestQuoteRefresh(); ToolingClient.Tick();
+            Assert.AreEqual(2, ToolingClient.TestEditorHashCalls);
 
             var saved = Snapshot(); saved.Revision = 2;
             saved.DesignBlueprints = new[] { new ToolingBlueprintInfo { Fingerprint = Fp, Name = "Lifter", Editor = "VAB", Hash = "edited", Bytes = 10 } };
@@ -280,8 +288,75 @@ namespace LmpCommonTest
         {
             Apply(Snapshot());
             OpenEditor(Manifest);
+            ToolingClient.TestEditorHash = "craft";
             ToolingClient.Tick();
             Assert.IsTrue(ToolingClient.EditorBlueprintNeedsSave);
+        }
+
+        [TestMethod]
+        public void OversizedCraft_HidesSaveAndReportsTheLimit()
+        {
+            Apply(Snapshot());
+            OpenEditor(Manifest);
+            ToolingClient.TestEditorHash = "craft";
+            ToolingClient.TestEditorBytes = ToolingLimits.MaxToolingBlueprintBytes + 1;
+            ToolingClient.Tick();
+            Assert.IsFalse(ToolingClient.EditorBlueprintNeedsSave, "No Save craft to tooling button for a craft the server would refuse.");
+            Assert.AreEqual(ToolingLimits.MaxToolingBlueprintBytes + 1, ToolingClient.EditorBlueprintOversizeBytes);
+            StringAssert.Contains(ToolingClient.BlueprintTooLargeText(ToolingClient.EditorBlueprintOversizeBytes), (ToolingLimits.MaxToolingBlueprintBytes / 1024) + " KB");
+
+            ToolingClient.TestCaptureBytes = new byte[ToolingLimits.MaxToolingBlueprintBytes + 1];
+            Assert.AreEqual(Guid.Empty, ToolingClient.SaveBlueprintToTooling());
+            StringAssert.Contains(ToolingClient.LatestStatus, "limited to");
+            Assert.AreEqual(0, Commands().Length);
+
+            ToolingClient.TestEditorBytes = 0;
+            ToolingClient.MarkEditorCraftModified(); ToolingClient.RequestQuoteRefresh(); ToolingClient.Tick();
+            Assert.AreEqual(0, ToolingClient.EditorBlueprintOversizeBytes);
+            Assert.IsTrue(ToolingClient.EditorBlueprintNeedsSave);
+        }
+
+        [TestMethod]
+        public void SaveBlueprintToTooling_OneAtATimeUntilTheResultOrTheDeadline()
+        {
+            Apply(Snapshot());
+            OpenEditor(Manifest);
+            ToolingClient.Tick();
+            ToolingClient.TestCaptureBytes = CraftBytes;
+            var request = ToolingClient.SaveBlueprintToTooling();
+            Assert.AreNotEqual(Guid.Empty, request);
+            Assert.IsTrue(ToolingClient.SaveBlueprintPending);
+            Assert.AreEqual(Guid.Empty, ToolingClient.SaveBlueprintToTooling(), "A second click while saving sends nothing.");
+            Assert.AreEqual(1, Commands().Length);
+            ToolingClient.Receive(new EconomyResult { Operation = EconomyOperation.Tool, RequestId = request, Success = true, Reason = "Saved." });
+            ToolingClient.Tick();
+            Assert.IsFalse(ToolingClient.SaveBlueprintPending);
+
+            Assert.AreNotEqual(Guid.Empty, ToolingClient.SaveBlueprintToTooling());
+            SetDeadline("saveDeadline", DateTime.UtcNow.AddSeconds(-1));
+            ToolingClient.Tick();
+            Assert.IsFalse(ToolingClient.SaveBlueprintPending, "A save with no answer frees the button at its deadline.");
+        }
+
+        private static void SetDeadline(string field, DateTime value) =>
+            typeof(ToolingClient).GetField(field, BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, value);
+
+        [TestMethod]
+        public void BuildPending_ClearsAtItsDeadline()
+        {
+            Apply(Snapshot());
+            Assert.AreNotEqual(Guid.Empty, ToolingClient.BuildStock(Fp, 2, ToolingClient.QuoteBuild(Fp, 2).Total));
+            ToolingClient.Tick();
+            Assert.IsTrue(ToolingClient.BuildPending, "Still within the deadline.");
+            SetDeadline("buildDeadline", DateTime.UtcNow.AddSeconds(-1));
+            ToolingClient.Tick();
+            Assert.IsFalse(ToolingClient.BuildPending);
+            StringAssert.Contains(ToolingClient.LatestStatus, "did not arrive");
+            Assert.AreNotEqual(Guid.Empty, ToolingClient.BuildStock(Fp, 1, ToolingClient.QuoteBuild(Fp, 1).Total), "A new build is allowed again.");
+            var late = Commands().First();
+            ToolingClient.Receive(new EconomyResult { Operation = EconomyOperation.BuildStock, RequestId = late.RequestId, Success = true, Reason = "Built 2." });
+            ToolingClient.Tick();
+            Assert.IsTrue(ToolingClient.BuildPending, "The late result of the timed-out build does not clear the new one.");
         }
 
         [TestMethod]
@@ -423,6 +498,50 @@ namespace LmpCommonTest
             StringAssert.Contains(ToolingClient.LoadStatus, "Missing parts: modTank, modEngine");
             Assert.AreEqual(0, ToolingClient.TestWrittenFiles.Count);
             Assert.AreEqual(0, ToolingClient.TestLoads.Count);
+        }
+
+        [TestMethod]
+        public void LateFetch_AsksAgainWhenTheSceneChanged()
+        {
+            Apply(WithBlueprint());
+            ToolingClient.TestBlueprintFingerprint = Fp;
+            Assert.AreEqual(DesignLoadState.Fetching, ToolingClient.LoadTooledDesign(Fp, false), "Space Center: no craft to replace.");
+            var fetch = Commands().Single();
+            OpenEditor(Other); // the player entered the VAB and built something while the fetch was in flight
+            ToolingClient.Receive(Fetched(fetch.RequestId));
+            ToolingClient.Tick();
+            Assert.AreEqual(DesignLoadState.NeedsConfirm, ToolingClient.LoadState);
+            Assert.AreEqual(Fp, ToolingClient.LoadingFingerprint);
+            Assert.AreEqual(0, ToolingClient.TestLoads.Count, "The editor craft is never replaced without a confirm.");
+
+            Assert.AreEqual(DesignLoadState.Loaded, ToolingClient.LoadTooledDesign(Fp, true));
+            Assert.AreEqual(1, ToolingClient.TestLoads.Count);
+            Assert.AreEqual(1, Commands().Length, "Confirming uses the cached bytes.");
+        }
+
+        [TestMethod]
+        public void LateFetch_AsksWhenAnUnconfirmedEditorGotACraft_AndLoadsWhenConfirmed()
+        {
+            Apply(WithBlueprint());
+            ToolingClient.TestBlueprintFingerprint = Fp;
+            OpenEditor(Other, parts: 0);
+            Assert.AreEqual(DesignLoadState.Fetching, ToolingClient.LoadTooledDesign(Fp, false), "An empty editor needs no confirm.");
+            EditorLogic.fetch.ship.parts.Add(new Part());
+            ToolingClient.Receive(Fetched(Commands().Single().RequestId));
+            ToolingClient.Tick();
+            Assert.AreEqual(DesignLoadState.NeedsConfirm, ToolingClient.LoadState);
+            Assert.AreEqual(0, ToolingClient.TestLoads.Count);
+            ToolingClient.CancelLoadConfirm();
+            Assert.AreEqual(DesignLoadState.Idle, ToolingClient.LoadState);
+
+            ToolingClient.Clear(); NetworkSender.Sent.Clear(); ToolingClient.TestLoads.Clear();
+            Apply(WithBlueprint());
+            OpenEditor(Other);
+            Assert.AreEqual(DesignLoadState.Fetching, ToolingClient.LoadTooledDesign(Fp, true));
+            ToolingClient.Receive(Fetched(Commands().Single().RequestId));
+            ToolingClient.Tick();
+            Assert.AreEqual(DesignLoadState.Loaded, ToolingClient.LoadState, "Confirmed in the same scene: loads.");
+            Assert.AreEqual(1, ToolingClient.TestLoads.Count);
         }
 
         [TestMethod]

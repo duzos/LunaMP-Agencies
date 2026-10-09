@@ -514,6 +514,7 @@
     <Compile Include="Harmony\AgencyTradeResearch.cs" />
     <Compile Include="Windows\Agency\TradeDrawer.cs" />
     <Compile Include="Windows\Agency\AgencyDesignsDrawer.cs" />
+    <Compile Include="Windows\Agency\FrameRefreshGate.cs" />
     <Compile Include="Systems\Agency\ToolingBoarding.cs" />
     <Compile Include="Systems\Agency\ToolingSplit.cs" />
     <Compile Include="Systems\Agency\SplitOrbitSnapshot.cs" />

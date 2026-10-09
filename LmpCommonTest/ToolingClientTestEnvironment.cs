@@ -129,14 +129,22 @@ namespace LmpClient.Systems.Agency
         internal static readonly List<string> TestWrittenFiles = new List<string>();
         internal static readonly List<Tuple<string, string>> TestLoads = new List<Tuple<string, string>>();
         internal static int TestEditorHashCalls;
+        /// <summary>Serialized size the editor craft reports; 0 means "small". Over the limit, no hash is returned (as in production).</summary>
+        internal static long TestEditorBytes;
         internal static void ResetBlueprintHooks()
         {
             TestEditorHash = null; TestBlueprintFingerprint = null; TestCaptureBytes = null; TestCaptureName = "Test craft"; TestCaptureEditor = "VAB";
-            TestMissingParts = Array.Empty<string>(); TestWrittenFiles.Clear(); TestLoads.Clear(); TestEditorHashCalls = 0;
+            TestMissingParts = Array.Empty<string>(); TestWrittenFiles.Clear(); TestLoads.Clear(); TestEditorHashCalls = 0; TestEditorBytes = 0;
         }
         private static bool CaptureEditorBlueprint(out byte[] bytes, out string editor, out string name)
         { bytes = TestCaptureBytes; editor = bytes == null ? null : TestCaptureEditor; name = bytes == null ? null : TestCaptureName; return bytes != null; }
-        private static bool TryEditorBlueprintHash(out string hash) { TestEditorHashCalls++; hash = TestEditorHash; return hash != null; }
+        private static bool TryEditorBlueprintHash(out string hash, out long size)
+        {
+            TestEditorHashCalls++;
+            size = TestEditorBytes > 0 ? TestEditorBytes : 100;
+            hash = size > ToolingLimits.MaxToolingBlueprintBytes ? null : TestEditorHash;
+            return TestEditorHash != null || TestEditorBytes > 0;
+        }
         private static string[] MissingBlueprintParts(byte[] bytes) => TestMissingParts;
         private static string BlueprintFingerprint(byte[] bytes) => TestBlueprintFingerprint;
         private static string WriteTooledCraftFile(ToolingBlueprintInfo info, byte[] bytes)

@@ -1,5 +1,10 @@
 using HarmonyLib;
+using System;
+using LmpClient.Diagnostics;
 using LmpClient.Events;
+using LmpClient.Systems.Agency;
+using LmpClient.Systems.SettingsSys;
+using LmpCommon.Agency;
 
 // ReSharper disable All
 
@@ -20,11 +25,56 @@ namespace LmpClient.Harmony
     public class ShipConstruction_AssembleForLaunch
     {
         [HarmonyPrefix]
-        private static void PrefixAssembleForLaunch(ShipConstruct ship, string landedAt, string displaylandedAt, string flagURL, Game sceneState, VesselCrewManifest crewManifest,
+        private static void PrefixAssembleForLaunch(ShipConstruct ship, string landedAt, string displaylandedAt, ref string flagURL, Game sceneState, VesselCrewManifest crewManifest,
             bool fromShipAssembly, bool setActiveVessel, bool isLanded, bool preCreate, Orbit orbit, bool orbiting, bool isSplashed)
         {
             if (fromShipAssembly && ship != null)
+            {
+                ApplyAgencyFlag(ref flagURL);
                 VesselAssemblyEvent.onAssemblingVessel.Fire(ship);
+            }
+        }
+
+        private static bool appliedLogged, notInstalledLogged;
+
+        /// <summary>
+        /// Launch default-flag craft with the agency flag. Only the part flagURL changes: ship.missionFlag is left alone,
+        /// and the tooling/trade fingerprints come from the craft file, so they are unaffected.
+        /// </summary>
+        private static void ApplyAgencyFlag(ref string flagURL)
+        {
+            try
+            {
+                var settings = SettingsSystem.CurrentSettings;
+                if (settings == null || !settings.AgencyAutoCraftFlag) return;
+                var agencyId = AgencySystem.Singleton.MyAgencyId;
+                if (agencyId == Guid.Empty || !AgencyIdentityClient.Supported) return;
+                var agencyFlag = AgencyIdentityClient.Get(agencyId).FlagUrl;
+                var database = GameDatabase.Instance;
+                var installed = database != null && !string.IsNullOrEmpty(agencyFlag) && database.ExistsTexture(agencyFlag);
+                var gameFlag = HighLogic.CurrentGame?.flagURL;
+                if (!AgencyCraftFlagPolicy.ShouldApply(true, agencyId, agencyFlag, installed, flagURL, settings.SelectedFlag, gameFlag))
+                {
+                    if (!installed && !notInstalledLogged && !string.IsNullOrEmpty(agencyFlag) &&
+                        !string.Equals(agencyFlag, AgencyIdentityDefaults.DefaultFlagUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        notInstalledLogged = true;
+                        PlaytestDiagnostics.Write("client.agency.craftflag.notinstalled", () => $"flag={agencyFlag}");
+                    }
+                    return;
+                }
+                var original = flagURL;
+                flagURL = agencyFlag;
+                if (!appliedLogged)
+                {
+                    appliedLogged = true;
+                    PlaytestDiagnostics.Write("client.agency.craftflag", () => $"from={original} to={agencyFlag}");
+                }
+            }
+            catch (Exception e)
+            {
+                PlaytestDiagnostics.Write("client.agency.craftflag.error", () => e.Message);
+            }
         }
 
         [HarmonyPostfix]

@@ -74,16 +74,28 @@ namespace Server
                 Description = "Enable bounded multiplayer playtest diagnostics for this run"
             };
 
+            Option<bool> downgradeEconomyOption = new("--downgrade-agency-economy")
+            {
+                Description = "Convert Universe/AgencyEconomy.json from agencies.9 back to the agencies.8 format and exit. Run with the server stopped"
+            };
+
             RootCommand rootCommand = new("Luna Multiplayer Server");
             rootCommand.Options.Add(dataDirectoryOption);
             rootCommand.Options.Add(memoryDiagnosticsOption);
             rootCommand.Options.Add(verboseDiagnosticsOption);
+            rootCommand.Options.Add(downgradeEconomyOption);
 
             rootCommand.SetAction((parseResult, cancellationToken) =>
             {
                 ServerContext.DataDirectory = parseResult.GetValue(dataDirectoryOption).FullName;
                 MemoryDiagnosticsEnabled = parseResult.GetValue(memoryDiagnosticsOption);
                 VerboseDiagnosticsEnabled = parseResult.GetValue(verboseDiagnosticsOption);
+                if (parseResult.GetValue(downgradeEconomyOption))
+                {
+                    // Runs before any server state exists: no settings, agency store or network. Main returns a Task, so the exit code goes through Environment.
+                    Environment.ExitCode = AgencyEconomyDowngrade.Run(ServerContext.UniverseDirectory);
+                    return Task.CompletedTask;
+                }
                 return RunServerAsync(cancellationToken);
             });
 

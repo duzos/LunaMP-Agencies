@@ -518,6 +518,83 @@ namespace ServerTest.Agency
             }
         }
 
+        private static EconomyCommand SellStock(Guid buyer, int units) => new EconomyCommand
+        {
+            Operation = EconomyOperation.TradeCreate,
+            Trade = new TradeCommand { OfferId = Guid.NewGuid(), BuyerAgencyId = buyer, DesignMode = TradeDesignMode.Stock, DesignFingerprint = ProbeFingerprint, StockUnits = units, BlueprintName = "Probe", Editor = "VAB", BlueprintData = Encoding.UTF8.GetBytes(Craft), BuyerFunds = 1 }
+        };
+
+        private static EconomyCommand Decide(EconomyOperation operation, Guid offer) => new EconomyCommand { Operation = operation, Trade = new TradeCommand { OfferId = offer, ExpectedRevision = 1 } };
+
+        private static int Escrowed(Guid seller) => Document().TradeOffers.Values.Where(o => o.Offer.Status == TradeOfferStatus.Open && o.Offer.SellerAgencyId == seller).Sum(o => o.Escrow.Sum(l => l.Units));
+
+        /// <summary>The R1.1 bound driven through the live trade path (no injected escrow): a splitting create and an accept into a full agency are refused, cancels return escrow without exceeding the bound.</summary>
+        [TestMethod]
+        public void CombinedLotBoundGatesRealStockOffersAndCancelsReturnTheEscrow()
+        {
+            using (var f = Start())
+            {
+                var seller = f.Economy.Client.AgencyId;
+                var buyer = f.Buyer.AgencyId;
+                var clock = DateTime.UtcNow;
+                AgencyEconomyStore.UtcNow = () => clock = clock.AddMilliseconds(10);
+                for (var i = 0; i < 62; i++) BuildRow(f, i, 2);
+                Assert.AreEqual(62, Slots(seller));
+
+                // Taking a whole lot moves its slot into escrow; taking part of one adds a slot.
+                var whole = SellStock(buyer, 2);
+                var created = f.Economy.Execute(whole);
+                Assert.IsTrue(created.Success, created.Reason);
+                Assert.AreEqual(62, Slots(seller));
+                var split = SellStock(buyer, 1);
+                created = f.Economy.Execute(split);
+                Assert.IsTrue(created.Success, created.Reason);
+                Assert.AreEqual(63, Slots(seller));
+                BuildRow(f, 62, 2);
+                Assert.AreEqual(64, Slots(seller));
+                var held = Units(f) + Escrowed(seller);
+                Assert.AreEqual(2 * 63, held);
+
+                // A create that empties the 1-unit lot and splits the next one would need a 65th slot.
+                var rows = Lots(f).Select(l => l.LotId + ":" + l.Units).OrderBy(x => x).ToArray();
+                var refused = f.Economy.Execute(SellStock(buyer, 2));
+                Assert.IsFalse(refused.Success);
+                StringAssert.Contains(refused.Reason, "Too many stock batches");
+                CollectionAssert.AreEqual(rows, Lots(f).Select(l => l.LotId + ":" + l.Units).OrderBy(x => x).ToArray(), "A refused create moves nothing.");
+                Assert.AreEqual(64, Slots(seller));
+
+                // The other agency sells this one a unit with terms nothing here shares: the accept would need a 65th slot.
+                var document = Document();
+                if (!document.Agencies.TryGetValue(buyer, out var buyerRow))
+                    document.Agencies[buyer] = buyerRow = new EconomyAgency { Funds = AgencyStore.Agencies[buyer].Funds, Science = AgencyStore.Agencies[buyer].Science };
+                buyerRow.Stock.Add(new DesignStockLot { LotId = Guid.NewGuid(), Fingerprint = ProbeFingerprint, Units = 1, PrepaidPerUnit = 999, LaunchMultiplier = .5, BuilderAgencyId = buyer, FundsBuilt = true, CreatedUtcTicks = 1 });
+                var incoming = SellStock(seller, 1);
+                var offered = f.Buy(incoming);
+                Assert.IsTrue(offered.Success, offered.Reason);
+                var accept = f.Economy.Execute(Decide(EconomyOperation.TradeAccept, incoming.Trade.OfferId));
+                Assert.IsFalse(accept.Success);
+                Assert.IsTrue(accept.Reason.IndexOf("too many stock batches", StringComparison.OrdinalIgnoreCase) >= 0, accept.Reason);
+                Assert.AreEqual(TradeOfferStatus.Open, Document().TradeOffers[incoming.Trade.OfferId].Offer.Status);
+                Assert.AreEqual(1, Document().TradeOffers[incoming.Trade.OfferId].Escrow.Sum(l => l.Units), "The refused accept leaves the escrow in place.");
+                Assert.AreEqual(64, Slots(seller));
+
+                // Cancelling returns every escrowed unit and never pushes the bound.
+                Assert.IsTrue(f.Economy.Execute(Decide(EconomyOperation.TradeCancel, whole.Trade.OfferId)).Success);
+                Assert.IsTrue(Slots(seller) <= 64);
+                Assert.IsTrue(f.Economy.Execute(Decide(EconomyOperation.TradeCancel, split.Trade.OfferId)).Success);
+                Assert.IsTrue(Slots(seller) <= 64);
+                Assert.AreEqual(0, Escrowed(seller));
+                Assert.AreEqual(held, Units(f), "Every escrowed unit came back.");
+
+                // With a slot free the same accept now succeeds.
+                Assert.AreEqual(63, Slots(seller));
+                accept = f.Economy.Execute(Decide(EconomyOperation.TradeAccept, incoming.Trade.OfferId));
+                Assert.IsTrue(accept.Success, accept.Reason);
+                Assert.AreEqual(held + 1, Units(f));
+                Assert.AreEqual(64, Slots(seller));
+            }
+        }
+
         [TestMethod]
         public void RevertWithFullSlotsMergesIntoASameTermsRowAndCreditsNothing()
         {

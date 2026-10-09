@@ -17,7 +17,6 @@ namespace ServerTest.Agency
     /// <summary>
     /// Plan 40 trade mode three: selling design stock. Units are escrowed at create, move to the buyer at accept and return to the seller on
     /// every other close. Lots are seeded straight into the economy document so these cases do not depend on BuildStock.
-    /// Cases marked "needs S1" call StockHeld / StockLotSlots / TryStoreBlueprint, whose bodies come from plan 40 slice S1.
     /// </summary>
     [TestClass, DoNotParallelize]
     public class AgencyStockTradeTest
@@ -80,7 +79,7 @@ namespace ServerTest.Agency
 
         // ---- Create ----
 
-        [TestMethod] // needs S1 (StockLotSlots)
+        [TestMethod]
         public void CreateEscrowsUnitsOldestFirstWithFreshLotIdsAndNeverSetsTheDesign()
         {
             using (var f = Start())
@@ -135,7 +134,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [TestMethod] // needs S1 (StockLotSlots)
+        [TestMethod]
         public void CareerCreateTakesOnlyFundsBuiltUnits()
         {
             using (var f = Start())
@@ -151,7 +150,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [TestMethod] // needs S1 (StockLotSlots)
+        [TestMethod]
         public void SandboxCreateMaySellSandboxBuiltUnits()
         {
             using (var f = Start())
@@ -167,7 +166,7 @@ namespace ServerTest.Agency
 
         // ---- Accept ----
 
-        [TestMethod] // needs S1 (StockLotSlots, StockHeld)
+        [TestMethod]
         public void AcceptMovesUnitsWithTheirTermsAndAddsOneDedupedStockDesign()
         {
             using (var f = Start())
@@ -209,7 +208,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [DataTestMethod] // needs S1 (StockHeld)
+        [DataTestMethod]
         [DataRow("before-document")]
         [DataRow("committed")]
         [DataRow("projections-written")]
@@ -239,7 +238,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [TestMethod] // needs S1 (StockLotSlots for create)
+        [TestMethod]
         public void StockAcceptWithToolingOffIsRefusedAndTheEscrowStays()
         {
             using (var f = Start())
@@ -277,7 +276,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [TestMethod] // needs S1 (StockHeld)
+        [TestMethod]
         public void BuyerHeldCapRefusesTheAcceptAndKeepsTheEscrow()
         {
             using (var f = Start())
@@ -293,7 +292,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [TestMethod] // needs S1 (StockLotSlots, StockHeld)
+        [TestMethod]
         public void CombinedLotBoundGatesCreateAndAccept()
         {
             using (var f = Start())
@@ -410,7 +409,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [TestMethod] // needs S1 (StockLotSlots, StockHeld)
+        [TestMethod]
         public void AcceptAndCancelRaceResolvesToExactlyOneOutcome()
         {
             using (var f = Start())
@@ -432,7 +431,7 @@ namespace ServerTest.Agency
 
         // ---- Resale and conservation ----
 
-        [TestMethod] // needs S1 (StockLotSlots, StockHeld)
+        [TestMethod]
         public void ResaleWithoutToolingRoundTripConservesUnitsAndPrepayment()
         {
             using (var f = Start())
@@ -554,7 +553,7 @@ namespace ServerTest.Agency
             }
         }
 
-        [TestMethod] // needs S1 (TryStoreBlueprint)
+        [TestMethod]
         public void ToolingAndDesignAcceptGivesTheBuyerTheBlueprintRef()
         {
             using (var f = Start())
@@ -583,6 +582,38 @@ namespace ServerTest.Agency
                 Assert.AreEqual(mine.Hash, kept.Hash);
                 Assert.AreEqual("SPH", kept.Editor);
                 Assert.AreEqual(1, AgencyEconomyStore.Snapshot(Buyer(f)).Designs.Length);
+            }
+        }
+
+        /// <summary>RetireTerminalLaunches prunes a delivered StockDesign only once nothing retains the design: no held lot and no open incoming Stock offer.</summary>
+        [TestMethod]
+        public void DeliveredStockDesignIsPrunedOnlyWhenNothingRetainsIt()
+        {
+            using (var f = Start())
+            {
+                var step = 0;
+                // Any committed transaction runs RetireTerminalLaunches; tooling a fresh design each time is always accepted.
+                EconomyResult Touch()
+                {
+                    var manifest = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "touch" + ++step, UnitCost = 10 } } };
+                    return f.Economy.Execute(new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest) });
+                }
+                bool HasDesign() => Doc().Entitlements.TryGetValue(Buyer(f), out var held) && held.Any(e => e.Kind == TradeEntitlementKind.StockDesign && e.Fingerprint == Fp);
+
+                var lot = Seed(Buyer(f), 1);
+                Doc().Entitlements[Buyer(f)] = new List<TradeEntitlement> { new TradeEntitlement { EntitlementId = Guid.NewGuid(), Kind = TradeEntitlementKind.StockDesign, Fingerprint = Fp, BlueprintName = "Stock Probe", Editor = "VAB", Delivered = true } };
+                Assert.IsTrue(Touch().Success);
+                Assert.IsTrue(HasDesign(), "A held lot retains the design.");
+
+                Seed(Seller(f), 2);
+                var incoming = SeedOffer(Seller(f), Buyer(f), 2);
+                Row(Doc(), Buyer(f)).Stock.RemoveAll(l => l.LotId == lot.LotId);
+                Assert.IsTrue(Touch().Success);
+                Assert.IsTrue(HasDesign(), "An open incoming Stock offer of the design retains it.");
+
+                Assert.IsTrue(f.Economy.Execute(Decision(EconomyOperation.TradeCancel, incoming.Offer.OfferId)).Success);
+                Assert.IsTrue(Touch().Success);
+                Assert.IsFalse(HasDesign(), "Nothing retains the design any more.");
             }
         }
     }

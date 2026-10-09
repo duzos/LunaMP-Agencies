@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace ServerTest.Agency
 {
@@ -16,7 +17,13 @@ namespace ServerTest.Agency
     {
         private static readonly ToolingManifest Probe = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "probe", UnitCost = 100 } } };
         private static readonly string Fingerprint = ToolingPolicy.Fingerprint(Probe);
+        private static readonly byte[] OfferCraft = System.Text.Encoding.UTF8.GetBytes("ship = Probe\nPART\n{\npart = probe\n}\n");
         private string _dir;
+
+        private static string Sha256Hex(byte[] bytes)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+        }
 
         [TestInitialize] public void Init() { _dir = Path.Combine(Path.GetTempPath(), "LMPDowngrade_" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(_dir); }
         [TestCleanup] public void Done() { try { Directory.Delete(_dir, true); } catch (IOException) { } }
@@ -49,7 +56,9 @@ namespace ServerTest.Agency
             doc.TradeOffers[w.Offer] = new StoredTradeOffer
             {
                 Offer = new TradeOffer { OfferId = w.Offer, SellerAgencyId = w.Seller, BuyerAgencyId = w.Buyer, Status = TradeOfferStatus.Open, DesignMode = TradeDesignMode.Stock, DesignFingerprint = Fingerprint, StockUnits = 4, StockPrepaidTotal = 80 },
-                Escrow = { Lot(4, 20) }
+                Escrow = { Lot(4, 20) },
+                Blueprint = OfferCraft,
+                BlueprintHash = Sha256Hex(OfferCraft)
             };
             doc.Entitlements[w.Buyer] = new List<TradeEntitlement>
             {
@@ -97,6 +106,41 @@ namespace ServerTest.Agency
             Assert.AreEqual(1, v2.Agencies[w.Seller].Designs.Count, "Tooled designs are kept.");
             Assert.AreEqual(3, w.Doc.Version, "The input document is not mutated.");
             Assert.AreEqual(2, w.Doc.Agencies[w.Seller].Stock.Count);
+        }
+
+        /// <summary>
+        /// The downgrade's own lot logic must give every agency exactly what the live server would: refund each Prepared launch with
+        /// RefundPrepared (charge plus GiveBackUnit), cancel each open offer with CloseOffer (escrow back to stock), then value every
+        /// remaining lot at its prepaid price (funds-built only).
+        /// </summary>
+        [DataTestMethod]
+        [DataRow(false, false, DisplayName = "Standard fixture")]
+        [DataRow(true, false, DisplayName = "Sandbox-built Prepared launch")]
+        [DataRow(false, true, DisplayName = "Escrow and launch terms differ from the held lots")]
+        public void FundsMatchTheLiveRefundAndCancelHelpers(bool sandboxLaunch, bool distinctTerms)
+        {
+            var w = Build();
+            if (sandboxLaunch) w.Doc.Launches[w.PreparedStock].Stock.FundsBuilt = false;
+            if (distinctTerms)
+            {
+                w.Doc.Launches[w.PreparedStock].Stock.PrepaidPerUnit = 33;
+                w.Doc.TradeOffers[w.Offer].Escrow[0].PrepaidPerUnit = 27;
+                w.Doc.TradeOffers[w.Offer].Offer.StockPrepaidTotal = 4 * 27;
+            }
+
+            var v2 = AgencyEconomyStore.ToVersion2(w.Doc, out _);
+
+            var live = JsonConvert.DeserializeObject<EconomyDocument>(JsonConvert.SerializeObject(w.Doc));
+            var refund = typeof(AgencyEconomyStore).GetMethod("RefundPrepared", BindingFlags.Static | BindingFlags.NonPublic);
+            var close = typeof(AgencyEconomyStore).GetMethod("CloseOffer", BindingFlags.Static | BindingFlags.NonPublic);
+            foreach (var launch in live.Launches.Values.Where(l => l.State == LaunchState.Prepared).ToArray()) refund.Invoke(null, new object[] { live, launch });
+            foreach (var stored in live.TradeOffers.Values.Where(o => o.Offer.Status == TradeOfferStatus.Open).ToArray()) close.Invoke(null, new object[] { live, stored, TradeOfferStatus.Cancelled, true });
+            foreach (var pair in live.Agencies)
+            {
+                var expected = pair.Value.Funds + pair.Value.Stock.Where(l => l.FundsBuilt).Sum(l => l.Units * l.PrepaidPerUnit);
+                Assert.AreEqual(expected, v2.Agencies[pair.Key].Funds, 1e-9, "Agency " + pair.Key + " funds differ from the live helpers.");
+            }
+            Assert.AreEqual(live.Agencies.Count, v2.Agencies.Count);
         }
 
         [TestMethod]

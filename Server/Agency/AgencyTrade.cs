@@ -389,7 +389,7 @@ namespace Server.Agency
             }
             catch (Exception e)
             {
-                // TryStoreBlueprint never throws by contract; this keeps any storage fault from refusing a paid trade.
+                // TryStoreBlueprint never throws by contract (every storage miss is a skip); this is defence in depth so no storage fault can refuse a paid trade.
                 LunaLog.Warning($"[Economy] Bought tooling {saved.Design.Fingerprint} kept without a saved craft for {trade.BuyerAgencyId}: {e.Message}");
             }
         }

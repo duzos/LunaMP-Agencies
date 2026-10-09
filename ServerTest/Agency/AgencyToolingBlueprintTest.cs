@@ -209,6 +209,49 @@ namespace ServerTest.Agency
             }
         }
 
+        private static EconomyCommand Accept(Guid offer) => new EconomyCommand { Operation = EconomyOperation.TradeAccept, Trade = new TradeCommand { OfferId = offer, ExpectedRevision = 1 } };
+
+        [TestMethod]
+        public void ToolingAndDesignAcceptWritesTheBuyersBlueprintFileAndFetchReturnsIt()
+        {
+            using (var t = new AgencyTradeTest.Fixture())
+            {
+                var offer = t.Offer(true);
+                var bytes = offer.Trade.BlueprintData;
+                Assert.IsFalse(File.Exists(FileFor(bytes)), "The seller tooled without saving a craft.");
+                Assert.IsTrue(t.Economy.Execute(offer).Success);
+                var accepted = t.Buy(Accept(offer.Trade.OfferId));
+                Assert.IsTrue(accepted.Success, accepted.Reason);
+                CollectionAssert.AreEqual(bytes, File.ReadAllBytes(FileFor(bytes)));
+                var reference = Document().Agencies[t.Buyer.AgencyId].Blueprints[offer.Trade.DesignFingerprint];
+                Assert.AreEqual(Sha(bytes), reference.Hash);
+                Assert.AreEqual(bytes.Length, reference.Size);
+                var fetched = t.Buy(new EconomyCommand { Operation = EconomyOperation.FetchBlueprint, StockFingerprint = offer.Trade.DesignFingerprint });
+                Assert.IsTrue(fetched.Success, fetched.Reason);
+                CollectionAssert.AreEqual(bytes, fetched.BlueprintData);
+                Assert.AreEqual("VAB", fetched.BlueprintEditor);
+            }
+        }
+
+        [TestMethod]
+        public void AFailedToolingAndDesignAcceptCommitLeavesNoNewFile()
+        {
+            using (var t = new AgencyTradeTest.Fixture())
+            {
+                var offer = t.Offer(true);
+                var bytes = offer.Trade.BlueprintData;
+                Assert.IsTrue(t.Economy.Execute(offer).Success);
+                AgencyEconomyStore.PersistenceCheckpoint = point => { if (point == "before-document") throw new IOException("injected"); };
+                Assert.IsFalse(t.Buy(Accept(offer.Trade.OfferId)).Success);
+                Assert.IsFalse(File.Exists(FileFor(bytes)), "Execute's catch deletes the file the failed accept wrote.");
+                Assert.IsFalse(Document().Agencies.TryGetValue(t.Buyer.AgencyId, out var row) && row.Blueprints.ContainsKey(offer.Trade.DesignFingerprint));
+                AgencyEconomyStore.PersistenceCheckpoint = null;
+                var accepted = t.Buy(Accept(offer.Trade.OfferId));
+                Assert.IsTrue(accepted.Success, accepted.Reason);
+                CollectionAssert.AreEqual(bytes, File.ReadAllBytes(FileFor(bytes)));
+            }
+        }
+
         [TestMethod]
         public void AFailedCommitLeavesNoNewFileAndNeverDeletesAReferencedOne()
         {

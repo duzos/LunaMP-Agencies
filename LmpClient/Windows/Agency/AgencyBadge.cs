@@ -1,3 +1,4 @@
+﻿using System.Collections.Generic;
 using System;
 using LmpClient.Systems.Agency;
 using UnityEngine;
@@ -33,12 +34,15 @@ namespace LmpClient.Windows.Agency
             var flag = GetFrameFlag(agency);
             if (!flag && !reserveSpace) return false;
             Rect rect;
-            if (alignTo == null) rect = GUILayoutUtility.GetRect(width, width, height, height);
+            if (alignTo == null) rect = GUILayoutUtility.GetRect(width, width, height, height, NoStretch);
             else
             {
-                if (slotStyle == null) slotStyle = new GUIStyle { margin = new RectOffset(0, 4, 0, 0), padding = new RectOffset(0, 0, 0, 0) };
-                slotStyle.margin.top = alignTo.margin.top;
-                slotStyle.margin.bottom = alignTo.margin.bottom;
+                // One slot style per aligned style: layout reads margins at calculation time, so a shared instance would take the last caller's.
+                if (!SlotStyles.TryGetValue(alignTo, out var slotStyle))
+                {
+                    slotStyle = new GUIStyle { margin = new RectOffset(0, 4, alignTo.margin.top, alignTo.margin.bottom), padding = new RectOffset(0, 0, 0, 0), stretchWidth = false, stretchHeight = false };
+                    SlotStyles[alignTo] = slotStyle;
+                }
                 var line = alignTo.fixedHeight > 0 ? alignTo.fixedHeight : alignTo.lineHeight + alignTo.padding.vertical;
                 var slotHeight = Mathf.Max(height, line);
                 rect = GUILayoutUtility.GetRect(width, width, slotHeight, slotHeight, slotStyle);
@@ -48,7 +52,8 @@ namespace LmpClient.Windows.Agency
             return true;
         }
 
-        private static GUIStyle slotStyle;
+        private static readonly Dictionary<GUIStyle, GUIStyle> SlotStyles = new Dictionary<GUIStyle, GUIStyle>();
+        private static readonly GUILayoutOption[] NoStretch = { GUILayout.ExpandWidth(false) };
 
         /// <summary>Draws the agency flag into <paramref name="rect"/> (Repaint only). Returns true when the agency has a flag.</summary>
         internal static bool DrawFlag(Rect rect, Guid agency)

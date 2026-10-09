@@ -23,7 +23,7 @@ namespace LmpClient.Windows.Agency
         private static string identityFlag = AgencyIdentityDefaults.DefaultFlagUrl;
         private static string identityStatus;
         private static int identityFlagPage;
-        private const int FlagPageSize = 8;
+        private const int FlagPageSize = 12;
 
         // The accent, rather than the label text, uses the chosen RGB so names stay readable.
         private static void DrawIdentityLabel(Guid id, string text)
@@ -57,6 +57,7 @@ namespace LmpClient.Windows.Agency
             identityFlag = value.FlagUrl;
             identityFlags = false;
             identityFlagPage = 0;
+            identityFlagQuery = string.Empty;
             identityStatus = null;
             identitySubmitted = null;
         }
@@ -83,7 +84,7 @@ namespace LmpClient.Windows.Agency
                 if (GUILayout.Button("Reload saved appearance")) LoadIdentityDraft(agency.Id);
             }
             GUILayout.Label("Flag: " + identityFlag);
-            if (GUILayout.Button(identityFlags ? "Close flag choices" : "Choose stock or synchronized flag")) identityFlags = !identityFlags;
+            if (GUILayout.Button(identityFlags ? "Close flag choices" : "Choose flag")) identityFlags = !identityFlags;
             if (identityFlags) DrawIdentityFlagChoices();
             identityHasColour = GUILayout.Toggle(identityHasColour, "Use an agency colour");
             if (identityHasColour)
@@ -121,11 +122,52 @@ namespace LmpClient.Windows.Agency
             GUILayout.EndHorizontal();
             return value;
         }
+        // Every flag texture KSP loaded from a "Flags" folder (what the stock flag browser lists via
+        // GameDatabase.GetAllTexturesInFolderType("Flags", true)), plus stock defaults and server-synced flags.
+        private static string[] flagChoices = new string[0], flagFiltered = new string[0];
+        private static int flagCacheServerCount = -1, flagCacheTextureCount = -1;
+        private static string identityFlagQuery = string.Empty, flagAppliedQuery;
+
+        internal static string[] BuildFlagChoices()
+        {
+            var urls = new System.Collections.Generic.HashSet<string>(DefaultFlags.DefaultFlagList, StringComparer.Ordinal);
+            foreach (var key in FlagSystem.Singleton.ServerFlags.Keys) urls.Add(key);
+            var db = GameDatabase.Instance;
+            if (db != null)
+                foreach (var info in db.GetAllTexturesInFolderType("Flags", true))
+                    if (info != null && !info.isNormalMap && info.name != null) urls.Add(info.name);
+            return urls.Where(AgencyIdentityDefaults.IsSafeFlagUrl).OrderBy(v => v, StringComparer.Ordinal).ToArray();
+        }
+
+        // Only refreshed on Layout so the control count is identical for Layout and Repaint.
+        private static void RefreshFlagChoices()
+        {
+            var serverCount = FlagSystem.Singleton.ServerFlags.Count;
+            var textureCount = GameDatabase.Instance?.databaseTexture?.Count ?? 0;
+            var rebuilt = serverCount != flagCacheServerCount || textureCount != flagCacheTextureCount;
+            if (rebuilt)
+            {
+                flagCacheServerCount = serverCount; flagCacheTextureCount = textureCount;
+                flagChoices = BuildFlagChoices();
+            }
+            if (rebuilt || flagAppliedQuery != identityFlagQuery)
+            {
+                flagAppliedQuery = identityFlagQuery;
+                var q = (identityFlagQuery ?? string.Empty).Trim();
+                flagFiltered = q.Length == 0 ? flagChoices
+                    : flagChoices.Where(f => f.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
+                identityFlagPage = 0;
+            }
+        }
         private static void DrawIdentityFlagChoices()
         {
-            // Bounded picker deliberately lists only portable candidates; the server validates custom bytes again.
-            var flags = DefaultFlags.DefaultFlagList.Concat(FlagSystem.Singleton.ServerFlags.Keys)
-                .Where(AgencyIdentityDefaults.IsSafeFlagUrl).Distinct().OrderBy(v => v, StringComparer.Ordinal).ToArray();
+            if (Event.current == null || Event.current.type == EventType.Layout || flagAppliedQuery == null) RefreshFlagChoices();
+            var flags = flagFiltered;
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Search", GUILayout.Width(50));
+            identityFlagQuery = GUILayout.TextField(identityFlagQuery ?? string.Empty, 64);
+            GUILayout.Label(flags.Length + " flags", GUILayout.Width(70));
+            GUILayout.EndHorizontal();
             var pages = Math.Max(1, (flags.Length + FlagPageSize - 1) / FlagPageSize);
             identityFlagPage = Math.Max(0, Math.Min(identityFlagPage, pages - 1));
             for (var i = identityFlagPage * FlagPageSize; i < Math.Min(flags.Length, (identityFlagPage + 1) * FlagPageSize); i++)
@@ -133,7 +175,7 @@ namespace LmpClient.Windows.Agency
                 var url = flags[i];
                 GUILayout.BeginHorizontal();
                 var texture = GameDatabase.Instance?.GetTexture(url, false);
-                if (texture) GUILayout.Label(texture, GUILayout.Width(32), GUILayout.Height(20));
+                GUILayout.Label(texture ? (Texture)texture : Texture2D.blackTexture, GUILayout.Width(32), GUILayout.Height(20));
                 if (GUILayout.Button(url)) { identityFlag = url; identityFlags = false; }
                 GUILayout.EndHorizontal();
             }
@@ -142,7 +184,7 @@ namespace LmpClient.Windows.Agency
             GUILayout.Label((identityFlagPage + 1) + " / " + pages);
             if (GUILayout.Button("Next")) identityFlagPage = Math.Min(pages - 1, identityFlagPage + 1);
             GUILayout.EndHorizontal();
-            GUILayout.Label("Custom flags must already be synchronized with this server.");
+            GUILayout.Label("Flags not yet on the server are uploaded when you save.");
         }
         private static void SaveIdentity(Guid id)
         {
@@ -151,7 +193,14 @@ namespace LmpClient.Windows.Agency
             if (!AgencyIdentityDefaults.IsStockFlag(identityFlag))
             {
                 if (!FlagSystem.Singleton.ServerFlags.TryGetValue(identityFlag, out var flag))
-                { identityStatus = "This flag is no longer synchronized. Choose another flag."; return; }
+                {
+                    // Installed locally but not yet on the server: upload it, then the server broadcast makes it saveable.
+                    if (!FlagSystem.Singleton.FlagExists(identityFlag))
+                    { identityStatus = "This flag is not installed. Choose another flag."; return; }
+                    FlagSystem.Singleton.SendFlag(identityFlag);
+                    identityStatus = "Uploading flag to the server; press Save again in a moment.";
+                    return;
+                }
                 hash = flag.ShaSum.Replace("-", string.Empty);
             }
             var colour = (Color32)identityColour;

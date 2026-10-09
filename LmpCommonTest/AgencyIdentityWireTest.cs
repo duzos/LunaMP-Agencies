@@ -54,6 +54,14 @@ namespace LmpCommonTest
             Assert.ThrowsException<InvalidDataException>(() => AgencyIdentityWire.ReadText(Incoming(peer, output), 256));
         }
         [TestMethod]
+        public void ModFlagUrlsAreSafeAndBadOnesAreRejected()
+        {
+            foreach (var url in new[] { "FlagPack/Flags/United_Kingdom", "FlagPack/Flags/Zimbabwe-2", "Squad/Flags/B612_Foundation_flag", "SomeMod/Textures/Flags/a1", "Mod/FlagsOrganization/x" })
+                Assert.IsTrue(AgencyIdentityDefaults.IsSafeFlagUrl(url), url);
+            foreach (var url in new[] { "", null, "FlagPack/../Flags/x", "..", "FlagPack/Flags/x.png", "FlagPack/Flags/my flag", "FlagPack/Flags/\u00e9", @"C:\Flags\x", "/FlagPack/Flags/x", "FlagPack/Flags/", @"FlagPack\Flags\x" })
+                Assert.IsFalse(AgencyIdentityDefaults.IsSafeFlagUrl(url), url);
+        }
+        [TestMethod]
         public void UnsafeFlagPathsAreRejected()
         {
             foreach (var path in new[] { "../flag", "C:/flag", "/flag", "A//B", "A/B.png", "A\\B", "A/\nB", new string('x', 257) })

@@ -9,6 +9,8 @@ namespace LmpCommonTest
     [TestClass]
     public class AgencySettingsSerializationTest
     {
+        // The stock settings tail (a double and an int) is appended after the active detection multiplier; truncation fixtures for older tails skip it.
+        private const int StockTailBits = 96;
         [DataTestMethod]
         [DataRow(0)]
         [DataRow(1)]
@@ -23,7 +25,7 @@ namespace LmpCommonTest
             source.AgencyContactExpirySeconds = 200; source.AgencyActiveDetectionRangeMultiplier = 4;
             var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
-            incoming.LengthBits = outgoing.LengthBits - missingBits;
+            incoming.LengthBits = outgoing.LengthBits - StockTailBits - missingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyContactClassificationSeconds = 99; parsed.AgencyContactIdentificationDistance = 99;
             parsed.AgencyContactExpirySeconds = 99; parsed.AgencyActiveDetectionRangeMultiplier = 99;
@@ -61,7 +63,7 @@ namespace LmpCommonTest
             source.UntooledLaunchMultiplier = 4;
             var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
-            incoming.LengthBits = outgoing.LengthBits - 256 - missingBits;
+            incoming.LengthBits = outgoing.LengthBits - StockTailBits - 256 - missingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
             parsed.AgencyDetectionRangeMultiplier = .9;
             parsed.Deserialize(incoming);
@@ -282,7 +284,7 @@ namespace LmpCommonTest
             var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
             var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
             // A server without the setting stops after the hide-craft flag; a double that is not fully there must not be half read either.
-            incoming.LengthBits = outgoing.LengthBits - 320 - missingTrailingBits;
+            incoming.LengthBits = outgoing.LengthBits - StockTailBits - 320 - missingTrailingBits;
             var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>(); parsed.UntooledLaunchMultiplier = 9;
             parsed.Deserialize(incoming);
             Assert.IsTrue(parsed.AgencyTooling); Assert.IsTrue(parsed.AgencyTrade); Assert.IsTrue(parsed.AgencyHideCraft);
@@ -310,6 +312,72 @@ namespace LmpCommonTest
             // The estimate counts each of the 35 bool flags as a whole byte but the wire spends one bit on them, so a complete estimate sits 30+ bytes above the real size.
             // Leaving the fourth double out of it costs 8 of those bytes, which this bound catches.
             Assert.IsTrue(settings.GetMessageSize() - outgoing.LengthBytes >= 30, "estimate " + settings.GetMessageSize() + " vs wire " + outgoing.LengthBytes);
+        }
+            private static SettingsReplyMsgData StockRoundTrip(double discount, int units, int missingBits, double active = 4)
+        {
+            var factory = new ServerMessageFactory(); var peer = new NetClient(new NetPeerConfiguration("StockSettings"));
+            var source = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            source.AgencyActiveDetectionRangeMultiplier = active; source.StockMaxDiscount = discount; source.StockFullDiscountUnits = units;
+            var outgoing = peer.CreateMessage(); source.Serialize(outgoing);
+            Assert.IsTrue(source.GetMessageSize() >= outgoing.LengthBytes);
+            var incoming = peer.CreateIncomingMessage(NetIncomingMessageType.Data, outgoing.ReadBytes(outgoing.LengthBytes));
+            incoming.LengthBits = outgoing.LengthBits - missingBits;
+            var parsed = factory.CreateNewMessageData<SettingsReplyMsgData>();
+            parsed.StockMaxDiscount = .45; parsed.StockFullDiscountUnits = 999;
+            parsed.Deserialize(incoming);
+            return parsed;
+        }
+
+        [TestMethod]
+        public void StockSettingsRoundTrip()
+        {
+            var parsed = StockRoundTrip(.2, 25, 0);
+            Assert.AreEqual(.2, parsed.StockMaxDiscount);
+            Assert.AreEqual(25, parsed.StockFullDiscountUnits);
+            Assert.AreEqual(4d, parsed.AgencyActiveDetectionRangeMultiplier);
+        }
+
+        [DataTestMethod]
+        [DataRow(1)]
+        [DataRow(32)]
+        [DataRow(StockTailBits)]
+        public void PayloadEndingAfterTheActiveMultiplierGetsStockDefaults(int missingBits)
+        {
+            var parsed = StockRoundTrip(.2, 25, missingBits);
+            Assert.AreEqual(4d, parsed.AgencyActiveDetectionRangeMultiplier, "The stock tail sits inside the active multiplier block; the multiplier itself is still read.");
+            Assert.AreEqual(StockDefaults.MaxDiscount, parsed.StockMaxDiscount);
+            Assert.AreEqual(StockDefaults.FullDiscountUnits, parsed.StockFullDiscountUnits);
+        }
+
+        [TestMethod]
+        public void PayloadWithoutTheActiveMultiplierAlsoResetsStockDefaults()
+        {
+            var parsed = StockRoundTrip(.2, 25, StockTailBits + 1);
+            Assert.AreEqual(3d, parsed.AgencyActiveDetectionRangeMultiplier);
+            Assert.AreEqual(StockDefaults.MaxDiscount, parsed.StockMaxDiscount);
+            Assert.AreEqual(StockDefaults.FullDiscountUnits, parsed.StockFullDiscountUnits);
+        }
+
+        [DataTestMethod]
+        [DataRow(.5, 10)]
+        [DataRow(-.01, 10)]
+        [DataRow(double.NaN, 10)]
+        [DataRow(double.PositiveInfinity, 10)]
+        [DataRow(.2, 1)]
+        [DataRow(.2, 1001)]
+        public void InvalidStockSettingsAreNormalizedToDefaultsOnWire(double discount, int units)
+        {
+            var parsed = StockRoundTrip(discount, units, 0);
+            Assert.AreEqual(StockDefaults.MaxDiscount, parsed.StockMaxDiscount);
+            Assert.AreEqual(StockDefaults.FullDiscountUnits, parsed.StockFullDiscountUnits);
+        }
+
+        [TestMethod]
+        public void NewMessagesDefaultToTheShippedStockRates()
+        {
+            var settings = new ServerMessageFactory().CreateNewMessageData<SettingsReplyMsgData>();
+            Assert.AreEqual(StockDefaults.MaxDiscount, settings.StockMaxDiscount);
+            Assert.AreEqual(StockDefaults.FullDiscountUnits, settings.StockFullDiscountUnits);
         }
     }
 }

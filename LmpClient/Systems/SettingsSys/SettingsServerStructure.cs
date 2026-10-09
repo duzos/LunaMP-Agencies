@@ -49,6 +49,8 @@ namespace LmpClient.Systems.SettingsSys
         public double TooledLaunchMultiplier = ToolingDefaults.TooledLaunch;
         public double UntooledLaunchMultiplier = ToolingDefaults.UntooledLaunch;
         public double ToolingCombineMultiplier = ToolingDefaults.Combine;
+        public double StockMaxDiscount = StockDefaults.MaxDiscount;
+        public int StockFullDiscountUnits = StockDefaults.FullDiscountUnits;
         public bool AgencyCommNetOptIn;
         public bool AgencyCommNetPerAgency { get; set; }
         public bool AgencyLaunchSitesPerAgency { get; set; }

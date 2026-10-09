@@ -60,6 +60,9 @@ namespace Server.Message
             msgData.TooledLaunchMultiplier = GeneralSettings.SettingsStore.TooledLaunchMultiplier;
             msgData.ToolingCombineMultiplier = GeneralSettings.SettingsStore.ToolingCombineMultiplier;
             msgData.UntooledLaunchMultiplier = GeneralSettings.SettingsStore.UntooledLaunchMultiplier;
+            var stockRates = LmpCommon.Agency.StockRates.Normalize(GeneralSettings.SettingsStore.StockMaxDiscount, GeneralSettings.SettingsStore.StockFullDiscountUnits);
+            msgData.StockMaxDiscount = stockRates.MaxDiscount;
+            msgData.StockFullDiscountUnits = stockRates.FullDiscountUnits;
 
             if (GeneralSettings.SettingsStore.GameDifficulty == GameDifficulty.Custom && GameplaySettings.SettingsStore != null)
             {

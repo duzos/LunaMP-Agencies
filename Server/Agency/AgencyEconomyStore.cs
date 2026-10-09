@@ -461,6 +461,8 @@ namespace Server.Agency
                         case EconomyOperation.TradeDecline:
                         case EconomyOperation.TradeCancel:
                         case EconomyOperation.TradeDelivered:
+                            // TODO(plan 40 merge with S2): pass ExecuteNewBlueprintFiles once ApplyTrade takes the newFiles parameter (feat/bbs-s2):
+                            // ApplyTrade(candidate, client, command, result, ExecuteNewBlueprintFiles);
                             ApplyTrade(candidate, client, command, result);
                             break;
                         case EconomyOperation.Tool:
@@ -1070,7 +1072,8 @@ namespace Server.Agency
             // Once its launch is gone the voucher can no longer be restored by a revert, so a spent one is just dead weight.
             foreach (var held in document.Entitlements.Values)
                 held.RemoveAll(e => e.Kind == TradeEntitlementKind.SingleLaunch && e.Redeemed && !document.Launches.ContainsKey(e.LaunchId));
-            PruneStockDesignEntitlements(document);
+            // TODO(plan 40 merge with S2): enable once AgencyTrade.cs (feat/bbs-s2) provides RetireStockDesigns; it relies on StockDesignRetainable.
+            // RetireStockDesigns(document);
         }
 
         public static void SendTo(ClientStructure client)

@@ -138,14 +138,6 @@ namespace Server.Agency
         /// <summary>True while anything still needs the design entry for this fingerprint: held or escrowed lots, Prepared or revertible stock launches.</summary>
         internal static bool StockDesignRetainable(EconomyDocument d, Guid agency, string fingerprint) => StockHeld(d, agency, fingerprint) > 0;
 
-        /// <summary>A delivered StockDesign entitlement goes once nothing needs it any more and no incoming Stock offer for that design is open.</summary>
-        private static void PruneStockDesignEntitlements(EconomyDocument d)
-        {
-            foreach (var entry in d.Entitlements)
-                entry.Value?.RemoveAll(e => e != null && e.Kind == TradeEntitlementKind.StockDesign && e.Delivered && !StockDesignRetainable(d, entry.Key, e.Fingerprint)
-                    && !d.TradeOffers.Values.Any(o => o?.Offer != null && o.Offer.Status == TradeOfferStatus.Open && o.Offer.BuyerAgencyId == entry.Key && o.Offer.DesignMode == TradeDesignMode.Stock && o.Offer.DesignFingerprint == e.Fingerprint));
-        }
-
         /// <summary>Lot, escrow, launch-terms and blueprint-ref invariants. Runs inside <see cref="Validate"/>, so on every Load and Persist. No file I/O.</summary>
         private static void ValidateStockLinks(EconomyDocument d)
         {

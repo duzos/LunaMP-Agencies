@@ -69,8 +69,17 @@ namespace LmpClient.Systems.Agency
         /// <summary>The StockDesign delivery (bought-stock craft file) for a fingerprint, or null.</summary>
         public static ReceivedTradeDesign StockDesignFor(string fingerprint)
         {
-            throw new NotImplementedException("StockDesignFor is implemented by plan 40 slice S3.");
+            if (string.IsNullOrEmpty(fingerprint)) return null;
+            ReceivedTradeDesign found;
+            // A saved craft file wins over one that could not be written; among equals the first delivery is stable.
+            lock (gate) found = deliveries.Values.Where(d => d.Kind == TradeEntitlementKind.StockDesign && d.Fingerprint == fingerprint && entitlements.Any(e => e.EntitlementId == d.Id))
+                .OrderByDescending(d => d.Delivered).ThenBy(d => d.Id).Select(Copy).FirstOrDefault();
+            if (found != null) found.StockUnits = ToolingClient.StockUnits(fingerprint);
+            return found;
         }
+        private static ReceivedTradeDesign Copy(ReceivedTradeDesign d) => new ReceivedTradeDesign {Id=d.Id,SellerAgencyId=d.SellerAgencyId,VesselId=d.VesselId,
+            Name=d.Name,Editor=d.Editor,Fingerprint=d.Fingerprint,DeliveryStatus=d.DeliveryStatus,LocalPath=d.LocalPath,Delivered=d.Delivered,
+            Kind=d.Kind,Redeemed=d.Redeemed,Reserved=d.Reserved,PrepaidFunds=d.PrepaidFunds,StockUnits=d.StockUnits};
         public static TradeEntitlement VoucherById(Guid id)
         {
             lock (gate) return entitlements.FirstOrDefault(e => e.EntitlementId == id);
@@ -113,24 +122,33 @@ namespace LmpClient.Systems.Agency
                 VesselId=o.VesselId, Revision=o.Revision, ExpiresUtcTicks=o.ExpiresUtcTicks, Status=o.Status, SellerFunds=o.SellerFunds,
                 SellerScience=o.SellerScience, BuyerFunds=o.BuyerFunds, BuyerScience=o.BuyerScience, DesignFingerprint=o.DesignFingerprint,
                 BlueprintName=o.BlueprintName, Editor=o.Editor, VesselName=o.VesselName, DesignMode=o.DesignMode, PrepaidLaunchFunds=o.PrepaidLaunchFunds,
-                LaunchMultiplier=o.LaunchMultiplier }).ToArray();
+                LaunchMultiplier=o.LaunchMultiplier, StockUnits=o.StockUnits, StockPrepaidTotal=o.StockPrepaidTotal }).ToArray();
         }
         public static IReadOnlyList<ReceivedTradeDesign> GetReceivedDesignsSnapshot()
         {
             // Voucher state changes without a new delivery, so it is read from the live entitlement, not the cached delivery view.
-            lock (gate) return deliveries.Values.Select(d =>
+            ReceivedTradeDesign[] views;
+            lock (gate) views = deliveries.Values.Select(d =>
             {
                 var live = entitlements.FirstOrDefault(e => e.EntitlementId == d.Id);
                 return new ReceivedTradeDesign {Id=d.Id,SellerAgencyId=d.SellerAgencyId,VesselId=d.VesselId,
                     Name=d.Name,Editor=d.Editor,Fingerprint=d.Fingerprint,DeliveryStatus=d.DeliveryStatus,LocalPath=d.LocalPath,Delivered=d.Delivered,
                     Kind=live?.Kind??d.Kind,Redeemed=live?.Redeemed??d.Redeemed,Reserved=live!=null && live.LaunchId!=Guid.Empty,PrepaidFunds=live?.PrepaidFunds??d.PrepaidFunds};
             }).ToArray();
+            // Held units come from ToolingClient's lock, which is never taken while holding this one (ToolingClient.Tick takes them in the other order).
+            foreach (var view in views) view.StockUnits = ToolingClient.StockUnits(view.Fingerprint);
+            return views;
         }
+        /// <summary>
+        /// Whether purchased rights or held stock unlock this exact part list. Stock is checked by ToolingClient and does not need trade to be on,
+        /// so a server that turns trade off never strands paid-for units. StockDesign entitlements never count by themselves.
+        /// </summary>
+        internal static bool HasEntitlement(ToolingManifest manifest) => HasTradeEntitlement(manifest) || ToolingClient.HasStockResearch(manifest);
         /// <summary>
         /// Whether purchased rights unlock this exact part list. Permanent allowances always count. A free-launch voucher counts only
         /// when it will really be applied: tooling on, toggle on, and either selected for the launch in progress or the one the next launch would use.
         /// </summary>
-        internal static bool HasEntitlement(ToolingManifest manifest)
+        private static bool HasTradeEntitlement(ToolingManifest manifest)
         {
             if (!Ready) return false;
             string fingerprint;
@@ -189,6 +207,19 @@ namespace LmpClient.Systems.Agency
         {
             if (draft == null) throw new ArgumentNullException(nameof(draft));
             if (draft.OfferId == Guid.Empty) draft.OfferId = Guid.NewGuid();
+            if (draft.DesignMode == TradeDesignMode.Stock)
+            {
+                // No research guard: the seller holds the units. The craft file only has to match the stocked design.
+                if (!ToolingClient.Enabled) { LatestStatus = "Stock offers need agency tooling."; return Guid.Empty; }
+                if (manifest == null || string.IsNullOrEmpty(draft.DesignFingerprint)) { LatestStatus = "Choose the craft file of the stock to sell."; return Guid.Empty; }
+                string fingerprint;
+                try { fingerprint = ToolingPolicy.Fingerprint(manifest); }
+                catch (ArgumentException) { LatestStatus = "The chosen craft is not a valid design."; return Guid.Empty; }
+                if (fingerprint != draft.DesignFingerprint) { LatestStatus = "The chosen craft does not match the stock design."; return Guid.Empty; }
+                var available = ToolingClient.AvailableStockUnits(fingerprint);
+                if (draft.StockUnits < 1 || draft.StockUnits > available) { LatestStatus = "Sell between 1 and " + available + " units of this design."; return Guid.Empty; }
+                return Send(EconomyOperation.TradeCreate, draft);
+            }
             if (draft.DesignMode == TradeDesignMode.SingleLaunch)
             {
                 // Consistent with the other client-side research checks: the seller must be able to launch the design themselves.
@@ -207,7 +238,7 @@ namespace LmpClient.Systems.Agency
             var copy=new TradeCommand {OfferId=command.OfferId,BuyerAgencyId=command.BuyerAgencyId,VesselId=command.VesselId,EntitlementId=command.EntitlementId,
                 ExpectedRevision=command.ExpectedRevision,SellerFunds=command.SellerFunds,SellerScience=command.SellerScience,BuyerFunds=command.BuyerFunds,
                 BuyerScience=command.BuyerScience,DesignFingerprint=command.DesignFingerprint,BlueprintName=command.BlueprintName,Editor=command.Editor,
-                DesignMode=command.DesignMode,
+                DesignMode=command.DesignMode,StockUnits=command.StockUnits,
                 BlueprintData=command.BlueprintData==null?Array.Empty<byte>():(byte[])command.BlueprintData.Clone()};
             return ToolingClient.Send(new EconomyCommand {Operation=operation,Trade=copy,Manifest=manifest,ManifestHash=manifest==null?null:ToolingPolicy.ManifestHash(manifest)});
         }
@@ -238,34 +269,30 @@ namespace LmpClient.Systems.Agency
             lock(gate)
                 if(deliveries.TryGetValue(item.EntitlementId,out var saved) && saved.Delivered && (item.Delivered || acknowledged.Contains(item.EntitlementId))) return;
             var view = new ReceivedTradeDesign {Id=item.EntitlementId,SellerAgencyId=item.SellerAgencyId,VesselId=item.VesselId,Name=item.BlueprintName,
-                Editor=item.Editor,Fingerprint=item.Fingerprint,DeliveryStatus=item.Kind==TradeEntitlementKind.SingleLaunch?"Free launch voucher":"Purchased vessel allowance",
+                Editor=item.Editor,Fingerprint=item.Fingerprint,DeliveryStatus=item.Kind==TradeEntitlementKind.SingleLaunch?"Free launch voucher":item.Kind==TradeEntitlementKind.StockDesign?"Stock design (craft file)":"Purchased vessel allowance",
                 Kind=item.Kind,Redeemed=item.Redeemed,PrepaidFunds=item.PrepaidFunds};
+            var stem="Trade-"+CraftFileName(item.BlueprintName,"Purchased craft")+"-"+item.EntitlementId.ToString("N");
+            var alternate="Trade-"+item.EntitlementId.ToString("N")+"-"+item.BlueprintHash;
             try
             {
-                if (item.BlueprintData == null || item.BlueprintData.Length == 0) {lock(gate) deliveries[item.EntitlementId]=view; return;}
+                if (item.BlueprintData == null || item.BlueprintData.Length == 0)
+                {
+                    // The server clears a delivered StockDesign's bytes and keeps the hash; the craft is the file this client already saved.
+                    if (item.Kind==TradeEntitlementKind.StockDesign && item.Delivered)
+                    {
+                        var existing=FindCraftFile(item.Editor,stem,alternate,item.BlueprintHash);
+                        if(existing!=null) {view.LocalPath=existing;view.Delivered=true;view.DeliveryStatus="Saved to "+item.Editor+" craft library";}
+                        else view.DeliveryStatus="Craft file missing from your library";
+                    }
+                    lock(gate) deliveries[item.EntitlementId]=view;
+                    return;
+                }
                 if (item.BlueprintData.Length > TradeLimits.MaxBlueprintBytes || Hash(item.BlueprintData)!=item.BlueprintHash || (item.Editor!="VAB" && item.Editor!="SPH"))
                     throw new InvalidOperationException("Received blueprint failed validation.");
                 var node=ConfigNode.Parse(Encoding.UTF8.GetString(item.BlueprintData));
                 if (ToolingPolicy.Fingerprint(ToolingManifestBuilder.FromConfig(node,null))!=item.Fingerprint) throw new InvalidOperationException("Received blueprint parts do not match its license.");
-                var saveRoot=Path.GetFullPath(Path.Combine(KSPUtil.ApplicationRootPath,"saves"));
-                var directory=Path.GetFullPath(Path.Combine(saveRoot,HighLogic.SaveFolder,"Ships",item.Editor));
-                if (!directory.StartsWith(saveRoot+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)) throw new IOException("Invalid save directory.");
-                for(var current=new DirectoryInfo(directory);current!=null && current.FullName.Length>=saveRoot.Length;current=current.Parent)
-                    if(current.Exists && (current.Attributes&FileAttributes.ReparsePoint)!=0) throw new IOException("Linked blueprint directories are unsupported.");
-                Directory.CreateDirectory(directory);
-                var name=new string((item.BlueprintName??"Purchased craft").Where(c=>!Path.GetInvalidFileNameChars().Contains(c) && !char.IsControl(c)).Take(60).ToArray()).Trim().TrimEnd('.');
-                if(string.IsNullOrEmpty(name)) name="Purchased craft";
-                var path=Path.Combine(directory,"Trade-"+name+"-"+item.EntitlementId.ToString("N")+".craft");
-                if(File.Exists(path) && Hash(File.ReadAllBytes(path))!=item.BlueprintHash)
-                    path=Path.Combine(directory,"Trade-"+item.EntitlementId.ToString("N")+"-"+item.BlueprintHash+".craft");
-                if(File.Exists(path)) {if(Hash(File.ReadAllBytes(path))!=item.BlueprintHash) throw new IOException("Blueprint destination contains different data.");}
-                else
-                {
-                    var temporary=path+"."+Guid.NewGuid().ToString("N")+".tmp";
-                    try {using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)) {stream.Write(item.BlueprintData,0,item.BlueprintData.Length);stream.Flush(true);} File.Move(temporary,path);}
-                    finally {if(File.Exists(temporary)) File.Delete(temporary);}
-                }
-                view.LocalPath=path; view.Delivered=true; view.DeliveryStatus="Saved to "+item.Editor+" craft library";
+                view.LocalPath=WriteCraftFile(item.Editor,stem,alternate,item.BlueprintData,item.BlueprintHash);
+                view.Delivered=true; view.DeliveryStatus="Saved to "+item.Editor+" craft library";
                 if(!item.Delivered && acknowledged.Add(item.EntitlementId)) Send(EconomyOperation.TradeDelivered,new TradeCommand {EntitlementId=item.EntitlementId});
             }
             catch(Exception e) {view.DeliveryStatus="Could not save: "+e.Message;LatestStatus=view.DeliveryStatus;}
@@ -275,6 +302,55 @@ namespace LmpClient.Systems.Agency
                 Diagnostics.PlaytestDiagnostics.Write("client.trade.delivery",()=> $"entitlement={item.EntitlementId} saved={view.Delivered} outcome={view.DeliveryStatus}");
             }
             lock(gate) deliveries[item.EntitlementId]=view;
+        }
+        /// <summary>A craft file name part: invalid and control characters removed, at most 60 characters, never empty.</summary>
+        internal static string CraftFileName(string name, string fallback)
+        {
+            var clean=new string((name??fallback).Where(c=>!Path.GetInvalidFileNameChars().Contains(c) && !char.IsControl(c)).Take(60).ToArray()).Trim().TrimEnd('.');
+            return string.IsNullOrEmpty(clean)?fallback:clean;
+        }
+        /// <summary>The current save's Ships/&lt;editor&gt; directory, refusing anything outside saves/ or reached through a link.</summary>
+        private static string CraftDirectory(string editor)
+        {
+            if (editor!="VAB" && editor!="SPH") throw new InvalidOperationException("Choose a valid VAB or SPH craft.");
+            var saveRoot=Path.GetFullPath(Path.Combine(KSPUtil.ApplicationRootPath,"saves"));
+            var directory=Path.GetFullPath(Path.Combine(saveRoot,HighLogic.SaveFolder,"Ships",editor));
+            if (!directory.StartsWith(saveRoot+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)) throw new IOException("Invalid save directory.");
+            for(var current=new DirectoryInfo(directory);current!=null && current.FullName.Length>=saveRoot.Length;current=current.Parent)
+                if(current.Exists && (current.Attributes&FileAttributes.ReparsePoint)!=0) throw new IOException("Linked blueprint directories are unsupported.");
+            return directory;
+        }
+        /// <summary>
+        /// Writes craft bytes to Ships/&lt;editor&gt;/&lt;fileStem&gt;.craft, reusing a file that already holds the same bytes. When that name holds different
+        /// bytes, &lt;alternateStem&gt;.craft is used instead; if that also differs the write is refused. New files are written to a temporary file and moved.
+        /// </summary>
+        internal static string WriteCraftFile(string editor, string fileStem, string alternateStem, byte[] bytes, string hash)
+        {
+            if (bytes==null || bytes.Length==0 || bytes.Length>TradeLimits.MaxBlueprintBytes || Hash(bytes)!=hash) throw new InvalidOperationException("Blueprint failed validation.");
+            var directory=CraftDirectory(editor);
+            Directory.CreateDirectory(directory);
+            var path=Path.Combine(directory,fileStem+".craft");
+            if(File.Exists(path) && Hash(File.ReadAllBytes(path))!=hash) path=Path.Combine(directory,alternateStem+".craft");
+            if(File.Exists(path)) {if(Hash(File.ReadAllBytes(path))!=hash) throw new IOException("Blueprint destination contains different data.");}
+            else
+            {
+                var temporary=path+"."+Guid.NewGuid().ToString("N")+".tmp";
+                try {using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)) {stream.Write(bytes,0,bytes.Length);stream.Flush(true);} File.Move(temporary,path);}
+                finally {if(File.Exists(temporary)) File.Delete(temporary);}
+            }
+            return path;
+        }
+        /// <summary>The existing craft file under either name whose bytes hash to <paramref name="hash"/>, or null.</summary>
+        private static string FindCraftFile(string editor, string fileStem, string alternateStem, string hash)
+        {
+            if (string.IsNullOrEmpty(hash)) return null;
+            var directory=CraftDirectory(editor);
+            foreach(var stem in new[]{fileStem,alternateStem})
+            {
+                var path=Path.Combine(directory,stem+".craft");
+                if(File.Exists(path) && (File.GetAttributes(path)&FileAttributes.ReparsePoint)==0 && Hash(File.ReadAllBytes(path))==hash) return path;
+            }
+            return null;
         }
         public static bool LoadDesign(Guid id, bool confirmedReplace)
         {
@@ -296,23 +372,28 @@ namespace LmpClient.Systems.Agency
         {
             var fingerprint=ToolingPolicy.Fingerprint(manifest);
             // A permanent allowance is always valid. Otherwise claim the voucher this launch reserved, which the server accepts for this launch only.
+            // Last, the stock lot this launch reserved: the server accepts that LotId for the Prepared launch holding it, with or without trade.
             var voucher=ToolingClient.PendingVoucher;
+            var stockLot=ToolingClient.PendingStockLot;
+            var stockFingerprint=ToolingClient.PendingStockFingerprint;
             lock(gate)
             {
-                launchEntitlement=entitlements.FirstOrDefault(e=>e.Kind==TradeEntitlementKind.Permanent && e.Fingerprint==fingerprint)?.EntitlementId
+                // Trade rights are only claimed while trade is on; the server refuses them otherwise.
+                launchEntitlement=!Enabled?Guid.Empty:entitlements.FirstOrDefault(e=>e.Kind==TradeEntitlementKind.Permanent && e.Fingerprint==fingerprint)?.EntitlementId
                     ??(voucher==Guid.Empty?Guid.Empty:entitlements.FirstOrDefault(e=>e.EntitlementId==voucher && e.Kind==TradeEntitlementKind.SingleLaunch && e.Fingerprint==fingerprint)?.EntitlementId)??Guid.Empty;
+                if(launchEntitlement==Guid.Empty && stockLot!=Guid.Empty && stockFingerprint==fingerprint) launchEntitlement=stockLot;
                 return launchEntitlement;
             }
         }
         internal static void BindLaunch(Vessel vessel, ShipConstruct ship)
         {
-            if(!Enabled || !vessel) return;
+            if(!Enabled && !ToolingClient.Enabled || !vessel) return;
             lock(gate) {if(launchEntitlement!=Guid.Empty) vesselEntitlements[vessel.id]=launchEntitlement;launchEntitlement=Guid.Empty;}
         }
         internal static void Registered(Guid vessel) {lock(gate) vesselEntitlements.Remove(vessel);}
         internal static void FillLaunchTail(Guid vessel, LmpCommon.Message.Data.Vessel.VesselProtoMsgData data)
         {
-            lock(gate) data.TradeEntitlementId=Enabled && vesselEntitlements.TryGetValue(vessel,out var id)?id:Guid.Empty;
+            lock(gate) data.TradeEntitlementId=(Enabled || ToolingClient.Enabled) && vesselEntitlements.TryGetValue(vessel,out var id)?id:Guid.Empty;
         }
         internal static void Clear()
         {

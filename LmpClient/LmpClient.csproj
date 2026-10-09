@@ -536,6 +536,15 @@
     <Compile Include="Systems\Agency\KkLaunchSiteIntegration.cs" />
     <Compile Include="Systems\Agency\AgencyIdentityClient.cs" />
     <Compile Include="Windows\Agency\AgencyIdentityDrawer.cs" />
+    <Compile Include="Systems\Agency\AgencyPresentation.cs" />
+    <Compile Include="Windows\Agency\AgencyBadge.cs" />
+    <Compile Include="Harmony\AgencyPresentationPatches.cs" />
+    <Compile Include="Harmony\AgencyMapPresentation.cs" />
+    <Compile Include="Windows\Agency\TrackingWidgetDecoration.cs" />
+    <Compile Include="Windows\Agency\AgencyNameplateOverlay.cs" />
+    <Compile Include="Windows\Agency\LaunchSiteFlagOverlay.cs" />
+    <Compile Include="Systems\Agency\LaunchSiteLocator.cs" />
+    <Compile Include="Harmony\AgencySiteCaption.cs" />
     <Compile Include="Systems\Agency\AgencySystem.cs" />
     <Compile Include="Systems\Agency\ControlObservation.cs" />
     <Compile Include="Systems\Agency\AgencyMessageSender.cs" />

@@ -52,6 +52,24 @@ namespace LmpClient.Systems.SettingsSys
         /// </summary>
         public bool VesselSyncDiagnosticsEnabled { get; set; } = true;
 
+        // Agency presentation (plan 41). All default on; each restores stock/LMP visuals when off.
+        /// <summary>Tint map, tracking-station and flight presentation of visible vessels with their agency colour.</summary>
+        public bool AgencyTintVessels { get; set; } = true;
+        /// <summary>Show the owning agency's flag beside vessel rows in the tracking-station list.</summary>
+        public bool AgencyTrackingListFlags { get; set; } = true;
+        /// <summary>Launch craft that still carry the default flag with your agency's flag.</summary>
+        public bool AgencyAutoCraftFlag { get; set; } = true;
+        /// <summary>Draw agency nameplates over visible rival craft in flight.</summary>
+        public bool AgencyNameplates { get; set; } = true;
+        /// <summary>Nameplate range in km (clamped 0.2 - 25).</summary>
+        public float AgencyNameplateRangeKm { get; set; } = 2.5f;
+        /// <summary>Show the assigned agency's flag over launch sites.</summary>
+        public bool AgencySiteFlags { get; set; } = true;
+        /// <summary>Show agency flags and colours in chat and the player list.</summary>
+        public bool AgencyChatPlayerList { get; set; } = true;
+        /// <summary>Show agency flags in the agency window (leaderboards, trade offers, bought designs).</summary>
+        public bool AgencyWindowFlags { get; set; } = true;
+
         /*
          * You can use this debug switches for testing purposes.
          * For example do one part or the code or another in case the debugX is on/off

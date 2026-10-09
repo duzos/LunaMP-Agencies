@@ -12,7 +12,9 @@ namespace LmpClient.Systems.Agency
         private static readonly object Gate = new object();
         private static readonly Dictionary<Guid, AgencyIdentityInfo> Identities = new Dictionary<Guid, AgencyIdentityInfo>();
         private static readonly HashSet<Guid> Deleted = new HashSet<Guid>();
-        private static int supported, refresh;
+        private static int supported, refresh, version;
+        // Bumped on every identity change so main-thread presentation caches (AgencyPresentation) know to rebuild.
+        internal static int Version => Volatile.Read(ref version);
         internal static bool Supported => Volatile.Read(ref supported) == 1;
         internal static void BeginSession()
         {
@@ -52,6 +54,7 @@ namespace LmpClient.Systems.Agency
         {
             lock (Gate) { Volatile.Write(ref supported, 0); Identities.Clear(); Deleted.Clear(); }
             RequestRefresh();
+            AgencyPresentation.Clear();
         }
         internal static bool TryColour(Guid id, out Color colour)
         {
@@ -59,7 +62,11 @@ namespace LmpClient.Systems.Agency
             colour = new Color32(value.Red, value.Green, value.Blue, 255);
             return value.HasColour;
         }
-        internal static void RequestRefresh() => Interlocked.Exchange(ref refresh, 1);
+        internal static void RequestRefresh()
+        {
+            Interlocked.Increment(ref version);
+            Interlocked.Exchange(ref refresh, 1);
+        }
         // Called by the agency system's Unity Update routine, never the network handler.
         internal static void Update()
         {

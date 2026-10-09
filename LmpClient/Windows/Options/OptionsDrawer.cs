@@ -1,11 +1,13 @@
 ﻿using Lidgren.Network;
 using LmpClient.Localization;
 using LmpClient.Network;
+using LmpClient.Systems.Agency;
 using LmpClient.Systems.Mod;
 using LmpClient.Systems.PlayerColorSys;
 using LmpClient.Systems.SettingsSys;
 using LmpClient.Utilities;
 using LmpClient.Windows.Status;
+using LmpCommon.Agency;
 using LmpCommon.Enums;
 using LmpCommon.Time;
 using System;
@@ -83,6 +85,7 @@ namespace LmpClient.Windows.Options
 
             DrawGeneralSettings();
             DrawNetworkSettings();
+            DrawAgencyDisplaySettings();
             var verboseDiagnostics = GUILayout.Toggle(SettingsSystem.CurrentSettings.VerboseDiagnostics, "Verbose diagnostics");
             if (verboseDiagnostics != SettingsSystem.CurrentSettings.VerboseDiagnostics)
             {
@@ -96,6 +99,49 @@ namespace LmpClient.Windows.Options
 #endif
             GUILayout.FlexibleSpace();
             GUILayout.EndVertical();
+        }
+
+        private static bool _showAgencyDisplaySettings;
+        private static bool _nameplateRangeDirty;
+        private static float _nameplateRangeSaved = float.NaN;
+
+        // Plan 41: per-feature agency presentation toggles, all applied live without a restart.
+        private static void DrawAgencyDisplaySettings()
+        {
+            _showAgencyDisplaySettings = GUILayout.Toggle(_showAgencyDisplaySettings, "Agency flags and colours", ToggleButtonStyle);
+            if (!_showAgencyDisplaySettings) return;
+            var settings = SettingsSystem.CurrentSettings;
+            var changed = false;
+            var refresh = false;
+
+            var tint = GUILayout.Toggle(settings.AgencyTintVessels, "Tint vessels with agency colour");
+            if (tint != settings.AgencyTintVessels) { settings.AgencyTintVessels = tint; changed = refresh = true; }
+            var trackingFlags = GUILayout.Toggle(settings.AgencyTrackingListFlags, "Agency flags in tracking station list");
+            if (trackingFlags != settings.AgencyTrackingListFlags) { settings.AgencyTrackingListFlags = trackingFlags; changed = refresh = true; }
+            var autoFlag = GUILayout.Toggle(settings.AgencyAutoCraftFlag, "Launch default-flag craft with agency flag");
+            if (autoFlag != settings.AgencyAutoCraftFlag) { settings.AgencyAutoCraftFlag = autoFlag; changed = true; }
+            var nameplates = GUILayout.Toggle(settings.AgencyNameplates, "Agency nameplates over rival craft");
+            if (nameplates != settings.AgencyNameplates) { settings.AgencyNameplates = nameplates; changed = true; }
+
+            var range = AgencyPresentationPolicy.ClampNameplateRangeKm(settings.AgencyNameplateRangeKm);
+            if (float.IsNaN(_nameplateRangeSaved)) _nameplateRangeSaved = range;
+            GUILayout.Label("Nameplate range: " + range.ToString("0.0") + " km");
+            var slider = (float)Math.Round(GUILayout.HorizontalSlider(range, AgencyPresentationPolicy.MinNameplateRangeKm, AgencyPresentationPolicy.MaxNameplateRangeKm), 1);
+            slider = AgencyPresentationPolicy.ClampNameplateRangeKm(slider);
+            if (Math.Abs(slider - settings.AgencyNameplateRangeKm) > 0.0001f) { settings.AgencyNameplateRangeKm = slider; _nameplateRangeDirty = true; }
+            // Save on release (no control held) or after a large move, never every frame while dragging.
+            if (_nameplateRangeDirty && (GUIUtility.hotControl == 0 || Math.Abs(settings.AgencyNameplateRangeKm - _nameplateRangeSaved) >= 5f))
+            { _nameplateRangeDirty = false; _nameplateRangeSaved = settings.AgencyNameplateRangeKm; changed = true; }
+
+            var siteFlags = GUILayout.Toggle(settings.AgencySiteFlags, "Agency flags over launch sites");
+            if (siteFlags != settings.AgencySiteFlags) { settings.AgencySiteFlags = siteFlags; changed = true; }
+            var chat = GUILayout.Toggle(settings.AgencyChatPlayerList, "Agency flags in chat and player list");
+            if (chat != settings.AgencyChatPlayerList) { settings.AgencyChatPlayerList = chat; changed = true; }
+            var window = GUILayout.Toggle(settings.AgencyWindowFlags, "Agency flags in agency window");
+            if (window != settings.AgencyWindowFlags) { settings.AgencyWindowFlags = window; changed = true; }
+
+            if (changed) SettingsSystem.SaveSettings();
+            if (refresh) AgencyIdentityClient.RequestRefresh();
         }
 
         private static void DrawGeneralSettings()

@@ -63,6 +63,7 @@ namespace LmpClient.Base
             AgencyCostDisplay.Install(HarmonyInstance);
             AgencyTradeResearch.Install(HarmonyInstance);
             AgencyVisibility.Install(HarmonyInstance);
+            AgencyPresentationPatches.Install(HarmonyInstance);
             SuppressClickThroughBlockerPopup();
             PatchContractPreLoader();
         }

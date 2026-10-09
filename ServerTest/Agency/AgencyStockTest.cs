@@ -692,6 +692,26 @@ namespace ServerTest.Agency
             }
         }
 
+        [TestMethod]
+        public void ServerChargeForASandboxBuiltLotEqualsTheSharedEffectiveLaunchCharge()
+        {
+            using (var f = Start())
+            {
+                GeneralSettings.SettingsStore.GameMode = GameMode.Sandbox;
+                Assert.IsTrue(Build(f, 100).Success);
+                GeneralSettings.SettingsStore.GameMode = GameMode.Career;
+                var lot = Lots(f).Single();
+                var rates = AgencyEconomyTest.Fixture.SettingsRates();
+                var standard = ToolingPolicy.Quote(Probe(Kit()), new[] { new ToolingDesign { Fingerprint = ProbeFingerprint, Manifest = Probe() } }, rates);
+                var expected = StockPolicy.EffectiveLaunchCharge(standard, lot, true, rates.TooledLaunch, out var multiplier);
+                Assert.IsNull(StockPolicy.SelectLot(new[] { lot }, standard, true, rates.TooledLaunch), "The client never offers a lot with no Career benefit.");
+                var prepared = Prepare(f.Economy.Execute, Probe(Kit()), lot.LotId, out _);
+                Assert.IsTrue(prepared.Success, prepared.Reason);
+                Assert.AreEqual(expected, prepared.Quote.LaunchCost, 1e-9);
+                Assert.AreEqual(rates.TooledLaunch, multiplier, 1e-12);
+            }
+        }
+
         private static JObject Written() => JObject.Parse(File.ReadAllText(AgencyEconomyStore.FilePath));
 
         [TestMethod]

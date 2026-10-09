@@ -16,7 +16,7 @@ Enable [playtest diagnostics](PlaytestDiagnostics.md) for later troubleshooting.
 
 Choose **Sell stock** as the design mode of a new offer (Trade tab, or **Sell...** on a design in the Designs tab). Enter how many units to sell and attach the craft file. This needs `AgencyTooling` as well as `AgencyTrade`, and you must hold the units; the mode is disabled with "Build stock in the Designs tab first" when you have none. Only the agency owner can sell.
 
-- **Escrow.** The units leave your stock when the offer is created and are held for the offer. They return to you if the offer is declined, withdrawn, expires or becomes invalid. On accept they move to the buyer along with any funds or science in the offer.
+- **Escrow.** The units leave your stock when the offer is created and are held for the offer. They return to you if the offer is declined, withdrawn, expires or becomes invalid. If trade is turned off, stock offers cannot be withdrawn from the client; the escrow returns automatically when the offer expires (24 hours). On accept they move to the buyer along with any funds or science in the offer.
 - **No tooling transfer.** You keep your tooling. The buyer gets the units and the craft file (under **Received designs**), not a tooling license, and cannot build more of it.
 - **Buyer launches free until empty.** Each launch of that exact design uses one unit. The buyer pays only for inventory, extra fuel and science, the same top-up as the owner. Stock lets the buyer launch parts they have not researched, but only for those launches. When the units run out the buyer must buy more or pay normal prices.
 - **Terms travel with the units.** Units keep the price they were built at, so trading never creates funds and recovery stays bounded by what was paid.

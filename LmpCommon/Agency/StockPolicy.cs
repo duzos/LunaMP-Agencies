@@ -146,10 +146,27 @@ namespace LmpCommon.Agency
         }
 
         /// <summary>
+        /// What launching one unit of <paramref name="lot"/> really charges, and the multiplier it applies. A lot built in Sandbox (not funds-built)
+        /// prepaid nothing, so when funds are in use it pays the normal tooled rate and never the stock discount. Shared by the server charge and the
+        /// client's lot selection and price so they cannot diverge.
+        /// </summary>
+        public static double EffectiveLaunchCharge(ToolingQuote launch, DesignStockLot lot, bool usesFunds, double tooledRate, out double multiplier)
+        {
+            if (lot == null) throw new ArgumentException("A stock lot is required.");
+            if (usesFunds && !lot.FundsBuilt)
+            {
+                multiplier = tooledRate;
+                return TradePolicy.VoucherLaunchCharge(launch, 0, tooledRate);
+            }
+            multiplier = lot.LaunchMultiplier;
+            return LaunchCharge(launch, lot);
+        }
+
+        /// <summary>
         /// The lot a launch of this quoted design would use: lowest charge, then oldest, then lowest LotId. In Career a lot is only taken when it
         /// costs less than the normal launch, so stock is never burned for no benefit. Outside Career any matching lot qualifies.
         /// </summary>
-        public static DesignStockLot SelectLot(IEnumerable<DesignStockLot> lots, ToolingQuote launch, bool usesFunds)
+        public static DesignStockLot SelectLot(IEnumerable<DesignStockLot> lots, ToolingQuote launch, bool usesFunds, double tooledRate)
         {
             if (lots == null || launch == null || !launch.Success) return null;
             DesignStockLot best = null; var bestCharge = 0.0;
@@ -157,7 +174,7 @@ namespace LmpCommon.Agency
             {
                 if (lot == null || lot.Units <= 0 || !string.Equals(lot.Fingerprint, launch.Fingerprint, StringComparison.Ordinal)) continue;
                 double charge;
-                try { charge = LaunchCharge(launch, lot); }
+                try { charge = EffectiveLaunchCharge(launch, lot, usesFunds, tooledRate, out _); }
                 catch (ArgumentException) { continue; }
                 if (usesFunds && !(charge < launch.LaunchCost)) continue;
                 if (best == null || charge < bestCharge || charge == bestCharge && (lot.CreatedUtcTicks < best.CreatedUtcTicks || lot.CreatedUtcTicks == best.CreatedUtcTicks && lot.LotId.CompareTo(best.LotId) < 0))

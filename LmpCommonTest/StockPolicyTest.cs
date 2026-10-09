@@ -172,29 +172,48 @@ namespace LmpCommonTest
             var cheapNew = Lot(2, 335, .07, ticks: 50);
             var cheapOld = Lot(2, 335, .07, ticks: 10);
             var dearer = Lot(2, 300, .07, ticks: 1);
-            Assert.AreSame(cheapOld, StockPolicy.SelectLot(new[] { dearer, cheapNew, cheapOld }, launch, true));
+            Assert.AreSame(cheapOld, StockPolicy.SelectLot(new[] { dearer, cheapNew, cheapOld }, launch, true, ToolingRates.Default.TooledLaunch));
 
             var a = Lot(1, 335, .07, ticks: 5); var b = Lot(1, 335, .07, ticks: 5);
             var lower = a.LotId.CompareTo(b.LotId) < 0 ? a : b;
-            Assert.AreSame(lower, StockPolicy.SelectLot(new[] { a, b }, launch, true));
-            Assert.AreSame(lower, StockPolicy.SelectLot(new[] { b, a }, launch, true));
+            Assert.AreSame(lower, StockPolicy.SelectLot(new[] { a, b }, launch, true, ToolingRates.Default.TooledLaunch));
+            Assert.AreSame(lower, StockPolicy.SelectLot(new[] { b, a }, launch, true, ToolingRates.Default.TooledLaunch));
         }
 
         [TestMethod]
         public void SelectLotSkipsEmptyAndOtherDesignLotsAndInCareerOnlyTakesACheaperLot()
         {
             var launch = Launch();
-            Assert.IsNull(StockPolicy.SelectLot(new[] { Lot(0, 335, .07), Lot(3, 335, .07, fingerprint: "other") }, launch, true));
-            Assert.IsNull(StockPolicy.SelectLot(null, launch, true));
-            Assert.IsNull(StockPolicy.SelectLot(new[] { Lot(1, 335, .07) }, new ToolingQuote { Success = false }, true));
+            Assert.IsNull(StockPolicy.SelectLot(new[] { Lot(0, 335, .07), Lot(3, 335, .07, fingerprint: "other") }, launch, true, ToolingRates.Default.TooledLaunch));
+            Assert.IsNull(StockPolicy.SelectLot(null, launch, true, ToolingRates.Default.TooledLaunch));
+            Assert.IsNull(StockPolicy.SelectLot(new[] { Lot(1, 335, .07) }, new ToolingQuote { Success = false }, true, ToolingRates.Default.TooledLaunch));
 
             // Unprepaid at the full tooled rate costs exactly the normal launch (375): never burned in Career, fine elsewhere.
             var noBenefit = Lot(1, 0, .1, fundsBuilt: false);
-            Assert.IsNull(StockPolicy.SelectLot(new[] { noBenefit }, launch, true));
-            Assert.AreSame(noBenefit, StockPolicy.SelectLot(new[] { noBenefit }, launch, false));
-            // Sandbox-built at the discounted rate is still cheaper in Career (360 < 375).
+            Assert.IsNull(StockPolicy.SelectLot(new[] { noBenefit }, launch, true, ToolingRates.Default.TooledLaunch));
+            Assert.AreSame(noBenefit, StockPolicy.SelectLot(new[] { noBenefit }, launch, false, ToolingRates.Default.TooledLaunch));
+            // Sandbox-built lots prepaid nothing: Career charges them the normal tooled rate, so the discounted multiplier is never shown or taken.
             var sandbox = Lot(1, 0, .07, fundsBuilt: false);
-            Assert.AreSame(sandbox, StockPolicy.SelectLot(new[] { sandbox }, launch, true));
+            Assert.IsNull(StockPolicy.SelectLot(new[] { sandbox }, launch, true, ToolingRates.Default.TooledLaunch));
+            Assert.AreSame(sandbox, StockPolicy.SelectLot(new[] { sandbox }, launch, false, ToolingRates.Default.TooledLaunch));
+            var funded = Lot(1, 335, .07);
+            Assert.AreSame(funded, StockPolicy.SelectLot(new[] { sandbox, funded }, launch, true, ToolingRates.Default.TooledLaunch));
+        }
+
+        [TestMethod]
+        public void EffectiveLaunchChargeIgnoresTheDiscountForSandboxBuiltLotsOnlyWhenFundsAreUsed()
+        {
+            var launch = Launch(); var tooled = ToolingRates.Default.TooledLaunch;
+            var sandbox = Lot(1, 0, .07, fundsBuilt: false);
+            double multiplier;
+            Assert.AreEqual(launch.LaunchCost, StockPolicy.EffectiveLaunchCharge(launch, sandbox, true, tooled, out multiplier), 1e-9);
+            Assert.AreEqual(tooled, multiplier, 1e-12);
+            Assert.AreEqual(StockPolicy.LaunchCharge(launch, sandbox), StockPolicy.EffectiveLaunchCharge(launch, sandbox, false, tooled, out multiplier), 1e-9);
+            Assert.AreEqual(.07, multiplier, 1e-12);
+            var funded = Lot(1, 335, .07);
+            Assert.AreEqual(25d, StockPolicy.EffectiveLaunchCharge(launch, funded, true, tooled, out multiplier), 1e-9);
+            Assert.AreEqual(.07, multiplier, 1e-12);
+            Assert.ThrowsException<ArgumentException>(() => StockPolicy.EffectiveLaunchCharge(launch, null, true, tooled, out _));
         }
 
         [TestMethod]

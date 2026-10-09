@@ -151,7 +151,7 @@ namespace LmpClient.Systems.Agency
             voucher = TradeClient.SelectVoucher(standard);
             if (voucher != null) return WithLaunchCost(standard, TradePolicy.VoucherLaunchCharge(standard, voucher.PrepaidFunds, voucher.LaunchMultiplier));
             stockLot = SelectStock(standard);
-            return stockLot == null ? standard : WithLaunchCost(standard, StockPolicy.LaunchCharge(standard, stockLot));
+            return stockLot == null ? standard : WithLaunchCost(standard, StockPolicy.EffectiveLaunchCharge(standard, stockLot, UsesFunds, Rates().TooledLaunch, out _));
         }
         private static ToolingQuote WithLaunchCost(ToolingQuote standard, double launchCost) => new ToolingQuote
         {
@@ -318,7 +318,7 @@ namespace LmpClient.Systems.Agency
             DesignStockLot[] lots;
             lock (stateLock) lots = (snapshot?.Stock ?? Array.Empty<DesignStockLot>()).Where(l => l != null).ToArray();
             if (StockLotSlots() >= StockDefaults.MaxLots) lots = lots.Where(l => l.Units == 1).ToArray();
-            return StockPolicy.SelectLot(lots, quote, UsesFunds);
+            return StockPolicy.SelectLot(lots, quote, UsesFunds, Rates().TooledLaunch);
         }
         /// <summary>
         /// True when held stock (or the pending stock launch) unlocks research for this exact part list. Needs only tooling and Use stock, not trade.

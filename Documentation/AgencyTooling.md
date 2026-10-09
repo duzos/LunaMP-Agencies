@@ -50,7 +50,7 @@ Stock keeps the terms it was built at. Changing `StockMaxDiscount` or `StockFull
 - 999 units held per design per agency. Units in open offers and in launches that can still be reverted count toward it.
 - 64 stock batches per agency. Batches built or bought on identical terms merge, so this rarely matters. Batches in open offers and prepared launches count too. If you hit it, launch or sell some stock first.
 - Saved craft: 512 KB each, 8 MB per agency, 256 MB per server.
-- Stock built in Sandbox or Science mode (no funds charged) carries no prepayment. It can be launched in Career at a reduced price but cannot be sold into Career (see [Agency trade](AgencyTrade.md)).
+- Stock built in Sandbox or Science mode (no funds charged) carries no prepayment. In Career it launches at the normal tooled rate (no stock discount) and cannot be sold into Career (see [Agency trade](AgencyTrade.md)).
 - Requires `AgencyTooling`. If tooling is turned off, existing stock is kept but cannot be built or launched.
 
 ### Server settings

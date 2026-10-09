@@ -91,17 +91,8 @@ namespace Server.Agency
         {
             var lot = agency.Stock.FirstOrDefault(l => l != null && l.LotId == command.StockLotId && l.Units > 0) ?? throw new InvalidOperationException("No stock left for this design.");
             if (lot.Fingerprint != quote.Fingerprint) throw new InvalidOperationException("Stock does not match this design.");
-            if (UsesFunds && !lot.FundsBuilt)
-            {
-                // Built in Sandbox (nothing prepaid): after a switch to Career it pays the normal tooled launch rate, never the stock discount.
-                launchMultiplier = Rates().TooledLaunch;
-                launchCharge = TradePolicy.VoucherLaunchCharge(quote, 0, launchMultiplier);
-            }
-            else
-            {
-                launchCharge = StockPolicy.LaunchCharge(quote, lot);
-                launchMultiplier = lot.LaunchMultiplier;
-            }
+            // Sandbox-built lots (nothing prepaid) pay the normal tooled rate in Career; shared with the client so the editor shows what is charged.
+            launchCharge = StockPolicy.EffectiveLaunchCharge(quote, lot, UsesFunds, Rates().TooledLaunch, out launchMultiplier);
             var terms = StockPolicy.TermsOf(lot);
             lot.Units -= 1;
             if (lot.Units == 0) agency.Stock.Remove(lot);

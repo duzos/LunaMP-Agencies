@@ -19,9 +19,11 @@ namespace LmpClient.Windows.Agency
     {
         private static readonly Dictionary<string, int> available = new Dictionary<string, int>();
         private static float nextRefresh;
-        private static int lotCount;
-        internal static int LotCount => lotCount;
-        internal static bool LotSlotsFull => lotCount >= StockDefaults.MaxLots;
+        private static bool slotsFull, buildPending;
+        /// <summary>ToolingClient.StockSlotsFull: stock rows plus escrow in open outgoing offers at the server's lot bound.</summary>
+        internal static bool LotSlotsFull { get { Refresh(); return slotsFull; } }
+        /// <summary>ToolingClient.BuildPending: a BuildStock request is waiting for its result (the client allows one at a time).</summary>
+        internal static bool BuildPending { get { Refresh(); return buildPending; } }
         internal static bool CanRefresh => Event.current == null || Event.current.type == EventType.Layout;
 
         /// <summary>Rebuilds the cache if it is due. Call at the start of any drawer that reads it. Returns true when it rebuilt.</summary>
@@ -31,24 +33,21 @@ namespace LmpClient.Windows.Agency
             if (!force && Time.realtimeSinceStartup < nextRefresh) return false;
             nextRefresh = Time.realtimeSinceStartup + 0.5f;
             available.Clear();
-            lotCount = 0;
+            slotsFull = buildPending = false;
             try
             {
                 var lots = ToolingClient.GetStockSnapshot();
                 if (lots != null)
-                    foreach (var lot in lots)
-                    {
-                        if (lot == null || string.IsNullOrEmpty(lot.Fingerprint) || lot.Units <= 0) continue;
-                        lotCount++;
-                        available.TryGetValue(lot.Fingerprint, out var units);
-                        available[lot.Fingerprint] = units + lot.Units;
-                    }
+                    foreach (var fingerprint in lots.Where(l => l != null && !string.IsNullOrEmpty(l.Fingerprint) && l.Units > 0).Select(l => l.Fingerprint).Distinct())
+                        available[fingerprint] = ToolingClient.AvailableStockUnits(fingerprint);
+                slotsFull = ToolingClient.StockSlotsFull;
+                buildPending = ToolingClient.BuildPending;
             }
-            catch (Exception) { available.Clear(); lotCount = 0; }
+            catch (Exception) { available.Clear(); slotsFull = buildPending = false; }
             return true;
         }
 
-        /// <summary>Available (sellable, launchable) units of a design in this agency's lots.</summary>
+        /// <summary>ToolingClient.AvailableStockUnits: units in this agency's own lots (sellable, launchable now). Excludes escrowed and launched units, unlike StockUnits.</summary>
         internal static int Available(string fingerprint)
         {
             Refresh();
@@ -120,12 +119,11 @@ namespace LmpClient.Windows.Agency
         private static string designsBuiltSearch;
         private static bool designsBuiltSort;
         private static string designsBuildConfirm, designsLoadConfirm, designsStatusFingerprint, designsStatus;
+        private static bool designsStatusIsLoad;
         private static int designsConfirmUnits;
         private static double designsConfirmTotal;
         private static Guid designsBoughtLoadConfirm;
         private static string designsPendingFingerprint;
-        private static int designsPendingHeld;
-        private static float designsPendingDeadline;
         private static StockRates designsRates = StockRates.Default;
         private static Vector2 designsScroll;
         private static GUIStyle designsText, designsHeading, designsButton;
@@ -293,9 +291,8 @@ namespace LmpClient.Windows.Agency
                 if (usesFunds && ToolingClient.TryConfirmedFunds(out var funds) && funds < quote.Total) { canBuild = false; blocked = "Not enough funds."; }
                 if (row.Held + quote.Units > StockDefaults.MaxHeldUnits) { canBuild = false; blocked = "Stock limit is " + StockDefaults.MaxHeldUnits + " units per design."; }
             }
-            var inFlight = designsPendingFingerprint == row.Fingerprint;
-            if (inFlight && (Time.realtimeSinceStartup > designsPendingDeadline || row.Held != designsPendingHeld)) { designsPendingFingerprint = null; inFlight = false; }
-            if (inFlight) { canBuild = false; blocked = "Building…"; }
+            if (!StockUi.BuildPending) designsPendingFingerprint = null;
+            else { canBuild = false; blocked = designsPendingFingerprint == row.Fingerprint ? "Building…" : "Another stock build is in progress."; }
             if (designsBuildConfirm == row.Fingerprint && (quote == null || !quote.Success || quote.Units != designsConfirmUnits || Math.Abs(quote.Total - designsConfirmTotal) > 1e-6)) designsBuildConfirm = null;
 
             var enabled = GUI.enabled;
@@ -318,7 +315,8 @@ namespace LmpClient.Windows.Agency
 
             DrawLoadControls(row);
             DrawSellControls(row);
-            if (designsStatusFingerprint == row.Fingerprint && !string.IsNullOrEmpty(designsStatus)) GUILayout.Label(designsStatus, designsText);
+            var status = DesignStatus(row);
+            if (!string.IsNullOrEmpty(status)) GUILayout.Label(status, designsText);
             GUILayout.EndVertical();
         }
 
@@ -328,16 +326,17 @@ namespace LmpClient.Windows.Agency
             try
             {
                 ToolingClient.BuildStock(row.Fingerprint, quote.Units, usesFunds ? quote.Total : 0);
-                designsPendingFingerprint = row.Fingerprint; designsPendingHeld = row.Held; designsPendingDeadline = Time.realtimeSinceStartup + 5f;
-                designsStatusFingerprint = row.Fingerprint; designsStatus = null;
+                designsPendingFingerprint = row.Fingerprint;
+                designsStatusFingerprint = row.Fingerprint; designsStatus = null; designsStatusIsLoad = false;
             }
-            catch (Exception e) { designsStatusFingerprint = row.Fingerprint; designsStatus = "Could not build: " + e.Message; }
+            catch (Exception e) { designsStatusFingerprint = row.Fingerprint; designsStatus = "Could not build: " + e.Message; designsStatusIsLoad = false; }
         }
 
         private static void DrawLoadControls(DesignRow row)
         {
             var inEditor = HighLogic.LoadedSceneIsEditor;
-            var canLoad = row.Blueprint != null && (inEditor || HighLogic.LoadedScene == GameScenes.SPACECENTER);
+            var loadBusy = ToolingClient.LoadState == DesignLoadState.Fetching || ToolingClient.LoadState == DesignLoadState.Loading;
+            var canLoad = row.Blueprint != null && (inEditor || HighLogic.LoadedScene == GameScenes.SPACECENTER) && !loadBusy;
             var enabled = GUI.enabled;
             if (designsLoadConfirm == row.Fingerprint)
             {
@@ -356,19 +355,30 @@ namespace LmpClient.Windows.Agency
             GUI.enabled = enabled;
             GUILayout.EndHorizontal();
             if (row.Blueprint == null) GUILayout.Label("Open this craft in the editor and press Save craft to tooling (free).", designsText);
+            else if (loadBusy) { if (ToolingClient.LoadingFingerprint != row.Fingerprint) GUILayout.Label("Another design is still loading.", designsText); }
             else if (!canLoad) GUILayout.Label("Return to the Space Center to load a design.", designsText);
         }
 
         private static void RunLoad(DesignRow row, bool confirmed)
         {
             designsStatusFingerprint = row.Fingerprint;
+            designsStatusIsLoad = true;
             try
             {
                 var state = ToolingClient.LoadTooledDesign(row.Fingerprint, confirmed);
                 designsLoadConfirm = state == DesignLoadState.NeedsConfirm ? row.Fingerprint : null;
                 designsStatus = state == DesignLoadState.NeedsConfirm ? null : string.IsNullOrEmpty(ToolingClient.LoadStatus) ? state.ToString() : ToolingClient.LoadStatus;
             }
-            catch (Exception e) { designsLoadConfirm = null; designsStatus = "Could not load: " + e.Message; }
+            catch (Exception e) { designsLoadConfirm = null; designsStatus = "Could not load: " + e.Message; designsStatusIsLoad = false; }
+        }
+
+        /// <summary>The row's status line. A load started from this row follows ToolingClient.LoadStatus live, so the fetch result replaces "Fetching saved craft...".</summary>
+        private static string DesignStatus(DesignRow row)
+        {
+            if (designsStatusFingerprint != row.Fingerprint) return null;
+            if (designsStatusIsLoad && ToolingClient.LoadingFingerprint == row.Fingerprint && ToolingClient.LoadState != DesignLoadState.NeedsConfirm && !string.IsNullOrEmpty(ToolingClient.LoadStatus))
+                return ToolingClient.LoadStatus;
+            return designsStatus;
         }
 
         private static void DrawSellControls(DesignRow row)
@@ -393,7 +403,7 @@ namespace LmpClient.Windows.Agency
                 {
                     if (confirming)
                     {
-                        try { TradeClient.LoadDesign(received.Id, true); } catch (Exception e) { designsStatusFingerprint = row.Fingerprint; designsStatus = "Could not load: " + e.Message; }
+                        try { TradeClient.LoadDesign(received.Id, true); } catch (Exception e) { designsStatusFingerprint = row.Fingerprint; designsStatus = "Could not load: " + e.Message; designsStatusIsLoad = false; }
                         designsBoughtLoadConfirm = Guid.Empty;
                     }
                     else designsBoughtLoadConfirm = received.Id;

@@ -318,7 +318,7 @@ namespace LmpClient.Windows.Agency
                 if (design.Kind == TradeEntitlementKind.SingleLaunch)
                     GUILayout.Label("One free launch: " + (design.Redeemed ? "Used" : design.Reserved ? "In progress" : "Available") + " (seller prepaid " + Funds(design.PrepaidFunds) + ")", tradeText);
                 else if (design.Kind == TradeEntitlementKind.StockDesign)
-                    GUILayout.Label("Stock: " + design.StockUnits + " units available", tradeText);
+                    GUILayout.Label("Stock: " + StockUi.Available(design.Fingerprint) + " units available" + (design.StockUnits > StockUi.Available(design.Fingerprint) ? " (" + design.StockUnits + " held incl. offered or launching)" : ""), tradeText);
                 else if (design.VesselId == Guid.Empty && !string.IsNullOrEmpty(design.LocalPath)) GUILayout.Label("Tooling + design (unlimited)", tradeText);
                 GUILayout.Label(design.DeliveryStatus, tradeText);
                 if (!string.IsNullOrEmpty(design.LocalPath))

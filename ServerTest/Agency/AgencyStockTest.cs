@@ -147,7 +147,7 @@ namespace ServerTest.Agency
         }
 
         [TestMethod]
-        public void ScienceIsNotDiscountedAndBuildingMoreNeverCostsLessInTotal()
+        public void ScienceIsNeverPrepaidAndBuildingMoreNeverCostsLessInTotal()
         {
             using (var f = new AgencyTradeTest.Fixture())
             {
@@ -163,7 +163,8 @@ namespace ServerTest.Agency
                 }
                 var before = Funds(f);
                 Assert.IsTrue(Build(f, 10, fp).Success);
-                Assert.AreEqual(before - 10 * (50 + 7), Funds(f), 1e-9);
+                // Science parts are paid by each launch, so a unit prepays only the probe: 100 x 0.07.
+                Assert.AreEqual(before - 10 * 7, Funds(f), 1e-9);
             }
         }
 

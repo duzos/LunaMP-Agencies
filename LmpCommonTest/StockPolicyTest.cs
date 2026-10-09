@@ -124,9 +124,10 @@ namespace LmpCommonTest
             Assert.AreEqual(500d, quote.NonScienceCost);
             Assert.AreEqual(.3, quote.Discount, 1e-12);
             Assert.AreEqual(.07, quote.UnitMultiplier, 1e-12);
-            Assert.AreEqual(335d, quote.PrepaidPerUnit, 1e-9);
-            Assert.AreEqual(3350d, quote.Total, 1e-9);
-            Assert.AreEqual(350d, quote.TooledLaunchEach, 1e-9);
+            // Science parts are not prepaid: 500 x 0.07 = 35 per unit.
+            Assert.AreEqual(35d, quote.PrepaidPerUnit, 1e-9);
+            Assert.AreEqual(350d, quote.Total, 1e-9);
+            Assert.AreEqual(50d, quote.TooledLaunchEach, 1e-9);
 
             var single = StockPolicy.Quote(Design(), 1, ToolingRates.Default, StockRates.Default);
             Assert.AreEqual(single.TooledLaunchEach, single.PrepaidPerUnit, 1e-9, "One unit costs exactly a tooled launch's parts.");
@@ -149,14 +150,33 @@ namespace LmpCommonTest
             Assert.IsFalse(StockPolicy.Quote(design, 1, new ToolingRates(5, double.NaN, 2, 0), StockRates.Default).Success);
             Assert.IsFalse(StockPolicy.Quote(design, 1, ToolingRates.Default, new StockRates(.5, 10)).Success);
 
-            var huge = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "science", UnitCost = ToolingPolicy.MaxCost, IsScience = true } } };
-            var overflow = StockPolicy.Quote(Design(huge), 2, ToolingRates.Default, StockRates.Default);
+            var huge = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "tank", UnitCost = ToolingPolicy.MaxCost } } };
+            var overflow = StockPolicy.Quote(Design(huge), StockDefaults.MaxBuildUnits, new ToolingRates(5, 1, 2, 0), StockRates.Default);
             Assert.IsFalse(overflow.Success, "A total beyond the supported range fails cleanly.");
+        }
+
+        [TestMethod]
+        public void ALaunchFromStockAddsItsOwnSciencePartsAtRawCost()
+        {
+            var built = StockPolicy.Quote(Design(), 10, ToolingRates.Default, StockRates.Default);
+            var lot = Lot(1, built.PrepaidPerUnit, built.UnitMultiplier);
+            Assert.AreEqual(25d + 300, StockPolicy.LaunchCharge(Launch(), lot), 1e-9, "Inventory plus the science part, undiscounted.");
+
+            // Swapping or adding science parts keeps the design, so the same lot still serves it; each launch pays its own science.
+            var swapped = new ToolingManifest { Parts = new[] { new ToolingPart { Name = "probe", UnitCost = 100 }, new ToolingPart { Name = "tank", UnitCost = 400 },
+                new ToolingPart { Name = "goo", UnitCost = 800, IsScience = true }, new ToolingPart { Name = "thermometer", UnitCost = 900, IsScience = true } } };
+            var launch = Launch(swapped);
+            Assert.AreEqual(lot.Fingerprint, launch.Fingerprint);
+            Assert.AreEqual(1700d, StockPolicy.LaunchCharge(launch, lot), 1e-9);
+            Assert.AreSame(lot, StockPolicy.SelectLot(new[] { lot }, launch, true, ToolingRates.Default.TooledLaunch));
+            var bare = new ToolingManifest { Parts = swapped.Parts.Take(2).ToArray() };
+            Assert.AreEqual(0d, StockPolicy.LaunchCharge(Launch(bare), lot), 1e-9, "No science parts: the prepayment covers the whole launch.");
         }
 
         [TestMethod]
         public void LaunchChargeIsCargoPlusAnyTopUpAtTheLotMultiplier()
         {
+            // A lot built before agencies.11 also prepaid the design's 300 science: the prepayment still covers that science, so it is never paid twice.
             var lot = Lot(1, 335, .07);
             Assert.AreEqual(25d, StockPolicy.LaunchCharge(Launch(), lot), 1e-9, "Same manifest: inventory only.");
             // A bigger tank changes the unit cost, not the fingerprint: the extra 200 non-science is charged at the lot multiplier.

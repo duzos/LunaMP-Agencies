@@ -45,7 +45,7 @@ namespace LmpCommon.Agency
         public string Fingerprint;
         /// <summary>Available units. Units that are reserved by a launch or escrowed in an offer are already removed.</summary>
         public int Units;
-        /// <summary>Funds paid per unit for parts (0 outside Career).</summary>
+        /// <summary>Funds paid per unit for non-science parts (0 outside Career). Lots built before agencies.11 also prepaid the design's science parts.</summary>
         public double PrepaidPerUnit;
         /// <summary>The non-science multiplier the prepayment covers: TooledLaunch x (1 - discount).</summary>
         public double LaunchMultiplier;
@@ -73,7 +73,9 @@ namespace LmpCommon.Agency
         public bool Success;
         public string Reason, Fingerprint;
         public int Units;
-        public double Discount, UnitMultiplier, ScienceCost, NonScienceCost, PrepaidPerUnit, Total, TooledLaunchEach;
+        public double Discount, UnitMultiplier, ScienceCost, NonScienceCost, PrepaidPerUnit, Total;
+        /// <summary>The non-science part cost of one ordinary tooled launch, the same basis as PrepaidPerUnit. Science parts are paid at launch either way.</summary>
+        public double TooledLaunchEach;
     }
 
     /// <summary>What the editor Load button needs to know progresses through these states.</summary>
@@ -104,7 +106,7 @@ namespace LmpCommon.Agency
         public const int BlueprintReplaceCooldownSeconds = 60;
     }
 
-    /// <summary>Pure pricing and bookkeeping of design stock. Only the tooled non-science share is discounted; science parts and inventory are never discounted.</summary>
+    /// <summary>Pure pricing and bookkeeping of design stock. Only the tooled non-science share is prepaid and discounted; science parts and inventory are paid at launch at raw cost.</summary>
     public static class StockPolicy
     {
         /// <summary>d(1) = 0; d(n) = D x min(1, (n - 1) / (N - 1)) for n &gt;= 2.</summary>
@@ -130,15 +132,16 @@ namespace LmpCommon.Agency
                 quote.NonScienceCost = Check(design.Manifest.Parts.Where(p => !p.IsScience).Sum(p => p.UnitCost));
                 quote.Discount = Discount(units, stock);
                 quote.UnitMultiplier = Check(tooling.TooledLaunch * (1 - quote.Discount));
-                quote.PrepaidPerUnit = Check(quote.ScienceCost + quote.NonScienceCost * quote.UnitMultiplier);
+                // Science parts are not part of the design, so a unit never prepays them: each launch adds its own science parts at raw cost.
+                quote.PrepaidPerUnit = Check(quote.NonScienceCost * quote.UnitMultiplier);
                 quote.Total = Check(quote.PrepaidPerUnit * units);
-                quote.TooledLaunchEach = Check(quote.ScienceCost + quote.NonScienceCost * tooling.TooledLaunch);
+                quote.TooledLaunchEach = Check(quote.NonScienceCost * tooling.TooledLaunch);
                 return quote;
             }
             catch (ArgumentException error) { return new StockQuote { Success = false, Reason = error.Message, Fingerprint = design?.Fingerprint, Units = units }; }
         }
 
-        /// <summary>What a launch from this lot still charges: all inventory plus any part cost above the unit's prepayment.</summary>
+        /// <summary>What a launch from this lot still charges: all inventory and science parts plus any part cost above the unit's prepayment.</summary>
         public static double LaunchCharge(ToolingQuote launch, DesignStockLot lot)
         {
             if (lot == null) throw new ArgumentException("A stock lot is required.");

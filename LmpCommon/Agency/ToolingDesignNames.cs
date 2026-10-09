@@ -82,16 +82,17 @@ namespace LmpCommon.Agency
 
         /// <summary>
         /// The fingerprint of a craft from its PART "part" (or "name") values, as <see cref="ToolingPolicy.Fingerprint"/> computes it: physical part
-        /// names only (the trailing _flightId is dropped). Null when the list is not a valid manifest.
+        /// names only (the trailing _flightId is dropped), leaving out the names <paramref name="isScience"/> marks as science parts. Null when the
+        /// list is not a valid manifest.
         /// </summary>
-        public static string FingerprintFromPartIds(IEnumerable<string> partIds)
+        public static string FingerprintFromPartIds(IEnumerable<string> partIds, Func<string, bool> isScience = null)
         {
             if (partIds == null) return null;
             try
             {
                 var names = partIds.Select(PartName).ToArray();
                 if (names.Length == 0 || names.Length > ToolingPolicy.MaxParts || names.Any(string.IsNullOrWhiteSpace)) return null;
-                return ToolingPolicy.Fingerprint(new ToolingManifest { Parts = names.Select(n => new ToolingPart { Name = n, UnitCost = 0 }).ToArray() });
+                return ToolingPolicy.Fingerprint(new ToolingManifest { Parts = names.Select(n => new ToolingPart { Name = n, UnitCost = 0, IsScience = isScience != null && isScience(n) }).ToArray() });
             }
             catch (ArgumentException) { return null; }
         }
@@ -140,7 +141,7 @@ namespace LmpCommon.Agency
         }
 
         /// <summary>The fingerprint of craft text (see <see cref="FingerprintFromPartIds"/>), or null.</summary>
-        public static string CraftFingerprint(string craft) => FingerprintFromPartIds(PartIdsFromCraft(craft));
+        public static string CraftFingerprint(string craft, Func<string, bool> isScience = null) => FingerprintFromPartIds(PartIdsFromCraft(craft), isScience);
 
         private static string PartName(string id)
         {

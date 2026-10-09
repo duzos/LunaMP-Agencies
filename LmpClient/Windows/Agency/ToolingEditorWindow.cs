@@ -90,7 +90,7 @@ namespace LmpClient.Windows.Agency
                 else if (stock == null && StockUi.LotSlotsFull) GUILayout.Label("Lot slots are full, so only a 1-unit lot can be used. Launch or sell stock to free a slot.", text);
                 if (stockToggled != useStock) ToolingClient.UseStock = stockToggled;
             }
-            GUILayout.Label(quote.AlreadyTooled ? "This exact design is tooled for your agency." : "This design is not tooled. Launching it as is costs " + Multiplier(ToolingClient.Rates().UntooledLaunch) + " its part price (science parts and inventory stay 1x), or you can purchase tooling once.", text);
+            GUILayout.Label(quote.AlreadyTooled ? "This design is tooled for your agency. Science parts never affect tooling; they are added at full price." : "This design is not tooled. Launching it as is costs " + Multiplier(ToolingClient.Rates().UntooledLaunch) + " its part price (science parts and inventory stay 1x), or you can purchase tooling once.", text);
             CostRow("Science parts · full price", quote.ScienceCost);
             CostRow("Inventory · full price", quote.CargoCost);
             if (!quote.AlreadyTooled)
@@ -98,7 +98,7 @@ namespace LmpClient.Windows.Agency
                 GUILayout.Space(6);
                 GUILayout.Label("Tool this design  " + Money(quote.ToolingCost), heading);
                 GUILayout.Label("Launch after tooling  " + Money(ToolingPolicy.LaunchCost(quote.ScienceCost, quote.CargoCost, quote.NonScienceCost, true, ToolingClient.Rates())), text);
-                GUILayout.Label("Tooling discounts future launches of this exact part list. Layout changes are fine; changing parts needs new tooling.", text);
+                GUILayout.Label("Tooling discounts future launches of this part list. Layout and science part changes are fine; changing other parts needs new tooling.", text);
                 if (quote.CoverSearchExhausted) GUILayout.Label("Tooling priced without reuse (craft too complex to match saved designs).", text);
                 foreach (var match in quote.Matches)
                     GUILayout.Label(match.Count + " × existing subassembly" + (match.CombineCost > 0 ? " · combine fee " + Money(match.CombineCost) : string.Empty), text);

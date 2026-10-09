@@ -321,6 +321,7 @@ namespace LmpClient.Windows.Agency
                 GUILayout.Label(usesFunds
                         ? quote.Units + " × " + quote.PrepaidPerUnit.ToString("N1", CultureInfo.CurrentCulture) + " each = " + Funds(quote.Total) + " (" + (quote.Discount * 100).ToString("0.#", CultureInfo.CurrentCulture) + "% volume discount; a tooled launch is " + quote.TooledLaunchEach.ToString("N1", CultureInfo.CurrentCulture) + " each)"
                         : quote.Units + " units, no funds charged in this game mode.", designsText);
+                if (usesFunds && quote.ScienceCost > 0) GUILayout.Label("Science parts are not prepaid; each launch adds them at full price.", designsText);
                 if (usesFunds && designsRates.MaxDiscount > 0 && quote.Units < designsRates.FullDiscountUnits)
                     GUILayout.Label("Build " + designsRates.FullDiscountUnits + "+ for " + (designsRates.MaxDiscount * 100).ToString("0.#", CultureInfo.CurrentCulture) + "% off", designsText);
                 if (usesFunds && ToolingClient.TryConfirmedFunds(out var funds) && funds < quote.Total) { canBuild = false; blocked = "Not enough funds."; }

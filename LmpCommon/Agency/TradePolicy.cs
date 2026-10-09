@@ -39,16 +39,20 @@ namespace LmpCommon.Agency
             return result;
         }
 
-        /// <summary>What the seller's agency pays up front for a single free launch: science parts at face value and the rest at the seller's own launch rate.</summary>
+        /// <summary>What the seller's agency pays up front for a single free launch: the non-science parts at the seller's own launch rate. Science parts are not part of the design; the buyer pays the ones it launches at raw cost.</summary>
         public static double PrepaidLaunchCost(ToolingQuote quote, double rate)
         {
             if (quote == null || !quote.Success || !ToolingPolicy.FiniteNonNegative(rate)) throw new ArgumentException("A valid quote and launch rate are required.");
-            var cost = quote.ScienceCost + quote.NonScienceCost * rate;
+            var cost = quote.NonScienceCost * rate;
             if (!ToolingPolicy.FiniteNonNegative(cost)) throw new ArgumentException("Prepaid launch cost exceeds supported range.");
             return cost;
         }
 
-        /// <summary>What the buyer still pays when launching on a voucher: all inventory, plus any part cost above what the seller prepaid (extra fuel and the like).</summary>
+        /// <summary>
+        /// What the buyer still pays when launching on a voucher or stock unit: all inventory and the science parts at raw cost, plus any non-science part
+        /// cost above what was prepaid (extra fuel and the like). A prepayment left over after the non-science parts (a lighter fuel load, or a lot
+        /// built before agencies.11 that also prepaid the design's science) is credited against the science parts instead of being forfeited.
+        /// </summary>
         public static double VoucherLaunchCharge(ToolingQuote quote, double prepaid, double multiplier)
         {
             if (quote == null || !quote.Success || !ToolingPolicy.FiniteNonNegative(prepaid) || !ToolingPolicy.FiniteNonNegative(multiplier)) throw new ArgumentException("A valid quote, prepayment and multiplier are required.");
@@ -82,8 +86,10 @@ namespace LmpCommon.Agency
             if (actual == null || purchasedFingerprints == null) return false;
             try
             {
+                // A licence written before agencies.11 may still carry the old all-parts fingerprint; it keeps granting the exact craft it was bought for.
                 var fingerprint = ToolingPolicy.Fingerprint(actual);
-                return purchasedFingerprints.Contains(fingerprint, StringComparer.Ordinal);
+                var legacy = ToolingPolicy.LegacyFingerprint(actual);
+                return purchasedFingerprints.Any(f => string.Equals(f, fingerprint, StringComparison.Ordinal) || string.Equals(f, legacy, StringComparison.Ordinal));
             }
             catch (ArgumentException) { return false; }
         }

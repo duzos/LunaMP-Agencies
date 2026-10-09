@@ -129,7 +129,37 @@ namespace Server.Agency
             return name.Trim();
         }
 
-        private static ToolingManifest BlueprintManifest(byte[] bytes, string editor)
+        /// <summary>
+        /// Which part names are science parts, for craft files and stored vessels that carry names only. The server has no part database, so it uses
+        /// what clients declared: a name classified by one of the <paramref name="context"/> manifests (the craft being priced, or the design it
+        /// claims to be) takes that classification; any other name is a science part when any manifest stored in <paramref name="document"/> declares it so.
+        /// </summary>
+        internal static Func<string, bool> ScienceClassifier(EconomyDocument document, params ToolingManifest[] context)
+        {
+            var declared = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (var manifest in context ?? Array.Empty<ToolingManifest>())
+            {
+                if (manifest?.Parts == null) continue;
+                try { ToolingPolicy.Validate(manifest); }
+                catch (ArgumentException) { continue; }
+                foreach (var part in manifest.Parts) if (!declared.ContainsKey(part.Name)) declared[part.Name] = part.IsScience;
+            }
+            var known = new HashSet<string>(StringComparer.Ordinal);
+            void Add(ToolingManifest manifest)
+            {
+                if (manifest?.Parts == null) return;
+                foreach (var part in manifest.Parts) if (part != null && part.IsScience && part.Name != null) known.Add(part.Name);
+            }
+            if (document != null)
+            {
+                foreach (var agency in document.Agencies.Values) if (agency?.Designs != null) foreach (var design in agency.Designs) Add(design?.Manifest);
+                foreach (var launch in document.Launches.Values) Add(launch?.Manifest);
+                foreach (var offer in document.TradeOffers.Values) Add(offer?.Design?.Manifest);
+            }
+            return name => name != null && (declared.TryGetValue(name, out var science) ? science : known.Contains(name));
+        }
+
+        private static ToolingManifest BlueprintManifest(byte[] bytes, string editor, Func<string, bool> isScience = null)
         {
             if (bytes == null || bytes.Length == 0 || bytes.Length > TradeLimits.MaxBlueprintBytes || editor != "VAB" && editor != "SPH") throw new ArgumentException("A bounded VAB or SPH craft blueprint is required.");
             var node = new ConfigNode(new UTF8Encoding(false, true).GetString(bytes));
@@ -141,7 +171,8 @@ namespace Server.Agency
             {
                 var separator = value.LastIndexOf('_');
                 if (separator < 1 || !uint.TryParse(value.Substring(separator + 1), out _)) throw new ArgumentException("Blueprint part identity is invalid.");
-                return new ToolingPart { Name = value.Substring(0, separator), UnitCost = 0 };
+                var name = value.Substring(0, separator);
+                return new ToolingPart { Name = name, UnitCost = 0, IsScience = isScience != null && isScience(name) };
             }).ToArray() };
             ToolingPolicy.Validate(manifest);
             return manifest;
@@ -150,7 +181,8 @@ namespace Server.Agency
         private static string VesselFingerprint(Guid vesselId)
         {
             if (!VesselStoreSystem.CurrentVessels.TryGetValue(vesselId, out var vessel)) throw new InvalidOperationException("Offered craft no longer exists.");
-            return ToolingPolicy.Fingerprint(new ToolingManifest { Parts = vessel.Parts.GetAllValues().Select(p => new ToolingPart { Name = p.Fields.GetSingle("name")?.Value, UnitCost = 0 }).ToArray() });
+            // A change check on the offered vessel itself, not a design identity: every part counts, science included, as it always has.
+            return ToolingPolicy.LegacyFingerprint(new ToolingManifest { Parts = vessel.Parts.GetAllValues().Select(p => new ToolingPart { Name = p.Fields.GetSingle("name")?.Value, UnitCost = 0 }).ToArray() });
         }
 
         private static void RequireAgencyOwner(Guid agencyId, ClientStructure client)
@@ -245,7 +277,8 @@ namespace Server.Agency
                 var stored = new StoredTradeOffer { Offer = offer, SellerOwner = seller.OwnerUniqueId, BuyerOwner = buyer.OwnerUniqueId, SessionId = command.SessionId, CreatedSequence = command.Sequence };
                 if (!string.IsNullOrEmpty(request.DesignFingerprint))
                 {
-                    var blueprintFingerprint = ToolingPolicy.Fingerprint(BlueprintManifest(request.BlueprintData, request.Editor));
+                    var sellerDesign = Agency(candidate, client.AgencyId).Designs.FirstOrDefault(d => d.Fingerprint == request.DesignFingerprint);
+                    var blueprintFingerprint = ToolingPolicy.Fingerprint(BlueprintManifest(request.BlueprintData, request.Editor, ScienceClassifier(candidate, command.Manifest, sellerDesign?.Manifest)));
                     switch (request.DesignMode)
                     {
                         case TradeDesignMode.SingleLaunch:
@@ -388,7 +421,7 @@ namespace Server.Agency
             if (saved.Blueprint.Length == 0 || buyer.Blueprints.ContainsKey(saved.Design.Fingerprint)) return;
             try
             {
-                if (!TryStoreBlueprint(candidate, trade.BuyerAgencyId, saved.Design.Fingerprint, saved.Blueprint, trade.Editor, trade.BlueprintName, newFiles ?? new List<string>(), out var reason))
+                if (!TryStoreBlueprint(candidate, trade.BuyerAgencyId, saved.Design.Fingerprint, saved.Blueprint, trade.Editor, trade.BlueprintName, newFiles ?? new List<string>(), ScienceClassifier(candidate, saved.Design.Manifest), out var reason))
                     LunaLog.Debug($"[Economy] Bought tooling {saved.Design.Fingerprint} kept without a saved craft for {trade.BuyerAgencyId}: {reason}");
             }
             catch (Exception e)
@@ -419,9 +452,13 @@ namespace Server.Agency
             {
                 if (entitlementId == Guid.Empty) return true;
                 if (!Ready) return false;
-                var manifest = new ToolingManifest { Parts = vessel.Parts.GetAllValues().Select(p => new ToolingPart { Name = p.Fields.GetSingle("name")?.Value }).ToArray() };
+                var names = new ToolingManifest { Parts = vessel.Parts.GetAllValues().Select(p => new ToolingPart { Name = p.Fields.GetSingle("name")?.Value }).ToArray() };
+                EconomyLaunch stockLaunch = null;
+                if (launchId != Guid.Empty) _document.Launches.TryGetValue(launchId, out stockLaunch);
+                // Science parts are not part of a design: classify the vessel's names (by its own launch manifest when there is one) before matching.
+                var manifest = ToolingPolicy.Classify(names, ScienceClassifier(_document, stockLaunch?.Manifest));
                 // A stock unit grants research only to the Prepared launch that reserved it, keyed by its lot ID. It needs tooling, not trade.
-                if (launchId != Guid.Empty && _document.Launches.TryGetValue(launchId, out var stockLaunch) && stockLaunch.Stock != null && stockLaunch.Stock.LotId == entitlementId)
+                if (stockLaunch != null && stockLaunch.Stock != null && stockLaunch.Stock.LotId == entitlementId)
                     return ToolingEnabled && stockLaunch.State == LaunchState.Prepared && stockLaunch.AgencyId == agencyId && TradePolicy.CanUseEntitlement(manifest, new[] { stockLaunch.Stock.Fingerprint });
                 if (!TradeEnabled || !_document.Entitlements.TryGetValue(agencyId, out var entitlements)) return false;
                 // Permanent: always. SingleLaunch: only for the one launch that reserved it, while tooling gameplay is on. StockDesign: never by itself.

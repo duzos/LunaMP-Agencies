@@ -126,10 +126,14 @@ namespace Server.Agency
                     var settings = GeneralSettings.SettingsStore;
                     if (!ToolingPolicy.FiniteNonNegative(settings.ToolingCostMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.TooledLaunchMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.UntooledLaunchMultiplier) || !ToolingPolicy.FiniteNonNegative(settings.ToolingCombineMultiplier))
                         throw new InvalidDataException("Invalid tooling multipliers.");
+                    var scienceMigrated = false;
                     if (File.Exists(FilePath))
                     {
                         if (new FileInfo(FilePath).Length > MaxFileBytes) throw new InvalidDataException("Economy file is too large.");
                         _document = JsonConvert.DeserializeObject<EconomyDocument>(File.ReadAllText(FilePath)) ?? throw new InvalidDataException();
+                        // Before validation: designs saved with science parts in their fingerprint fail the current fingerprint check until re-keyed.
+                        scienceMigrated = MigrateScienceFingerprints(_document);
+                        if (scienceMigrated) LunaLog.Info("[Economy] Re-keyed tooled designs, stock and vouchers so science parts no longer change a design's fingerprint.");
                         Validate(_document);
                     }
                     else
@@ -169,7 +173,7 @@ namespace Server.Agency
                         }
                     }
                     var candidate = Copy(_document);
-                    var changed = migrated;
+                    var changed = migrated || scienceMigrated;
                     foreach (var launch in candidate.Launches.Values.Where(l => l.State == LaunchState.Prepared))
                     {
                         RefundPrepared(candidate, launch);
@@ -486,7 +490,7 @@ namespace Server.Agency
                             if (command.BlueprintData != null && command.BlueprintData.Length > 0)
                             {
                                 var savedName = designName ?? agency.Designs.FirstOrDefault(x => x.Fingerprint == result.Quote.Fingerprint)?.Name;
-                                if (!TryStoreBlueprint(candidate, client.AgencyId, result.Quote.Fingerprint, command.BlueprintData, command.BlueprintEditor, savedName, ExecuteNewBlueprintFiles, out var notSaved))
+                                if (!TryStoreBlueprint(candidate, client.AgencyId, result.Quote.Fingerprint, command.BlueprintData, command.BlueprintEditor, savedName, ExecuteNewBlueprintFiles, ScienceClassifier(candidate, command.Manifest), out var notSaved))
                                     result.Reason = "Tooled; craft not saved (" + notSaved + ")";
                             }
                             break;

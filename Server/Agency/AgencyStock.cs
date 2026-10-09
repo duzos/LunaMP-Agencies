@@ -277,7 +277,7 @@ namespace Server.Agency
         /// <paramref name="d"/>. Every storage miss returns false with <paramref name="reason"/> set and never fails the Tool. A path is added to
         /// <paramref name="newFiles"/> only when this call wrote the file, so a failed Commit can delete it.
         /// </summary>
-        internal static bool TryStoreBlueprint(EconomyDocument d, Guid agency, string fingerprint, byte[] bytes, string editor, string name, List<string> newFiles, out string reason)
+        internal static bool TryStoreBlueprint(EconomyDocument d, Guid agency, string fingerprint, byte[] bytes, string editor, string name, List<string> newFiles, Func<string, bool> isScience, out string reason)
         {
             reason = null;
             if (d == null || string.IsNullOrEmpty(fingerprint) || !d.Agencies.TryGetValue(agency, out var holder) || holder == null || !holder.Designs.Any(x => x.Fingerprint == fingerprint))
@@ -285,7 +285,7 @@ namespace Server.Agency
             if (bytes == null || bytes.Length == 0 || bytes.Length > ToolingLimits.MaxToolingBlueprintBytes) { reason = "storage limit"; return false; }
             try
             {
-                if (ToolingPolicy.Fingerprint(BlueprintManifest(bytes, editor)) != fingerprint) { reason = "does not match"; return false; }
+                if (ToolingPolicy.Fingerprint(BlueprintManifest(bytes, editor, isScience)) != fingerprint) { reason = "does not match"; return false; }
             }
             catch (Exception) { reason = "does not match"; return false; }
             if (holder.Blueprints == null) holder.Blueprints = new Dictionary<string, ToolingBlueprintRef>();

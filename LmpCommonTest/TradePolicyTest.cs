@@ -40,14 +40,20 @@ namespace LmpCommonTest
             rearranged.Parts = new[] { Part("engine"), Part("tank") };
             Assert.IsFalse(TradePolicy.CanUseEntitlement(rearranged, new[] { fingerprint }));
             Assert.IsFalse(TradePolicy.CanUseEntitlement(original, Array.Empty<string>()));
+            // Science parts never change the licensed design; a licence stored with the old all-parts fingerprint still grants its exact craft.
+            var withScience = new ToolingManifest { Parts = new[] { Part("tank"), Part("engine"), Part("tank"), new ToolingPart { Name = "goo", IsScience = true } } };
+            Assert.IsTrue(TradePolicy.CanUseEntitlement(withScience, new[] { fingerprint }));
+            Assert.IsTrue(TradePolicy.CanUseEntitlement(withScience, new[] { ToolingPolicy.LegacyFingerprint(withScience) }));
             Assert.IsFalse(TradePolicy.CanUseEntitlement(null, new[] { fingerprint }));
         }
         private static ToolingQuote Quote(double science, double nonScience, double cargo, double launch = 0) => new ToolingQuote { Success = true, Fingerprint = "f", ScienceCost = science, NonScienceCost = nonScience, CargoCost = cargo, LaunchCost = launch };
         [TestMethod]
-        public void PrepaidLaunchCostIsScienceAtFaceValuePlusOtherPartsAtTheSellerRate()
+        public void PrepaidLaunchCostIsTheNonSciencePartsAtTheSellerRateOnly()
         {
-            Assert.AreEqual(300d + 100 * 2, TradePolicy.PrepaidLaunchCost(Quote(300, 100, 55), 2), 1e-9);
-            Assert.AreEqual(300d + 100 * .1, TradePolicy.PrepaidLaunchCost(Quote(300, 100, 55), .1), 1e-9);
+            Assert.AreEqual(100d * 2, TradePolicy.PrepaidLaunchCost(Quote(300, 100, 55), 2), 1e-9);
+            Assert.AreEqual(100d * .1, TradePolicy.PrepaidLaunchCost(Quote(300, 100, 55), .1), 1e-9);
+            // The buyer then pays the science parts it launches at raw cost on top of inventory.
+            Assert.AreEqual(55d + 300, TradePolicy.VoucherLaunchCharge(Quote(300, 100, 55), TradePolicy.PrepaidLaunchCost(Quote(300, 100, 55), 2), 2), 1e-9);
             Assert.AreEqual(0d, TradePolicy.PrepaidLaunchCost(Quote(0, 0, 55), 2), 1e-9);
         }
         [TestMethod]

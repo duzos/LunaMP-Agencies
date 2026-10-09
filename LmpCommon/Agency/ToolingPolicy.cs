@@ -90,16 +90,41 @@ namespace LmpCommon.Agency
                 using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(stream.ToArray())).Replace("-", string.Empty).ToLowerInvariant();
             }
         }
+        /// <summary>
+        /// The design identity: the multiset of non-science physical part names. Science parts never change which design a craft is, so adding,
+        /// removing or swapping them keeps the craft tooled. For a craft without science parts this is byte-for-byte the digest earlier builds
+        /// stored (<see cref="LegacyFingerprint"/>), so those designs, lots and vouchers keep matching unchanged.
+        /// </summary>
         public static string Fingerprint(ToolingManifest manifest)
         {
             Validate(manifest);
-            return Digest(writer =>
+            return NameDigest(manifest.Parts.Where(p => !p.IsScience));
+        }
+        /// <summary>The pre-agencies.11 identity over every physical part, science included. Only for migrating and matching records written by older builds.</summary>
+        public static string LegacyFingerprint(ToolingManifest manifest)
+        {
+            Validate(manifest);
+            return NameDigest(manifest.Parts);
+        }
+        private static string NameDigest(IEnumerable<ToolingPart> parts) => Digest(writer =>
+        {
+            writer.Write(1);
+            var groups = parts.GroupBy(p => p.Name, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal).ToArray();
+            writer.Write(groups.Length);
+            foreach (var group in groups) { writer.Write(group.Key); writer.Write(group.Count()); }
+        });
+        /// <summary>
+        /// A copy of <paramref name="manifest"/> whose IsScience flags come from <paramref name="isScience"/>. Used where only part names are known
+        /// (a craft file or a stored vessel) so its fingerprint can be compared with a client-priced one.
+        /// </summary>
+        public static ToolingManifest Classify(ToolingManifest manifest, Func<string, bool> isScience)
+        {
+            if (manifest?.Parts == null || isScience == null) return manifest;
+            return new ToolingManifest
             {
-                writer.Write(1);
-                var groups = manifest.Parts.GroupBy(p => p.Name, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal).ToArray();
-                writer.Write(groups.Length);
-                foreach (var group in groups) { writer.Write(group.Key); writer.Write(group.Count()); }
-            });
+                Parts = manifest.Parts.Select(p => p == null ? null : new ToolingPart { Name = p.Name, UnitCost = p.UnitCost, IsScience = p.Name != null && isScience(p.Name) }).ToArray(),
+                Cargo = manifest.Cargo
+            };
         }
         public static string ManifestHash(ToolingManifest manifest)
         {
@@ -176,12 +201,14 @@ namespace LmpCommon.Agency
             internal CoverSearch(ToolingManifest manifest, ToolingDesign[] designs, double tooling, double combine)
             {
                 multiplier = tooling; this.combine = combine;
-                var groups = manifest.Parts.GroupBy(p => p.Name, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal).ToArray();
+                // Science parts are never tooled and never part of a design's identity, so the cover works on non-science parts only: a saved design
+                // covers a craft whatever science either of them carries.
+                var groups = manifest.Parts.Where(p => !p.IsScience).GroupBy(p => p.Name, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal).ToArray();
                 var names = groups.Select(g => g.Key).ToArray();
                 initial = groups.Select(g => g.Count()).ToArray();
                 // Covered instances consume the most expensive equal-name rows. Remaining rows are cheapest.
-                costs = groups.Select(g => g.Select(p => p.IsScience ? 0 : p.UnitCost).OrderBy(c => c).ToArray()).ToArray();
-                candidates = designs.Select(design => new { design, counts = design.Manifest.Parts.GroupBy(p => p.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal) })
+                costs = groups.Select(g => g.Select(p => p.UnitCost).OrderBy(c => c).ToArray()).ToArray();
+                candidates = designs.Select(design => new { design, counts = design.Manifest.Parts.Where(p => !p.IsScience).GroupBy(p => p.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal) })
                     .Where(x => x.counts.All(p => Array.IndexOf(names, p.Key) >= 0 && p.Value <= initial[Array.IndexOf(names, p.Key)]))
                     .Select(x => new Candidate { Fingerprint = x.design.Fingerprint, Counts = names.Select(n => x.counts.TryGetValue(n, out var count) ? count : 0).ToArray() })
                     .GroupBy(c => c.Fingerprint, StringComparer.Ordinal).Select(g => g.First()).OrderBy(c => c.Fingerprint, StringComparer.Ordinal).ToArray();

@@ -249,6 +249,34 @@ namespace LmpCommonTest
         }
 
         [TestMethod]
+        public void StockResearchCandidates_ListHeldDesignsAndThePendingLaunchWithoutPricing()
+        {
+            var otherFp = ToolingPolicy.Fingerprint(Other);
+            Apply(Snapshot(Lot(2), Lot(0, fingerprint: otherFp)));
+            var calls = ToolingClient.StandardQuoteCalls;
+            CollectionAssert.AreEquivalent(new[] { Fp }, ToolingClient.StockResearchCandidates().ToArray(), "An emptied row is not a candidate.");
+            Assert.AreEqual(calls, ToolingClient.StandardQuoteCalls, "The candidate list never prices a launch.");
+
+            ToolingClient.UseStock = false;
+            Assert.AreEqual(0, ToolingClient.StockResearchCandidates().Count(), "Use stock off: held units unlock nothing.");
+            ToolingClient.UseStock = true;
+
+            var lot = Lot(1, fingerprint: otherFp);
+            Apply(Snapshot(lot));
+            SetPending(lot.LotId, otherFp);
+            var pruned = Snapshot(); pruned.Revision = 2;
+            Apply(pruned);
+            CollectionAssert.AreEquivalent(new[] { otherFp }, ToolingClient.StockResearchCandidates().ToArray(), "The reserved unit still counts after Prepare pruned its row.");
+            SetPending(Guid.Empty, otherFp);
+            Assert.AreEqual(0, ToolingClient.StockResearchCandidates().Count(), "A pending launch without stock is not a candidate.");
+
+            SetPending(Guid.Empty, null);
+            SettingsSystem.ServerSettings.AgencyTooling = false;
+            Apply(Snapshot(Lot(5)));
+            Assert.AreEqual(0, ToolingClient.StockResearchCandidates().Count(), "Stock research needs tooling.");
+        }
+
+        [TestMethod]
         public void EditorBlueprintNeedsSave_IsSetOnlyFromTick()
         {
             var snapshot = Snapshot();

@@ -28,15 +28,20 @@ namespace LmpClient.Systems.Agency
             return true;
         }
 
-        /// <summary>SHA-256 (lowercase hex) of the open editor craft's blueprint bytes, for comparing with the saved blueprint.</summary>
-        private static bool TryEditorBlueprintHash(out string hash)
+        /// <summary>
+        /// SHA-256 (lowercase hex) of the open editor craft's blueprint bytes, for comparing with the saved blueprint, and the serialized size.
+        /// A craft over the blueprint limit is not hashed (hash stays null); the caller reports the size instead.
+        /// </summary>
+        private static bool TryEditorBlueprintHash(out string hash, out long size)
         {
-            hash = null;
+            hash = null; size = 0;
             if (!TrySerializeEditorCraft(out _, out var data)) return false;
-            hash = HexHash(data);
+            size = data.Length;
+            if (data.Length <= ToolingLimits.MaxToolingBlueprintBytes) hash = HexHash(data);
             return true;
         }
 
+        /// <summary>Serializes the open editor craft. Any size is returned; callers compare it with ToolingLimits.MaxToolingBlueprintBytes and report it.</summary>
         private static bool TrySerializeEditorCraft(out ConfigNode node, out byte[] data)
         {
             node = null; data = null;
@@ -45,7 +50,7 @@ namespace LmpClient.Systems.Agency
             node = ship.SaveShip();
             if (node == null) return false;
             data = node.Serialize();
-            return data != null && data.Length > 0 && data.Length <= ToolingLimits.MaxToolingBlueprintBytes;
+            return data != null && data.Length > 0;
         }
 
         /// <summary>Part names in the blueprint (including stored inventory parts) that this install does not have (PartLoader). Empty when everything can load.</summary>

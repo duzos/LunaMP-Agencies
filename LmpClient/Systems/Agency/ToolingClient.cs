@@ -115,6 +115,11 @@ namespace LmpClient.Systems.Agency
                 byte[] bytes = null; string editor = null, name = null;
                 try { if (!CaptureEditorBlueprint(out bytes, out editor, out name)) bytes = null; }
                 catch (Exception e) { bytes = null; Diagnostics.PlaytestDiagnostics.Write("client.tooling.blueprint-capture", () => "failed=" + e.Message); }
+                if (bytes != null && bytes.Length > ToolingLimits.MaxToolingBlueprintBytes)
+                {
+                    LatestStatus = "Purchasing tooling without the saved craft. " + BlueprintTooLargeText(bytes.Length);
+                    bytes = null;
+                }
                 if (name == null) { try { name = EditorLogic.fetch?.ship?.shipName; } catch (Exception) { name = null; } }
                 return Send(new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = manifest, ManifestHash = ToolingPolicy.ManifestHash(manifest), DesignName = name,
                     BlueprintData = bytes ?? Array.Empty<byte>(), BlueprintEditor = bytes == null ? null : editor });
@@ -167,14 +172,19 @@ namespace LmpClient.Systems.Agency
 
         // Plan 40 design stock: the pure client state. The KSP-bound half (capture, hashing, craft files, editor load) is ToolingClient.Blueprints.cs.
         private static bool useStock = true;
-        private static Guid buildRequest;
+        private static Guid buildRequest, saveRequest;
+        private static DateTime buildDeadline, saveDeadline;
         private static Guid loadRequest;
         private static string loadFingerprint;
         private static DateTime loadDeadline;
-        private static DateTime nextBlueprintCheck;
+        /// <summary>The scene, and whether the player confirmed replacing the editor craft, when the fetch in flight was sent.</summary>
+        private static GameScenes loadScene;
+        private static bool loadConfirmed;
+        /// <summary>Set when the editor craft changed (onEditorShipModified, a load or a scene change); the blueprint hash is recomputed only then.</summary>
+        private static bool blueprintRecheck = true;
         private static string blueprintCheckKey;
         private static readonly Dictionary<string, byte[]> blueprintCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-        private const int FetchTimeoutSeconds = 15, BlueprintCheckSeconds = 2;
+        private const int FetchTimeoutSeconds = 15, BuildTimeoutSeconds = 30, SaveTimeoutSeconds = 30;
         /// <summary>Test hook: counts StandardQuote calls, so a test can prove a check stayed on its cheap path.</summary>
         internal static int StandardQuoteCalls;
         private static bool UsesFunds => SettingsSystem.ServerSettings.GameMode == GameMode.Career;
@@ -188,6 +198,18 @@ namespace LmpClient.Systems.Agency
         public static DesignStockLot EditorStock { get; private set; }
         /// <summary>True when the open editor craft is tooled and its saved blueprint is missing or differs. Computed in Tick, never in OnGUI.</summary>
         public static bool EditorBlueprintNeedsSave { get; private set; }
+        /// <summary>Serialized size of the open editor craft when it exceeds the blueprint limit (it cannot be saved to tooling), otherwise 0.</summary>
+        public static long EditorBlueprintOversizeBytes { get; private set; }
+        /// <summary>True while a Save craft to tooling request waits for its result.</summary>
+        public static bool SaveBlueprintPending => saveRequest != Guid.Empty;
+        /// <summary>The player-facing text for a craft over the blueprint size limit.</summary>
+        public static string BlueprintTooLargeText(long bytes) =>
+            "This craft is " + KiB(bytes) + " KB; saved crafts are limited to " + KiB(ToolingLimits.MaxToolingBlueprintBytes) + " KB, so it cannot be saved to tooling.";
+        private static long KiB(long bytes) => (bytes + 1023) / 1024;
+        /// <summary>Marks the editor craft changed, so the next editor tick recomputes EditorBlueprintNeedsSave. Main thread only.</summary>
+        public static void MarkEditorCraftModified() { blueprintRecheck = true; }
+        /// <summary>Clears a NeedsConfirm load (the player cancelled the replace prompt).</summary>
+        public static void CancelLoadConfirm() { if (LoadState == DesignLoadState.NeedsConfirm) SetLoad(DesignLoadState.Idle, null); }
         public static string LoadStatus { get; private set; }
         /// <summary>Where the most recent LoadTooledDesign call is, and which design it is for.</summary>
         public static DesignLoadState LoadState { get; private set; }
@@ -279,7 +301,7 @@ namespace LmpClient.Systems.Agency
                 if ((long)StockUnits(fingerprint) + units > StockDefaults.MaxHeldUnits) throw new InvalidOperationException("Stock limit is " + StockDefaults.MaxHeldUnits + " units per design.");
                 var request = Send(new EconomyCommand { Operation = EconomyOperation.BuildStock, StockFingerprint = fingerprint, StockUnits = units, ExpectedCharge = charge });
                 if (request == Guid.Empty) return Guid.Empty;
-                buildRequest = request;
+                buildRequest = request; buildDeadline = DateTime.UtcNow.AddSeconds(BuildTimeoutSeconds);
                 LatestStatus = "Building " + units + " stock...";
                 return request;
             }
@@ -333,10 +355,12 @@ namespace LmpClient.Systems.Agency
                 var hash = ToolingPolicy.ManifestHash(manifest);
                 if (!Ready || EditorQuote == null || !EditorQuote.Success || editorQuoteHash != hash) throw new InvalidOperationException("Craft changed or tooling is still syncing. Review the updated quote.");
                 if (!EditorQuote.AlreadyTooled) throw new InvalidOperationException("Tool this design first; saving the craft is free once it is tooled.");
+                if (saveRequest != Guid.Empty) throw new InvalidOperationException("The craft is already being saved to tooling.");
                 if (!CaptureEditorBlueprint(out var bytes, out var editor, out var name)) throw new InvalidOperationException("The craft could not be captured; check that its parts match the tooled design.");
+                if (bytes.Length > ToolingLimits.MaxToolingBlueprintBytes) throw new InvalidOperationException(BlueprintTooLargeText(bytes.Length));
                 LatestStatus = "Saving craft to tooling...";
                 var request = Send(new EconomyCommand { Operation = EconomyOperation.Tool, Manifest = manifest, ManifestHash = hash, DesignName = name, BlueprintData = bytes, BlueprintEditor = editor });
-                if (request != Guid.Empty) blueprintCheckKey = null;
+                if (request != Guid.Empty) { blueprintCheckKey = null; saveRequest = request; saveDeadline = DateTime.UtcNow.AddSeconds(SaveTimeoutSeconds); }
                 return request;
             }
             catch (Exception e) { LatestStatus = e.Message; return Guid.Empty; }
@@ -365,6 +389,7 @@ namespace LmpClient.Systems.Agency
             if (request == Guid.Empty) return SetLoad(DesignLoadState.Failed, "Waiting for economy session.");
             SetLoad(DesignLoadState.Fetching, "Fetching saved craft...");
             loadRequest = request; loadDeadline = DateTime.UtcNow.AddSeconds(FetchTimeoutSeconds);
+            loadScene = HighLogic.LoadedScene; loadConfirmed = confirmedReplace;
             return DesignLoadState.Fetching;
         }
         private static DesignLoadState SetLoad(DesignLoadState state, string status)
@@ -397,6 +422,9 @@ namespace LmpClient.Systems.Agency
                 if (missing != null && missing.Length > 0) { SetLoad(DesignLoadState.Refused, MissingPartsText(missing)); return; }
                 if (BlueprintFingerprint(bytes) != fingerprint) { SetLoad(DesignLoadState.Failed, "Saved craft failed validation."); return; }
                 lock (stateLock) blueprintCache[CacheKey(info)] = bytes;
+                // The fetch took a while: never replace a craft the player did not agree to replace. The bytes are cached, so confirming loads at once.
+                if (HighLogic.LoadedScene != loadScene || !loadConfirmed && EditorHasCraft())
+                { SetLoad(DesignLoadState.NeedsConfirm, "Replace current editor craft? Unsaved changes are lost."); return; }
                 ContinueLoad(info, bytes);
             }
             catch (Exception e) { SetLoad(DesignLoadState.Failed, "Saved craft failed validation: " + e.Message); }
@@ -418,16 +446,21 @@ namespace LmpClient.Systems.Agency
             }
             catch (Exception e) { return SetLoad(DesignLoadState.Failed, "Could not load the saved craft: " + e.Message); }
         }
-        /// <summary>Recomputes EditorBlueprintNeedsSave from the 500 ms editor tick, only when the craft or its saved hash changed, or every 2 s.</summary>
+        /// <summary>
+        /// Recomputes EditorBlueprintNeedsSave from the 500 ms editor tick, but serializes and hashes the craft only when it changed
+        /// (onEditorShipModified, a load or a scene change, or a new part list) or the saved hash in the snapshot changed. No timer.
+        /// </summary>
         private static void RefreshBlueprintNeedsSave(ToolingQuote quote)
         {
-            if (quote == null || !quote.Success || !quote.AlreadyTooled) { EditorBlueprintNeedsSave = false; blueprintCheckKey = null; return; }
+            if (quote == null || !quote.Success || !quote.AlreadyTooled) { EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0; blueprintCheckKey = null; return; }
             var saved = BlueprintInfo(quote.Fingerprint)?.Hash;
             var key = editorQuoteHash + "|" + saved;
-            if (key == blueprintCheckKey && DateTime.UtcNow < nextBlueprintCheck) return;
-            blueprintCheckKey = key; nextBlueprintCheck = DateTime.UtcNow.AddSeconds(BlueprintCheckSeconds);
-            if (saved == null) { EditorBlueprintNeedsSave = true; return; }
-            EditorBlueprintNeedsSave = TryEditorBlueprintHash(out var hash) && !string.Equals(hash, saved, StringComparison.OrdinalIgnoreCase);
+            if (key == blueprintCheckKey && !blueprintRecheck) return;
+            blueprintCheckKey = key; blueprintRecheck = false;
+            EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0;
+            if (!TryEditorBlueprintHash(out var hash, out var size)) return;
+            if (size > ToolingLimits.MaxToolingBlueprintBytes) { EditorBlueprintOversizeBytes = size; return; }
+            EditorBlueprintNeedsSave = saved == null || !string.Equals(hash, saved, StringComparison.OrdinalIgnoreCase);
         }
         internal static ToolingQuote DisplayQuote(ShipConstruct ship, ShipTemplate template, VesselCrewManifest crew)
         {
@@ -473,6 +506,7 @@ namespace LmpClient.Systems.Agency
         internal static void SceneChanged(GameScenes scene)
         {
             if (pending != null && !pending.Started) CancelLaunch();
+            blueprintRecheck = true;
             ApplyCachedBalance();
             RequestQuoteRefresh();
         }
@@ -610,6 +644,10 @@ namespace LmpClient.Systems.Agency
             }
             if (pending != null && (!Enabled || DateTime.UtcNow > pending.Deadline || !pending.Started && HighLogic.LoadedScene != pending.Scene)) CancelLaunch();
             if (loadRequest != Guid.Empty && DateTime.UtcNow > loadDeadline) SetLoad(DesignLoadState.Failed, "The saved craft did not arrive. Try again.");
+            if (buildRequest != Guid.Empty && DateTime.UtcNow > buildDeadline)
+            { buildRequest = Guid.Empty; buildDeadline = default(DateTime); LatestStatus = "The stock build result did not arrive. Check your stock before building again."; }
+            if (saveRequest != Guid.Empty && DateTime.UtcNow > saveDeadline)
+            { saveRequest = Guid.Empty; saveDeadline = default(DateTime); LatestStatus = "Saving the craft to tooling got no answer. Try again."; }
             if (!Enabled || !HighLogic.LoadedSceneIsEditor || DateTime.UtcNow < nextQuote) return;
             nextQuote = DateTime.UtcNow.AddMilliseconds(500);
             try
@@ -622,7 +660,7 @@ namespace LmpClient.Systems.Agency
             }
             catch (Exception e) { EditorQuote = null; EditorVoucher = null; EditorStock = null; LatestStatus = e.Message; }
             try { RefreshBlueprintNeedsSave(EditorQuote); }
-            catch (Exception) { EditorBlueprintNeedsSave = false; }
+            catch (Exception) { EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0; }
             LmpClient.Harmony.AgencyCostDisplay.Refresh();
         }
         private static void Handle(EconomyResult result)
@@ -636,7 +674,8 @@ namespace LmpClient.Systems.Agency
                 return;
             }
             LatestStatus = result.Reason;
-            if (buildRequest != Guid.Empty && result.RequestId == buildRequest) { buildRequest = Guid.Empty; return; }
+            if (buildRequest != Guid.Empty && result.RequestId == buildRequest) { buildRequest = Guid.Empty; buildDeadline = default(DateTime); return; }
+            if (saveRequest != Guid.Empty && result.RequestId == saveRequest) { saveRequest = Guid.Empty; saveDeadline = default(DateTime); blueprintRecheck = true; return; }
             if (HandleBoarding(result) || HandleSplit(result)) return;
             if (result.Operation == EconomyOperation.Recover)
             {
@@ -700,8 +739,10 @@ namespace LmpClient.Systems.Agency
             boarding = null; InputLockManager.RemoveControlLock(BoardingLock);
             splitting = null; splitQueue.Clear(); splitBytes = 0; InputLockManager.RemoveControlLock(SplitLock);
             pending = null; pendingRevert = Guid.Empty; resumeLaunch = resumeRevert = false; EditorQuote = null; EditorVoucher = null; LatestStatus = null;
-            EditorStock = null; EditorBlueprintNeedsSave = false; blueprintCheckKey = null; nextBlueprintCheck = default(DateTime); buildRequest = Guid.Empty;
-            loadRequest = Guid.Empty; loadDeadline = default(DateTime); loadFingerprint = null; LoadState = DesignLoadState.Idle; LoadStatus = null;
+            EditorStock = null; EditorBlueprintNeedsSave = false; EditorBlueprintOversizeBytes = 0; blueprintCheckKey = null; blueprintRecheck = true;
+            buildRequest = saveRequest = Guid.Empty; buildDeadline = saveDeadline = default(DateTime);
+            loadRequest = Guid.Empty; loadDeadline = default(DateTime); loadFingerprint = null; loadScene = default(GameScenes); loadConfirmed = false;
+            LoadState = DesignLoadState.Idle; LoadStatus = null;
             lock (stateLock) blueprintCache.Clear();
             InputLockManager.RemoveControlLock(LaunchLock);
         }

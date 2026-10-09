@@ -12,26 +12,26 @@ namespace LmpClient.Windows.Agency
 {
     /// <summary>
     /// Cached, exception-safe reads of the design-stock client state for IMGUI. The client members can throw (not ready, or not implemented yet),
-    /// and a throw inside OnGUI breaks the layout, so every read goes through here. The cache is rebuilt at most twice a second and only
-    /// during the Layout event, so a frame's Layout and Repaint passes always see the same data.
+    /// and a throw inside OnGUI breaks the layout, so every read goes through here. The cache is rebuilt at most twice a second, at most once
+    /// per frame (Time.frameCount) and only on a Layout event, so every Layout and event pass of a frame, in every window, sees the same data.
     /// </summary>
     internal static class StockUi
     {
         private static readonly Dictionary<string, int> available = new Dictionary<string, int>();
-        private static float nextRefresh;
+        private static readonly FrameRefreshGate gate = new FrameRefreshGate(0.5f);
         private static bool slotsFull, buildPending;
         /// <summary>ToolingClient.StockSlotsFull: stock rows plus escrow in open outgoing offers at the server's lot bound.</summary>
         internal static bool LotSlotsFull { get { Refresh(); return slotsFull; } }
         /// <summary>ToolingClient.BuildPending: a BuildStock request is waiting for its result (the client allows one at a time).</summary>
         internal static bool BuildPending { get { Refresh(); return buildPending; } }
-        internal static bool CanRefresh => Event.current == null || Event.current.type == EventType.Layout;
+        internal static bool IsLayout => Event.current == null || Event.current.type == EventType.Layout;
+        /// <summary>The player-facing line when the lot slots are full, outside the editor's Use stock toggle.</summary>
+        internal const string SlotsFullSellText = "Lot slots are full: the server may refuse a new offer. Sell a whole lot or launch stock to free a slot.";
 
-        /// <summary>Rebuilds the cache if it is due. Call at the start of any drawer that reads it. Returns true when it rebuilt.</summary>
-        internal static bool Refresh(bool force = false)
+        /// <summary>Rebuilds the cache if it is due (see the class summary). Every reader calls it; it never forces a mid-frame rebuild.</summary>
+        internal static void Refresh()
         {
-            if (!CanRefresh) return false;
-            if (!force && Time.realtimeSinceStartup < nextRefresh) return false;
-            nextRefresh = Time.realtimeSinceStartup + 0.5f;
+            if (!gate.TryBegin(Time.frameCount, IsLayout, Time.realtimeSinceStartup)) return;
             available.Clear();
             slotsFull = buildPending = false;
             try
@@ -44,7 +44,6 @@ namespace LmpClient.Windows.Agency
                 buildPending = ToolingClient.BuildPending;
             }
             catch (Exception) { available.Clear(); slotsFull = buildPending = false; }
-            return true;
         }
 
         /// <summary>ToolingClient.AvailableStockUnits: units in this agency's own lots (sellable, launchable now). Excludes escrowed and launched units, unlike StockUnits.</summary>
@@ -114,11 +113,12 @@ namespace LmpClient.Windows.Agency
         private static readonly Dictionary<string, string> designsDetail = new Dictionary<string, string>();
         private static readonly List<DesignRow> designsRows = new List<DesignRow>();
         private static int designsTotal, designsShown, designsBoughtTotal, designsBoughtShown;
-        private static bool designsDirty = true;
-        private static float designsNextRebuild;
+        private static readonly FrameRefreshGate designsRowsGate = new FrameRefreshGate(0.5f);
+        /// <summary>Click handlers that add or remove controls run here, on the next Layout event, never in the middle of an event pass.</summary>
+        private static readonly List<Action> designsDeferred = new List<Action>();
         private static string designsBuiltSearch;
         private static bool designsBuiltSort;
-        private static string designsBuildConfirm, designsLoadConfirm, designsStatusFingerprint, designsStatus;
+        private static string designsBuildConfirm, designsStatusFingerprint, designsStatus;
         private static bool designsStatusIsLoad;
         private static int designsConfirmUnits;
         private static double designsConfirmTotal;
@@ -144,9 +144,16 @@ namespace LmpClient.Windows.Agency
                 designsSave = HighLogic.SaveFolder;
                 designsSearch = ""; designsSortStock = false;
                 designsQty.Clear();
-                designsBuildConfirm = designsLoadConfirm = designsStatus = designsStatusFingerprint = designsPendingFingerprint = null;
+                designsBuildConfirm = designsStatus = designsStatusFingerprint = designsPendingFingerprint = null;
                 designsBoughtLoadConfirm = Guid.Empty;
-                designsDirty = true;
+                designsDeferred.Clear();
+                designsRowsGate.Invalidate();
+            }
+            if (StockUi.IsLayout && designsDeferred.Count > 0)
+            {
+                var run = designsDeferred.ToArray();
+                designsDeferred.Clear();
+                foreach (var action in run) action();
             }
             if (!ToolingClient.Ready) { GUILayout.Label("Syncing tooled designs…", designsText); return; }
             var usesFunds = SettingsSystem.ServerSettings.GameMode == GameMode.Career;
@@ -192,15 +199,16 @@ namespace LmpClient.Windows.Agency
             return text;
         }
 
-        /// <summary>Rebuilds the filtered, sorted rows on the Layout event when the search or sort changed, an edit made them dirty, or half a second passed.</summary>
+        /// <summary>
+        /// Rebuilds the filtered, sorted rows on a Layout event, at most once per frame, when the search or sort changed, an edit invalidated them,
+        /// or half a second passed. Reads the StockUi cache as it is this frame; never forces it.
+        /// </summary>
         private static void RebuildDesignRows()
         {
-            if (!StockUi.CanRefresh) return;
-            var changed = designsDirty || designsBuiltSearch != designsSearch || designsBuiltSort != designsSortStock;
-            if (!changed && Time.realtimeSinceStartup < designsNextRebuild) return;
-            designsNextRebuild = Time.realtimeSinceStartup + 0.5f;
-            designsDirty = false; designsBuiltSearch = designsSearch; designsBuiltSort = designsSortStock;
-            StockUi.Refresh(true);
+            if (designsBuiltSearch != designsSearch || designsBuiltSort != designsSortStock) designsRowsGate.Invalidate();
+            if (!designsRowsGate.TryBegin(Time.frameCount, StockUi.IsLayout, Time.realtimeSinceStartup)) return;
+            designsBuiltSearch = designsSearch; designsBuiltSort = designsSortStock;
+            StockUi.Refresh();
             designsRates = ToolingClient.StockRates();
             designsRows.Clear();
             var search = designsSearch ?? string.Empty;
@@ -273,7 +281,7 @@ namespace LmpClient.Windows.Agency
             GUILayout.Label("Quantity", GUILayout.Width(62));
             var edited = GUILayout.TextField(qty ?? "1", 4, GUILayout.Width(56));
             StockUi.Digits(edited, out edited);
-            if (edited != (qty ?? "1")) { designsQty[row.Fingerprint] = edited; designsDirty = true; }
+            if (edited != (qty ?? "1")) { designsQty[row.Fingerprint] = edited; designsRowsGate.Invalidate(); }
             GUILayout.EndHorizontal();
 
             var quote = row.Quote;
@@ -301,14 +309,14 @@ namespace LmpClient.Windows.Agency
             {
                 GUILayout.Label(usesFunds ? "Spend " + Funds(designsConfirmTotal) + " to build " + designsConfirmUnits + "? Stock is paid now and cannot be refunded." : "Build " + designsConfirmUnits + " units at no charge?", designsText);
                 GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Confirm build", designsButton)) ConfirmBuild(row, quote, usesFunds);
+                if (GUILayout.Button("Confirm build", designsButton)) Defer(() => ConfirmBuild(row, quote, usesFunds));
                 GUI.enabled = enabled;
-                if (GUILayout.Button("Cancel", designsButton)) designsBuildConfirm = null;
+                if (GUILayout.Button("Cancel", designsButton)) Defer(() => designsBuildConfirm = null);
                 GUILayout.EndHorizontal();
             }
             else
             {
-                if (GUILayout.Button("Build…", designsButton)) { designsBuildConfirm = row.Fingerprint; designsConfirmUnits = quote.Units; designsConfirmTotal = quote.Total; }
+                if (GUILayout.Button("Build…", designsButton)) Defer(() => { designsBuildConfirm = row.Fingerprint; designsConfirmUnits = quote.Units; designsConfirmTotal = quote.Total; });
             }
             GUI.enabled = enabled;
             if (!string.IsNullOrEmpty(blocked) && designsBuildConfirm != row.Fingerprint) GUILayout.Label(blocked, designsText);
@@ -330,28 +338,35 @@ namespace LmpClient.Windows.Agency
                 designsStatusFingerprint = row.Fingerprint; designsStatus = null; designsStatusIsLoad = false;
             }
             catch (Exception e) { designsStatusFingerprint = row.Fingerprint; designsStatus = "Could not build: " + e.Message; designsStatusIsLoad = false; }
+            designsRowsGate.Invalidate();
         }
+
+        /// <summary>Runs a click handler that adds or removes controls on the next Layout event (see designsDeferred).</summary>
+        private static void Defer(Action action) => designsDeferred.Add(action);
+
+        /// <summary>Loading is allowed from the Space Center or an editor only (stock KSP loads into the editor from those scenes).</summary>
+        private static bool DesignLoadSceneAllowed => HighLogic.LoadedSceneIsEditor || HighLogic.LoadedScene == GameScenes.SPACECENTER;
 
         private static void DrawLoadControls(DesignRow row)
         {
-            var inEditor = HighLogic.LoadedSceneIsEditor;
             var loadBusy = ToolingClient.LoadState == DesignLoadState.Fetching || ToolingClient.LoadState == DesignLoadState.Loading;
-            var canLoad = row.Blueprint != null && (inEditor || HighLogic.LoadedScene == GameScenes.SPACECENTER) && !loadBusy;
+            var canLoad = row.Blueprint != null && DesignLoadSceneAllowed && !loadBusy;
             var enabled = GUI.enabled;
-            if (designsLoadConfirm == row.Fingerprint)
+            // The client owns the confirm state, so a fetch that came back after the scene or editor craft changed asks here too.
+            if (ToolingClient.LoadState == DesignLoadState.NeedsConfirm && ToolingClient.LoadingFingerprint == row.Fingerprint)
             {
                 GUILayout.Label("Replace current editor craft? Unsaved changes are lost.", designsText);
                 GUILayout.BeginHorizontal();
                 GUI.enabled = enabled && canLoad;
-                if (GUILayout.Button("Replace", designsButton)) RunLoad(row, true);
+                if (GUILayout.Button("Replace", designsButton)) Defer(() => RunLoad(row, true));
                 GUI.enabled = enabled;
-                if (GUILayout.Button("Cancel", designsButton)) designsLoadConfirm = null;
+                if (GUILayout.Button("Cancel", designsButton)) Defer(ToolingClient.CancelLoadConfirm);
                 GUILayout.EndHorizontal();
                 return;
             }
             GUILayout.BeginHorizontal();
             GUI.enabled = enabled && canLoad;
-            if (GUILayout.Button("Load" + (row.Facility != null ? " (" + row.Facility + ")" : ""), designsButton)) RunLoad(row, false);
+            if (GUILayout.Button("Load" + (row.Facility != null ? " (" + row.Facility + ")" : ""), designsButton)) Defer(() => RunLoad(row, false));
             GUI.enabled = enabled;
             GUILayout.EndHorizontal();
             if (row.Blueprint == null) GUILayout.Label("Open this craft in the editor and press Save craft to tooling (free).", designsText);
@@ -366,10 +381,9 @@ namespace LmpClient.Windows.Agency
             try
             {
                 var state = ToolingClient.LoadTooledDesign(row.Fingerprint, confirmed);
-                designsLoadConfirm = state == DesignLoadState.NeedsConfirm ? row.Fingerprint : null;
                 designsStatus = state == DesignLoadState.NeedsConfirm ? null : string.IsNullOrEmpty(ToolingClient.LoadStatus) ? state.ToString() : ToolingClient.LoadStatus;
             }
-            catch (Exception e) { designsLoadConfirm = null; designsStatus = "Could not load: " + e.Message; designsStatusIsLoad = false; }
+            catch (Exception e) { designsStatus = "Could not load: " + e.Message; designsStatusIsLoad = false; }
         }
 
         /// <summary>The row's status line. A load started from this row follows ToolingClient.LoadStatus live, so the fetch result replaces "Fetching saved craft...".</summary>
@@ -385,8 +399,8 @@ namespace LmpClient.Windows.Agency
         {
             if (!TradeClient.Enabled || row.Available <= 0) return;
             if (!AgencySystem.Singleton.AmIOwnerOfMine()) { GUILayout.Label("Your agency owner sells stock.", designsText); return; }
-            if (GUILayout.Button("Sell…", designsButton)) StartSellStock(row.Fingerprint);
-            if (StockUi.LotSlotsFull) GUILayout.Label("Lot slots are full: turn off Use stock, or sell or launch a smaller lot.", designsText);
+            if (GUILayout.Button("Sell…", designsButton)) Defer(() => StartSellStock(row.Fingerprint));
+            if (StockUi.LotSlotsFull) GUILayout.Label(StockUi.SlotsFullSellText, designsText);
         }
 
         private static void DrawBoughtRow(DesignRow row)
@@ -397,24 +411,42 @@ namespace LmpClient.Windows.Agency
             var received = row.BoughtDesign;
             if (received != null && !string.IsNullOrEmpty(received.LocalPath))
             {
-                var confirming = designsBoughtLoadConfirm == received.Id;
+                // Same scene gate as tooled rows: only the Space Center or an editor can load a craft.
+                var canLoad = DesignLoadSceneAllowed;
+                var inEditor = HighLogic.LoadedSceneIsEditor;
+                var confirming = canLoad && inEditor && designsBoughtLoadConfirm == received.Id;
                 if (confirming) GUILayout.Label("Loading replaces the current editor craft. Save any changes you want to keep first.", designsText);
+                var enabled = GUI.enabled;
+                GUI.enabled = enabled && canLoad;
                 if (GUILayout.Button(confirming ? "Replace and load design" : "Load in editor", designsButton))
                 {
-                    if (confirming)
-                    {
-                        try { TradeClient.LoadDesign(received.Id, true); } catch (Exception e) { designsStatusFingerprint = row.Fingerprint; designsStatus = "Could not load: " + e.Message; designsStatusIsLoad = false; }
-                        designsBoughtLoadConfirm = Guid.Empty;
-                    }
-                    else designsBoughtLoadConfirm = received.Id;
+                    if (confirming || !inEditor) Defer(() => LoadBoughtDesign(row, received));
+                    else Defer(() => designsBoughtLoadConfirm = received.Id);
                 }
-                if (confirming && GUILayout.Button("Cancel", designsButton)) designsBoughtLoadConfirm = Guid.Empty;
+                GUI.enabled = enabled;
+                if (confirming && GUILayout.Button("Cancel", designsButton)) Defer(() => designsBoughtLoadConfirm = Guid.Empty);
+                if (!canLoad) GUILayout.Label("Return to the Space Center to load a design.", designsText);
                 GUILayout.Label("Turn on Use stock (or research the parts) before loading: locked parts are removed on load.", designsText);
             }
             else GUILayout.Label(received != null && !string.IsNullOrEmpty(received.DeliveryStatus) ? received.DeliveryStatus : "Craft file missing from your library.", designsText);
             DrawSellControls(row);
             if (designsStatusFingerprint == row.Fingerprint && !string.IsNullOrEmpty(designsStatus)) GUILayout.Label(designsStatus, designsText);
             GUILayout.EndVertical();
+        }
+
+        /// <summary>Loads a bought design through TradeClient and shows its outcome (TradeClient.LatestStatus on failure) on this row.</summary>
+        private static void LoadBoughtDesign(DesignRow row, ReceivedTradeDesign received)
+        {
+            designsBoughtLoadConfirm = Guid.Empty;
+            designsStatusFingerprint = row.Fingerprint; designsStatusIsLoad = false;
+            if (!DesignLoadSceneAllowed) { designsStatus = "Return to the Space Center to load a design."; return; }
+            try
+            {
+                designsStatus = TradeClient.LoadDesign(received.Id, true)
+                    ? "Loaded " + row.Name + "."
+                    : string.IsNullOrEmpty(TradeClient.LatestStatus) ? "Could not load the design." : TradeClient.LatestStatus;
+            }
+            catch (Exception e) { designsStatus = "Could not load: " + e.Message; }
         }
 
         /// <summary>Opens the Trade tab's New offer page in Sell stock mode with this design preselected. The player still chooses the craft file.</summary>

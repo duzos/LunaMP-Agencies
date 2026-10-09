@@ -76,14 +76,19 @@ namespace LmpClient.Windows.Agency
             scroll = GUILayout.BeginScrollView(scroll);
             if (TradeClient.Ready && TradeClient.HasUnusedVoucher(quote.Fingerprint))
             {
-                TradeClient.UseVoucher = GUILayout.Toggle(TradeClient.UseVoucher, "Use free launch voucher", button);
-                if (!TradeClient.UseVoucher) GUILayout.Label("The voucher stays unspent. This launch is charged the normal price.", text);
+                // Draw this pass from the value it started with; the toggle applies afterwards, so the label count never changes mid-event.
+                var useVoucher = TradeClient.UseVoucher;
+                var voucherToggled = GUILayout.Toggle(useVoucher, "Use free launch voucher", button);
+                if (!useVoucher) GUILayout.Label("The voucher stays unspent. This launch is charged the normal price.", text);
+                if (voucherToggled != useVoucher) TradeClient.UseVoucher = voucherToggled;
             }
             if (stock != null || StockUi.Available(quote.Fingerprint) > 0)
             {
-                ToolingClient.UseStock = GUILayout.Toggle(ToolingClient.UseStock, "Use stock", button);
-                if (!ToolingClient.UseStock) GUILayout.Label("Stock stays unspent; this launch is charged the normal price.", text);
-                else if (stock == null && StockUi.LotSlotsFull) GUILayout.Label("Lot slots are full: turn off Use stock, or sell or launch a smaller lot.", text);
+                var useStock = ToolingClient.UseStock;
+                var stockToggled = GUILayout.Toggle(useStock, "Use stock", button);
+                if (!useStock) GUILayout.Label("Stock stays unspent; this launch is charged the normal price.", text);
+                else if (stock == null && StockUi.LotSlotsFull) GUILayout.Label("Lot slots are full, so only a 1-unit lot can be used. Launch or sell stock to free a slot.", text);
+                if (stockToggled != useStock) ToolingClient.UseStock = stockToggled;
             }
             GUILayout.Label(quote.AlreadyTooled ? "This exact design is tooled for your agency." : "This design is not tooled. Launching it as is costs " + Multiplier(ToolingClient.Rates().UntooledLaunch) + " its part price (science parts and inventory stay 1x), or you can purchase tooling once.", text);
             CostRow("Science parts · full price", quote.ScienceCost);
@@ -114,12 +119,22 @@ namespace LmpClient.Windows.Agency
             else
             {
                 confirmFingerprint = null;
-                if (ToolingClient.EditorBlueprintNeedsSave && GUILayout.Button("Save craft to tooling (free)", button))
+                if (ToolingClient.EditorBlueprintOversizeBytes > 0)
+                    GUILayout.Label(ToolingClient.BlueprintTooLargeText(ToolingClient.EditorBlueprintOversizeBytes), text);
+                else if (ToolingClient.EditorBlueprintNeedsSave)
                 {
-                    try { ToolingClient.SaveBlueprintToTooling(); }
-                    catch (Exception) { }
+                    // Disabled (not hidden) while saving, so the click never changes the control count mid-event.
+                    var saving = ToolingClient.SaveBlueprintPending;
+                    var enabled = GUI.enabled;
+                    GUI.enabled = enabled && !saving;
+                    if (GUILayout.Button("Save craft to tooling (free)", button))
+                    {
+                        try { ToolingClient.SaveBlueprintToTooling(); }
+                        catch (Exception) { }
+                    }
+                    GUI.enabled = enabled;
+                    GUILayout.Label(saving ? "Saving craft to tooling…" : "Saves this craft with your tooling so the Designs tab can load it.", text);
                 }
-                if (ToolingClient.EditorBlueprintNeedsSave) GUILayout.Label("Saves this craft with your tooling so the Designs tab can load it.", text);
             }
             GUILayout.Space(6);
             GUILayout.Label(ToolingClient.LatestStatus ?? "Prices are confirmed by the server before launch.", text);

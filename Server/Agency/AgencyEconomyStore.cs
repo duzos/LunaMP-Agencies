@@ -24,6 +24,10 @@ namespace Server.Agency
     {
         public double Funds, Science;
         public List<ToolingDesign> Designs = new List<ToolingDesign>();
+        /// <summary>Prepaid stock lots this agency holds; escrowed and reserved units are not in here.</summary>
+        public List<DesignStockLot> Stock = new List<DesignStockLot>();
+        /// <summary>Saved tooling blueprints by fingerprint. References to Universe/AgencyBlueprints files only; never bytes.</summary>
+        public Dictionary<string, ToolingBlueprintRef> Blueprints = new Dictionary<string, ToolingBlueprintRef>();
     }
 
     public sealed class EconomyLaunch
@@ -31,6 +35,8 @@ namespace Server.Agency
         public Guid LaunchId, AgencyId, Token, VesselId;
         /// <summary>The single-launch voucher this launch reserved or redeemed; empty for an ordinary launch.</summary>
         public Guid VoucherId;
+        /// <summary>The terms of the stock unit this launch reserved or consumed; null for a launch not from stock.</summary>
+        public StockTerms Stock;
         public string ActorId;
         public long SessionTicks, ExpiresUtcTicks, CreatedSequence;
         public Guid SessionId;
@@ -63,9 +69,12 @@ namespace Server.Agency
     {
         public Dictionary<Guid, StoredTradeOffer> TradeOffers = new Dictionary<Guid, StoredTradeOffer>();
         public Dictionary<Guid, List<TradeEntitlement>> Entitlements = new Dictionary<Guid, List<TradeEntitlement>>();
-        /// <summary>1 was written by agencies.4 and earlier. Every write by agencies.5 or later stores 2, which older servers refuse to load.</summary>
+        /// <summary>
+        /// 1 was written by agencies.4 and earlier, 2 by agencies.5 to agencies.8. Every write by agencies.9 or later stores 3 (design stock, escrow,
+        /// tooling blueprint refs), which older servers refuse to load instead of silently dropping stock.
+        /// </summary>
         public int Version = CurrentVersion;
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 3;
         public long Revision;
         public Dictionary<Guid, EconomyAgency> Agencies = new Dictionary<Guid, EconomyAgency>();
         public Dictionary<Guid, EconomyLaunch> Launches = new Dictionary<Guid, EconomyLaunch>();
@@ -173,7 +182,7 @@ namespace Server.Agency
 
         private static void Validate(EconomyDocument document)
         {
-            if (document.Version != 1 && document.Version != EconomyDocument.CurrentVersion || document.Revision < 0 || document.Agencies == null || document.Launches == null || document.Vessels == null || document.Operations == null || document.Operations.Count > MaxOperations || document.Launches.Count > MaxLaunches)
+            if (document.Version < 1 || document.Version > EconomyDocument.CurrentVersion || document.Revision < 0 || document.Agencies == null || document.Launches == null || document.Vessels == null || document.Operations == null || document.Operations.Count > MaxOperations || document.Launches.Count > MaxLaunches)
                 throw new InvalidDataException("Invalid economy document.");
             foreach (var agency in document.Agencies.Values)
             {

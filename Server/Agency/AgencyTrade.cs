@@ -22,10 +22,21 @@ namespace Server.Agency
         public string VesselFingerprint;
         public Guid SessionId;
         public long CreatedSequence;
+        /// <summary>Stock offers only: the seller's units held while the offer is open. Empty once the offer closes.</summary>
+        public List<DesignStockLot> Escrow = new List<DesignStockLot>();
     }
 
     public static partial class AgencyEconomyStore
     {
+        /// <summary>
+        /// The one exit for an open offer: sets the status, bumps the revision and returns any escrow to the seller's stock. With
+        /// <paramref name="strict"/> false (the live server) a missing seller row drops the units with a log line; with it true (the downgrade tool) that is an error.
+        /// </summary>
+        private static void CloseOffer(EconomyDocument document, StoredTradeOffer stored, TradeOfferStatus status, bool strict)
+        {
+            throw new NotImplementedException("CloseOffer is implemented by plan 40 slice S2.");
+        }
+
         private static bool IsTradeOperation(EconomyOperation operation) => operation >= EconomyOperation.TradeCreate && operation <= EconomyOperation.TradeDelivered;
 
         private static void ValidateTrade(EconomyDocument document)

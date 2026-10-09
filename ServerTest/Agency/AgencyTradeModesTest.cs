@@ -477,7 +477,7 @@ namespace ServerTest.Agency
                 var held = Held(f).Single();
                 Assert.AreEqual(TradeEntitlementKind.Permanent, held.Kind);
                 Assert.AreEqual(1, AgencyEconomyStore.Snapshot(f.Buyer.AgencyId).Designs.Length);
-                Assert.AreEqual(2, (int)Written(f)["Version"], "Every write by this build stores version 2.");
+                Assert.AreEqual(3, (int)Written(f)["Version"], "Every write by this build stores version 3.");
             }
         }
 
@@ -488,7 +488,7 @@ namespace ServerTest.Agency
             {
                 var voucher = BuyVoucher(f);
                 var json = Written(f);
-                json["Version"] = 3;
+                json["Version"] = 4;
                 File.WriteAllText(AgencyEconomyStore.FilePath, json.ToString());
                 AgencyEconomyStore.Load();
                 Assert.IsFalse(AgencyEconomyStore.Ready, "An unknown future version must not be reinterpreted.");

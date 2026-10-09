@@ -68,39 +68,57 @@ namespace LmpClient.Systems.Flag
             return GameDatabase.Instance.ExistsTexture(flagUrl);
         }
 
-        public void SendFlag(string flagUrl)
+        public const int MaxFlagBytes = 1000000;
+
+        public static string LocalFlagFile(string flagUrl) => CommonUtil.CombinePaths(MainSystem.KspPath, "GameData", $"{flagUrl}.png");
+
+        /// <summary>True when the flag is a PNG on disk within the size the server accepts.</summary>
+        public static bool IsShareableLocalFlag(string flagUrl)
+        {
+            try
+            {
+                var info = new FileInfo(LocalFlagFile(flagUrl));
+                return info.Exists && info.Length > 0 && info.Length <= MaxFlagBytes;
+            }
+            catch { return false; }
+        }
+
+        public void SendFlag(string flagUrl) => TrySendFlag(flagUrl);
+
+        /// <summary>Returns true only when an upload message was actually queued.</summary>
+        public bool TrySendFlag(string flagUrl)
         {
             //If it's a default flag skip the sending
             if (DefaultFlags.DefaultFlagList.Contains(flagUrl))
-                return;
+                return false;
 
             //If the flag is owned by someone else don't sync it
             if (ServerFlags.TryGetValue(flagUrl, out var existingFlag) && existingFlag.Owner != SettingsSystem.CurrentSettings.PlayerName)
-                return;
+                return false;
 
             var textureInfo = GameDatabase.Instance.GetTextureInfo(flagUrl);
-            if (textureInfo != null)
+            if (textureInfo == null) return false;
+
+            var filePath = LocalFlagFile(flagUrl);
+            if (!File.Exists(filePath))
             {
-                var filePath = CommonUtil.CombinePaths(MainSystem.KspPath, "GameData", $"{flagUrl}.png");
-                if (!File.Exists(filePath))
-                {
-                    LunaLog.LogError($"Cannot upload flag {Path.GetFileName(flagUrl)} file not found");
-                    return;
-                }
-
-                var flagData = File.ReadAllBytes(filePath);
-                if (flagData.Length > 1000000)
-                {
-                    LunaLog.LogError($"Cannot upload flag {Path.GetFileName(flagUrl)} size is greater than 1Mb!");
-                    return;
-                }
-
-                //Don't send the flag when the SHA sum already matches as that would mean that the server already has it
-                if (existingFlag != null && existingFlag.ShaSum == Common.CalculateSha256Hash(flagData)) return;
-
-                LunaLog.Log($"[LMP]: Uploading {Path.GetFileName(flagUrl)} flag");
-                MessageSender.SendMessage(MessageSender.GetFlagMessageData(flagUrl, flagData));
+                LunaLog.LogError($"Cannot upload flag {Path.GetFileName(flagUrl)} file not found");
+                return false;
             }
+
+            var flagData = File.ReadAllBytes(filePath);
+            if (flagData.Length > MaxFlagBytes)
+            {
+                LunaLog.LogError($"Cannot upload flag {Path.GetFileName(flagUrl)} size is greater than 1Mb!");
+                return false;
+            }
+
+            //Don't send the flag when the SHA sum already matches as that would mean that the server already has it
+            if (existingFlag != null && existingFlag.ShaSum == Common.CalculateSha256Hash(flagData)) return false;
+
+            LunaLog.Log($"[LMP]: Uploading {Path.GetFileName(flagUrl)} flag");
+            MessageSender.SendMessage(MessageSender.GetFlagMessageData(flagUrl, flagData));
+            return true;
         }
 
         #endregion
